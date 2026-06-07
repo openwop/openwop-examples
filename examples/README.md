@@ -83,7 +83,7 @@ Pipelines compose downstream of each other:
 - `market-intel-pipeline/market-intel-research.json`'s `audience-targeting.outputs.targetingPacks.meta` maps directly into `ads-publish-pipeline/ads-creative-publish-meta.json`'s `targeting` variable.
 - `rag-grounded-chat/` is the smallest reference for the `host.knowledge` spec extension — its 2-node shape is the building block for any RAG-augmented workflow.
 
-See [`docs/PACK-CATALOG.md`](../docs/PACK-CATALOG.md) for the full pack inventory grouped by domain.
+See [`docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/PACK-CATALOG.md) for the full pack inventory grouped by domain.
 
 **Drift gates** (both in `.github/workflows/examples.yml` → `validate-workflow-defs` job, both run against the in-tree `registry/v1/index.json`):
 
@@ -95,5 +95,5 @@ See [`docs/PACK-CATALOG.md`](../docs/PACK-CATALOG.md) for the full pack inventor
 - [`hosts/in-memory/`](./hosts/in-memory/) — reference host that powers most examples.
 - [`hosts/sqlite/`](./hosts/sqlite/) — durable reference host; "build your own host" walkthrough.
 - [`../QUICKSTART-10MIN.md`](../QUICKSTART-10MIN.md) — fastest "hello world" path.
-- [`../spec/v1/profiles.md`](../spec/v1/profiles.md) — closed catalog of compatibility profiles examples gate on.
-- [`../docs/PACK-CATALOG.md`](../docs/PACK-CATALOG.md) — registry of all 62 published packs grouped by domain.
+- [`../spec/v1/profiles.md`](https://github.com/openwop/openwop/blob/main/spec/v1/profiles.md) — closed catalog of compatibility profiles examples gate on.
+- [`../docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/PACK-CATALOG.md) — registry of all 62 published packs grouped by domain.

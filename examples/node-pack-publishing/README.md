@@ -92,7 +92,7 @@ All three are deployment-specific. An example that bundled a working pack would 
 
 ## See also
 
-- [`../../spec/v1/node-packs.md`](../../spec/v1/node-packs.md) — full pack contract
-- [`../../spec/v1/registry-operations.md`](../../spec/v1/registry-operations.md) — operator-side reference
-- [`../../SECURITY/threat-model-node-packs.md`](../../SECURITY/threat-model-node-packs.md) — supply-chain threat model
-- [`../../conformance/src/scenarios/pack-registry.test.ts`](../../conformance/src/scenarios/pack-registry.test.ts) — registry HTTP contract
+- [`../../spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) — full pack contract
+- [`../../spec/v1/registry-operations.md`](https://github.com/openwop/openwop/blob/main/spec/v1/registry-operations.md) — operator-side reference
+- [`../../SECURITY/threat-model-node-packs.md`](https://github.com/openwop/openwop/blob/main/SECURITY/threat-model-node-packs.md) — supply-chain threat model
+- [`../../conformance/src/scenarios/pack-registry.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/pack-registry.test.ts) — registry HTTP contract

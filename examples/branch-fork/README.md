@@ -57,6 +57,6 @@ and the conformance scenario replayDeterminism.test.ts.
 
 ## See also
 
-- [`../../spec/v1/replay.md`](../../spec/v1/replay.md) — full fork contract
-- [`../../spec/v1/profiles.md`](../../spec/v1/profiles.md) `#openwop-replay-fork` — predicate definition
-- [`../../conformance/src/scenarios/replayDeterminism.test.ts`](../../conformance/src/scenarios/replayDeterminism.test.ts) — determinism contract for `mode: 'replay'` (skip-equivalent until a host advertises that mode)
+- [`../../spec/v1/replay.md`](https://github.com/openwop/openwop/blob/main/spec/v1/replay.md) — full fork contract
+- [`../../spec/v1/profiles.md`](https://github.com/openwop/openwop/blob/main/spec/v1/profiles.md) `#openwop-replay-fork` — predicate definition
+- [`../../conformance/src/scenarios/replayDeterminism.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/replayDeterminism.test.ts) — determinism contract for `mode: 'replay'` (skip-equivalent until a host advertises that mode)

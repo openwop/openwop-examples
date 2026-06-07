@@ -73,7 +73,7 @@ A research-assistant workflow is the canonical multi-agent worked example. A use
               └──────────────────────────┘
 ```
 
-Every event in the boxes above is canonical per [`observability.md`](../../spec/v1/observability.md) §"Canonical run lifecycle event names". Every `AgentRef` shape is normative per [`schemas/agent-ref.schema.json`](../../schemas/agent-ref.schema.json) + RFC 0002.
+Every event in the boxes above is canonical per [`observability.md`](https://github.com/openwop/openwop/blob/main/spec/v1/observability.md) §"Canonical run lifecycle event names". Every `AgentRef` shape is normative per [`schemas/agent-ref.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/agent-ref.schema.json) + RFC 0002.
 
 ---
 
@@ -81,15 +81,15 @@ Every event in the boxes above is canonical per [`observability.md`](../../spec/
 
 | Fixture | Role | Spec doc / RFC |
 |---|---|---|
-| [`conformance-orchestrator-dispatch`](../../conformance/fixtures/conformance-orchestrator-dispatch.json) | Orchestrator + dispatch topology with mock supervisor decisions | RFC 0006 + RFC 0007 |
-| [`conformance-orchestrator-low-confidence`](../../conformance/fixtures/conformance-orchestrator-low-confidence.json) | CP-1 escalation contract — low-confidence supervisor decision suspends with `reason: 'low-confidence'` | RFC 0006 §"Confidence escalation" |
-| [`conformance-dispatch-loop`](../../conformance/fixtures/conformance-dispatch-loop.json) | Multi-tick dispatch loop (supervisor → worker → supervisor → terminate) | RFC 0007 §C |
-| [`conformance-agent-reasoning`](../../conformance/fixtures/conformance-agent-reasoning.json) | Worker emits `agent.reasoned` + `agent.toolCalled` + `agent.handoff` + `agent.decided` | RFC 0002 + `capabilities.md` §`agents.reasoning` |
-| [`conformance-agent-memory-roundtrip`](../../conformance/fixtures/conformance-agent-memory-roundtrip.json) | MemoryAdapter read-side via `list` / `get` with `AgentRef.memoryRef` | RFC 0004 §A |
-| [`conformance-agent-memory-redaction`](../../conformance/fixtures/conformance-agent-memory-redaction.json) | SR-1 invariant — BYOK plaintext NEVER lands on memory entries | RFC 0004 §D + SR-1 |
-| [`conformance-approval`](../../conformance/fixtures/conformance-approval.json) | HITL approval gate with signed-token callback | `interrupt.md` + `interrupt-profiles.md` |
+| [`conformance-orchestrator-dispatch`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-orchestrator-dispatch.json) | Orchestrator + dispatch topology with mock supervisor decisions | RFC 0006 + RFC 0007 |
+| [`conformance-orchestrator-low-confidence`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-orchestrator-low-confidence.json) | CP-1 escalation contract — low-confidence supervisor decision suspends with `reason: 'low-confidence'` | RFC 0006 §"Confidence escalation" |
+| [`conformance-dispatch-loop`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-dispatch-loop.json) | Multi-tick dispatch loop (supervisor → worker → supervisor → terminate) | RFC 0007 §C |
+| [`conformance-agent-reasoning`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-agent-reasoning.json) | Worker emits `agent.reasoned` + `agent.toolCalled` + `agent.handoff` + `agent.decided` | RFC 0002 + `capabilities.md` §`agents.reasoning` |
+| [`conformance-agent-memory-roundtrip`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-agent-memory-roundtrip.json) | MemoryAdapter read-side via `list` / `get` with `AgentRef.memoryRef` | RFC 0004 §A |
+| [`conformance-agent-memory-redaction`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-agent-memory-redaction.json) | SR-1 invariant — BYOK plaintext NEVER lands on memory entries | RFC 0004 §D + SR-1 |
+| [`conformance-approval`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-approval.json) | HITL approval gate with signed-token callback | `interrupt.md` + `interrupt-profiles.md` |
 
-Each fixture is independently runnable against any host that advertises the relevant capability — see [`docs/PROFILE-DECISION-GUIDE.md`](../../docs/PROFILE-DECISION-GUIDE.md) for which fixtures gate on which `capabilities.*` advertisements.
+Each fixture is independently runnable against any host that advertises the relevant capability — see [`docs/PROFILE-DECISION-GUIDE.md`](https://github.com/openwop/openwop/blob/main/docs/PROFILE-DECISION-GUIDE.md) for which fixtures gate on which `capabilities.*` advertisements.
 
 ---
 
@@ -145,7 +145,7 @@ For a HITL-gated variant, replace `conformance-orchestrator-dispatch` with a fix
 ## What this composition does NOT do
 
 - **Define agent reasoning internals.** How an agent decides what tool to call, what the prompt looks like, what model serves the call — all host / pack territory. The protocol only normates the events emitted.
-- **Specify agent-to-agent transport.** Multi-agent inside one OpenWOP run uses `core.dispatch` (in-host). Cross-host agent messaging composes with [A2A](../../spec/v1/a2a-integration.md) — distinct surface.
+- **Specify agent-to-agent transport.** Multi-agent inside one OpenWOP run uses `core.dispatch` (in-host). Cross-host agent messaging composes with [A2A](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) — distinct surface.
 - **Mandate memory backends.** The MemoryAdapter contract is wire-level; implementations choose Postgres / Redis / vector DB / etc.
 - **Define a planning algorithm.** RFC 0006 supports `single` / `delegate` / `delegate.smart` patterns; hosts choose. The protocol normates the decision-event shape, not the algorithm that produces it.
 
@@ -157,12 +157,12 @@ When a worker is an external A2A peer rather than an in-host workflow:
 
 1. The orchestrator's `runOrchestrator.decided` emits `kind: 'next-worker'` with the external worker's `AgentRef` referencing an A2A AgentCard.
 2. `core.dispatch` routes to an A2A bridge node (host-implementation; not normated) that issues an A2A `message/send` task.
-3. The bridge node maps A2A `Task.status` back to OpenWOP run state per [`spec/v1/a2a-integration.md`](../../spec/v1/a2a-integration.md) §"State projection".
+3. The bridge node maps A2A `Task.status` back to OpenWOP run state per [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) §"State projection".
 4. On the A2A peer's `completed` state, the bridge resumes the local run with the A2A `Task.result`.
 
 The protocol-level boundaries — `AgentRef`, the runOrchestrator decision envelope, the dispatch contract — stay identical regardless of whether the worker is local or remote. The A2A bridge is the only host-implementation surface that differs.
 
-See [`spec/v1/a2a-integration.md`](../../spec/v1/a2a-integration.md) §"Operational mapping table" for the 10 cross-protocol edge cases.
+See [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) §"Operational mapping table" for the 10 cross-protocol edge cases.
 
 → Runnable form at [`examples/multi-agent-cross-host/`](../multi-agent-cross-host/README.md). That example boots the conformance suite's `A2AFakePeer`, walks 6 scenarios end-to-end (happy path + drift points #3/#4 + plain failure + cancellation + replay determinism), and exports the canonical projection + bridge functions future hosts can adopt.
 
@@ -177,18 +177,18 @@ When the host advertises `capabilities.memory.compaction.supported: true` (Postg
 - Each compaction emits a canonical `memory.compacted` event per `run-event-payloads.schema.json` §`memoryCompacted`.
 - SR-1 carry-forward (RFC 0012 §D) MUST be enforced — derived content passes the BYOK redaction harness.
 
-This is independent of the dispatch loop above; compaction runs on the host schedule. The conformance suite's 3 RFC 0012 scenarios ([`memory-compaction-event-emitted`](../../conformance/src/scenarios/memory-compaction-event-emitted.test.ts) + [`memory-compaction-sr1-carry-forward`](../../conformance/src/scenarios/memory-compaction-sr1-carry-forward.test.ts) + [`memory-compaction-provenance-tag`](../../conformance/src/scenarios/memory-compaction-provenance-tag.test.ts)) verify the surface end-to-end against the Postgres reference.
+This is independent of the dispatch loop above; compaction runs on the host schedule. The conformance suite's 3 RFC 0012 scenarios ([`memory-compaction-event-emitted`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/memory-compaction-event-emitted.test.ts) + [`memory-compaction-sr1-carry-forward`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/memory-compaction-sr1-carry-forward.test.ts) + [`memory-compaction-provenance-tag`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/memory-compaction-provenance-tag.test.ts)) verify the surface end-to-end against the Postgres reference.
 
 ---
 
 ## See also
 
-- [`spec/v1/agent-ref-positioning.md`](../../spec/v1/agent-ref-positioning.md) — `AgentRef` vs W3C DID vs A2A AgentCard vs AGNTCY composition.
-- [`RFCS/0002-agent-identity-and-reasoning-events.md`](../../RFCS/0002-agent-identity-and-reasoning-events.md) — canonical `AgentRef` + agent-event vocabulary.
-- [`RFCS/0004-memory-layer.md`](../../RFCS/0004-memory-layer.md) — MemoryAdapter + SR-1 secret-redaction invariant.
-- [`RFCS/0006-orchestrator.md`](../../RFCS/0006-orchestrator.md) — orchestrator decision shape + CP-1 escalation.
-- [`RFCS/0007-dispatch.md`](../../RFCS/0007-dispatch.md) — `core.dispatch` contract.
-- [`RFCS/0012-memory-compaction-profile.md`](../../RFCS/0012-memory-compaction-profile.md) — memory compaction + SR-1 carry-forward.
-- [`spec/v1/observability.md`](../../spec/v1/observability.md) §"Canonical run lifecycle event names" — the canonical event vocabulary.
-- [`docs/PROFILE-DECISION-GUIDE.md`](../../docs/PROFILE-DECISION-GUIDE.md) — which `capabilities.*` advertisements gate which scenarios.
+- [`spec/v1/agent-ref-positioning.md`](https://github.com/openwop/openwop/blob/main/spec/v1/agent-ref-positioning.md) — `AgentRef` vs W3C DID vs A2A AgentCard vs AGNTCY composition.
+- [`RFCS/0002-agent-identity-and-reasoning-events.md`](https://github.com/openwop/openwop/blob/main/RFCS/0002-agent-identity-and-reasoning-events.md) — canonical `AgentRef` + agent-event vocabulary.
+- [`RFCS/0004-memory-layer.md`](https://github.com/openwop/openwop/blob/main/RFCS/0004-memory-layer.md) — MemoryAdapter + SR-1 secret-redaction invariant.
+- [`RFCS/0006-orchestrator.md`](https://github.com/openwop/openwop/blob/main/RFCS/0006-orchestrator.md) — orchestrator decision shape + CP-1 escalation.
+- [`RFCS/0007-dispatch.md`](https://github.com/openwop/openwop/blob/main/RFCS/0007-dispatch.md) — `core.dispatch` contract.
+- [`RFCS/0012-memory-compaction-profile.md`](https://github.com/openwop/openwop/blob/main/RFCS/0012-memory-compaction-profile.md) — memory compaction + SR-1 carry-forward.
+- [`spec/v1/observability.md`](https://github.com/openwop/openwop/blob/main/spec/v1/observability.md) §"Canonical run lifecycle event names" — the canonical event vocabulary.
+- [`docs/PROFILE-DECISION-GUIDE.md`](https://github.com/openwop/openwop/blob/main/docs/PROFILE-DECISION-GUIDE.md) — which `capabilities.*` advertisements gate which scenarios.
 - [`examples/hosts/postgres/README.md`](../hosts/postgres/README.md) — runnable reference host that advertises every capability this composition exercises.

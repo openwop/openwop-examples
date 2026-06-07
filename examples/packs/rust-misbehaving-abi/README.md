@@ -2,10 +2,10 @@
 
 Fixture-only WASM node pack for openwop conformance. Exists to drive
 the positive-path assertion in
-[`conformance/src/scenarios/wasm-pack-abi-version-rejection.test.ts`](../../../conformance/src/scenarios/wasm-pack-abi-version-rejection.test.ts):
+[`conformance/src/scenarios/wasm-pack-abi-version-rejection.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/wasm-pack-abi-version-rejection.test.ts):
 declares an ABI version (999) no OpenWOP host supports, forcing the
 host's loader to refuse instantiation per
-[RFC 0008 §H](../../../RFCS/0008-wasm-abi.md#h-abi-version-handshake).
+[RFC 0008 §H](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md#h-abi-version-handshake).
 
 ## Status
 
@@ -62,5 +62,5 @@ least one WASM pack is loaded.
   reference pack this one is the evil twin of.
 - [`examples/packs/rust-misbehaving-memory/`](../rust-misbehaving-memory)
   — the other deliberately-misbehaving pack (exercises §K memory cap).
-- [RFC 0008 §H](../../../RFCS/0008-wasm-abi.md#h-abi-version-handshake)
+- [RFC 0008 §H](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md#h-abi-version-handshake)
   — normative ABI-version contract.

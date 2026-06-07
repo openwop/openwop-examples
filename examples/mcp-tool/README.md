@@ -66,7 +66,7 @@ These invariants are host-side; this example doesn't exercise them directly. The
 
 ## See also
 
-- [`../../spec/v1/mcp-integration.md`](../../spec/v1/mcp-integration.md) — full OpenWOP+MCP composition pattern
-- [`../../spec/v1/host-extensions.md`](../../spec/v1/host-extensions.md) — vendor-extension namespace conventions
-- [`../../SECURITY/threat-model-prompt-injection.md`](../../SECURITY/threat-model-prompt-injection.md) — MCP-specific invariants
+- [`../../spec/v1/mcp-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/mcp-integration.md) — full OpenWOP+MCP composition pattern
+- [`../../spec/v1/host-extensions.md`](https://github.com/openwop/openwop/blob/main/spec/v1/host-extensions.md) — vendor-extension namespace conventions
+- [`../../SECURITY/threat-model-prompt-injection.md`](https://github.com/openwop/openwop/blob/main/SECURITY/threat-model-prompt-injection.md) — MCP-specific invariants
 - [Model Context Protocol](https://modelcontextprotocol.io) — canonical MCP spec

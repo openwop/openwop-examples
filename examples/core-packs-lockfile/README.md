@@ -1,6 +1,6 @@
 # `core-packs-lockfile/` — workspace lockfile demo pinning the 4 audit-gated core packs
 
-Reference workspace [`pack-lockfile`](../../schemas/pack-lockfile.schema.json)
+Reference workspace [`pack-lockfile`](https://github.com/openwop/openwop/blob/main/schemas/pack-lockfile.schema.json)
 that pins the four core packs whose **registry publication** is gated on
 the external security audit (`SECURITY/external-audit-engagement.md` §2.1):
 
@@ -25,7 +25,7 @@ This file demonstrates the lockfile shape against the canonical core
 packs — useful for:
 
 1. **Schema-validity evidence** — the file validates against
-   [`schemas/pack-lockfile.schema.json`](../../schemas/pack-lockfile.schema.json).
+   [`schemas/pack-lockfile.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/pack-lockfile.schema.json).
 2. **Air-gapped install reproducibility** — an operator with the
    in-tree tarballs + this lockfile can install the 4 packs without
    reaching the hosted registry. The `resolved:` URLs point at
@@ -80,7 +80,7 @@ extracted from the SPKI DER (base64-encoded).
 
 ## See also
 
-- [`schemas/pack-lockfile.schema.json`](../../schemas/pack-lockfile.schema.json) — normative shape.
-- [`spec/v1/node-packs.md`](../../spec/v1/node-packs.md) §"Dependency resolution + lockfile".
-- [`registry/scripts/verify-signatures.mjs`](../../registry/scripts/verify-signatures.mjs) — canonical verifier (28/28 packs pass as of 2026-05-13).
-- [`SECURITY/external-audit-engagement.md`](../../SECURITY/external-audit-engagement.md) §2.1 — audit-gated pack list.
+- [`schemas/pack-lockfile.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/pack-lockfile.schema.json) — normative shape.
+- [`spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) §"Dependency resolution + lockfile".
+- [`registry/scripts/verify-signatures.mjs`](https://github.com/openwop/openwop-registry/blob/main/registry/scripts/verify-signatures.mjs) — canonical verifier (28/28 packs pass as of 2026-05-13).
+- [`SECURITY/external-audit-engagement.md`](https://github.com/openwop/openwop/blob/main/SECURITY/external-audit-engagement.md) §2.1 — audit-gated pack list.

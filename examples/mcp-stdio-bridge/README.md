@@ -1,7 +1,7 @@
 # `mcp-stdio-bridge/` — HTTP shim for stdio-transport MCP servers
 
 The openwop MCP conformance probe
-([`conformance/src/scenarios/mcp-tool-roundtrip.test.ts`](../../conformance/src/scenarios/mcp-tool-roundtrip.test.ts))
+([`conformance/src/scenarios/mcp-tool-roundtrip.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/mcp-tool-roundtrip.test.ts))
 is HTTP-only: it POSTs JSON-RPC bodies and reads either
 `application/json` or `text/event-stream` responses. But real
 [`modelcontextprotocol/servers`](https://github.com/modelcontextprotocol/servers)
@@ -90,8 +90,8 @@ OPENWOP_MCP_STDIO_CMD=python3 \
 
 ## See also
 
-- [`spec/v1/mcp-integration.md`](../../spec/v1/mcp-integration.md) — openwop's MCP integration contract.
-- [`conformance/src/scenarios/mcp-tool-roundtrip.test.ts`](../../conformance/src/scenarios/mcp-tool-roundtrip.test.ts) — the probe this bridge feeds.
+- [`spec/v1/mcp-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/mcp-integration.md) — openwop's MCP integration contract.
+- [`conformance/src/scenarios/mcp-tool-roundtrip.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/mcp-tool-roundtrip.test.ts) — the probe this bridge feeds.
 - [`INTEROP-MATRIX.md`](../../INTEROP-MATRIX.md) §"Composition partners" — real-impl evidence row for MCP.
 - [`gRPC HTTP/2 transport spec`](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md) — analogous shim pattern for protocols that need wire-format adaptation.
 - [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) — the canonical TypeScript SDK; `StdioServerTransport` is what `echo-stdio-server.mjs` uses.

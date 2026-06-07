@@ -22,7 +22,7 @@ Replace this `README.md` with documentation for your real pack. Recommended stru
 
 2. **Customize `pack.json`:**
    - Replace `description`, `keywords`, `homepage`.
-   - Update `peerDependencies` to declare the `host.*` capabilities your nodes actually consume. See [`spec/v1/host-capabilities.md`](../../../spec/v1/host-capabilities.md) for the canonical contracts.
+   - Update `peerDependencies` to declare the `host.*` capabilities your nodes actually consume. See [`spec/v1/host-capabilities.md`](https://github.com/openwop/openwop/blob/main/spec/v1/host-capabilities.md) for the canonical contracts.
    - Update `signing.keyId` to your registered publisher key (must be in `registry/keys/` and authorized for `vendor.<org>.*` via `.well-known/openwop-registry.json`).
    - Replace the placeholder `nodes[]` array with your real typeIds.
 
@@ -37,7 +37,7 @@ Replace this `README.md` with documentation for your real pack. Recommended stru
    - Use `ctx.*` accessors for host capabilities (never import myndhyve services directly).
    - Use `ctx.log()` for structured logging (never `console.log`).
    - Yield `output` / `error` / `progress` events; the engine handles the rest.
-   - See [`docs/AUTHORING-CANVAS-PACKS.md`](../../../docs/AUTHORING-CANVAS-PACKS.md) for the full patterns + anti-patterns guide.
+   - See [`docs/AUTHORING-CANVAS-PACKS.md`](https://github.com/openwop/openwop/blob/main/docs/AUTHORING-CANVAS-PACKS.md) for the full patterns + anti-patterns guide.
 
 5. **Build + sign:**
 

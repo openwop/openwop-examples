@@ -1,6 +1,6 @@
 # rag-grounded-chat
 
-> 2-node reference workflow exercising the v1 [`host.knowledge`](../../spec/v1/host-capabilities.md#host-knowledge) spec extension. Composes the [`vendor.myndhyve.knowledge-tools`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.knowledge-tools/index.json) pack (RAG retrieval + prompt augmentation) with the spec-canonical [`core.openwop.ai`](https://packs.openwop.dev/v1/packs/core.openwop.ai/index.json) pack (free-form LLM chat). Demonstrates how to produce a cited answer from a knowledge base with zero ad-hoc RAG plumbing.
+> 2-node reference workflow exercising the v1 [`host.knowledge`](https://github.com/openwop/openwop/blob/main/spec/v1/host-capabilities.md#host-knowledge) spec extension. Composes the [`vendor.myndhyve.knowledge-tools`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.knowledge-tools/index.json) pack (RAG retrieval + prompt augmentation) with the spec-canonical [`core.openwop.ai`](https://packs.openwop.dev/v1/packs/core.openwop.ai/index.json) pack (free-form LLM chat). Demonstrates how to produce a cited answer from a knowledge base with zero ad-hoc RAG plumbing.
 
 ## The workflow
 
@@ -53,7 +53,7 @@ The terminal `answer-with-sources` node returns the model's text. The upstream `
 4. POST the workflow JSON to `/v1/workflows`.
 5. POST a run via `/v1/runs` with `{ workflowId: "vendor.myndhyve.rag-grounded-chat", variables: { userQuestion, aiProvider, aiModel, ... } }`.
 
-See [`spec/v1/rest-endpoints.md`](../../spec/v1/rest-endpoints.md) for the run lifecycle.
+See [`spec/v1/rest-endpoints.md`](https://github.com/openwop/openwop/blob/main/spec/v1/rest-endpoints.md) for the run lifecycle.
 
 ## When to override `retrievalQuery`
 
@@ -82,9 +82,9 @@ If `knowledge.augment-prompt` returns `hasResults: false`, the augmented user me
 
 ## See also
 
-- [`docs/PACK-CATALOG.md`](../../docs/PACK-CATALOG.md) — categorized inventory of all 62 published packs
-- [`spec/v1/host-capabilities.md#host-knowledge`](../../spec/v1/host-capabilities.md#host-knowledge) — the `host.knowledge` capability contract
-- [`packs/vendor.myndhyve.knowledge-tools/README.md`](../../packs/vendor.myndhyve.knowledge-tools/README.md) — node-level details + score-filtering knobs
+- [`docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/PACK-CATALOG.md) — categorized inventory of all 62 published packs
+- [`spec/v1/host-capabilities.md#host-knowledge`](https://github.com/openwop/openwop/blob/main/spec/v1/host-capabilities.md#host-knowledge) — the `host.knowledge` capability contract
+- [`packs/vendor.myndhyve.knowledge-tools/README.md`](https://github.com/openwop/openwop-registry/blob/main/packs/vendor.myndhyve.knowledge-tools/README.md) — node-level details + score-filtering knobs
 - [`examples/market-intel-pipeline/`](../market-intel-pipeline/) — multi-pack composition reference
 - [`examples/ads-publish-pipeline/`](../ads-publish-pipeline/) — end-to-end creative + publish pipeline
 

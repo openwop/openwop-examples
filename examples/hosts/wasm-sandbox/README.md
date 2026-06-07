@@ -1,6 +1,6 @@
 # `@openwop/openwop-host-wasm-sandbox` — RFC 0035 real-isolation reference host
 
-A reference OpenWOP host that executes pack-loaded typeIds as **WebAssembly modules** under real isolation, implementing the [RFC 0035](../../../RFCS/0035-sandbox-execution-contract.md) sandbox execution contract. It is the **real-isolation reference** that the protocol needed: until this host, `SECURITY/invariants.yaml` carried the eight `node-pack-sandbox-*` rows at `reference-impl` tier with the rationale *"no reference host executes pack-loaded typeIds in a sandbox"* — the workflow-engine `node:vm` MVP proved the wire contract but is escapable by construction, not a production isolation boundary.
+A reference OpenWOP host that executes pack-loaded typeIds as **WebAssembly modules** under real isolation, implementing the [RFC 0035](https://github.com/openwop/openwop/blob/main/RFCS/0035-sandbox-execution-contract.md) sandbox execution contract. It is the **real-isolation reference** that the protocol needed: until this host, `SECURITY/invariants.yaml` carried the eight `node-pack-sandbox-*` rows at `reference-impl` tier with the rationale *"no reference host executes pack-loaded typeIds in a sandbox"* — the workflow-engine `node:vm` MVP proved the wire contract but is escapable by construction, not a production isolation boundary.
 
 ## Why WASM
 

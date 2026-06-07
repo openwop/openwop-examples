@@ -76,7 +76,7 @@ Following `node-packs.md` §Signing, this pack will be signed with the project's
 
 ## See also
 
-- [`RFCS/0008-wasm-abi.md`](../../../RFCS/0008-wasm-abi.md) — the ABI spec this pack implements
-- [`spec/v1/node-packs.md`](../../../spec/v1/node-packs.md) — pack manifest format + distribution
+- [`RFCS/0008-wasm-abi.md`](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md) — the ABI spec this pack implements
+- [`spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) — pack manifest format + distribution
 - [`examples/hosts/in-memory/src/wasm-loader.ts`](../../hosts/in-memory/src/wasm-loader.ts) — the loader that bridges this pack to the runtime
-- [`conformance/fixtures/conformance-wasm-pack-roundtrip.json`](../../../conformance/fixtures/conformance-wasm-pack-roundtrip.json) — fixture that exercises the pack end-to-end
+- [`conformance/fixtures/conformance-wasm-pack-roundtrip.json`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-wasm-pack-roundtrip.json) — fixture that exercises the pack end-to-end
