@@ -1,10 +1,10 @@
 # `vendor.openwop.prompt-sample`
 
-> Reference prompt pack proving [RFC 0028](../../../RFCS/0028-prompt-library-endpoints.md) §B end-to-end. In-tree only — NOT published to `packs.openwop.dev`. Status: example.
+> Reference prompt pack proving [RFC 0028](https://github.com/openwop/openwop/blob/main/RFCS/0028-prompt-library-endpoints.md) §B end-to-end. In-tree only — NOT published to `packs.openwop.dev`. Status: example.
 
-This pack is the canonical proof that the prompt-pack contract from [`spec/v1/prompts.md`](../../../spec/v1/prompts.md) §"Discovery & distribution" is implementable with real-world-shaped content. It exists to:
+This pack is the canonical proof that the prompt-pack contract from [`spec/v1/prompts.md`](https://github.com/openwop/openwop/blob/main/spec/v1/prompts.md) §"Discovery & distribution" is implementable with real-world-shaped content. It exists to:
 
-1. Exercise the new [`schemas/prompt-pack-manifest.schema.json`](../../../schemas/prompt-pack-manifest.schema.json) against a non-trivial manifest.
+1. Exercise the new [`schemas/prompt-pack-manifest.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/prompt-pack-manifest.schema.json) against a non-trivial manifest.
 2. Demonstrate the `kind: "prompt"` discriminator that distinguishes prompt packs from node packs (RFC 0003) and workflow-chain packs (RFC 0013) at the registry layer.
 3. Surface real PromptTemplate shapes the reference [`promptStore.installPackTemplates()`](../../../apps/workflow-engine/backend/typescript/src/host/promptStore.ts) seam can be exercised against once the RFC 0028 §B install flow (signature + SRI + dependency resolution) lands.
 
@@ -28,7 +28,7 @@ cd conformance
 npx vitest run src/scenarios/spec-corpus-validity.test.ts
 ```
 
-The two templates also validate individually against [`prompt-template.schema.json`](../../../schemas/prompt-template.schema.json) — same validator the `prompt-template-shape.test.ts` server-free scenario uses.
+The two templates also validate individually against [`prompt-template.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/prompt-template.schema.json) — same validator the `prompt-template-shape.test.ts` server-free scenario uses.
 
 ## How a workflow author references this pack's templates
 
@@ -73,7 +73,7 @@ When two installed packs ship the same `templateId`, the stringy form is rejecte
 
 ## See also
 
-- [`RFCS/0028-prompt-library-endpoints.md`](../../../RFCS/0028-prompt-library-endpoints.md) — the RFC this pack closes the acceptance gate for.
-- [`spec/v1/prompts.md`](../../../spec/v1/prompts.md) §"Discovery & distribution" — the normative spec text.
-- [`schemas/prompt-pack-manifest.schema.json`](../../../schemas/prompt-pack-manifest.schema.json) — the manifest schema this pack validates against.
+- [`RFCS/0028-prompt-library-endpoints.md`](https://github.com/openwop/openwop/blob/main/RFCS/0028-prompt-library-endpoints.md) — the RFC this pack closes the acceptance gate for.
+- [`spec/v1/prompts.md`](https://github.com/openwop/openwop/blob/main/spec/v1/prompts.md) §"Discovery & distribution" — the normative spec text.
+- [`schemas/prompt-pack-manifest.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/prompt-pack-manifest.schema.json) — the manifest schema this pack validates against.
 - [`examples/packs/workflow-chain-sample/`](../workflow-chain-sample/) — the parallel RFC 0013 example pack (workflow-chain kind).

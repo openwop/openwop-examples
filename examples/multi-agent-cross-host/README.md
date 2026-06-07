@@ -6,7 +6,7 @@ Companion to [`examples/multi-agent-research-assistant/`](../multi-agent-researc
 
 ## What this is
 
-A standalone TypeScript script that boots the conformance suite's [`A2AFakePeer`](../../conformance/src/lib/a2a-fake-peer.ts), drives a complete parent-child workflow across the boundary, and asserts the canonical state-projection rules from [`spec/v1/a2a-integration.md`](../../spec/v1/a2a-integration.md) §"State projection".
+A standalone TypeScript script that boots the conformance suite's [`A2AFakePeer`](https://github.com/openwop/openwop/blob/main/conformance/src/lib/a2a-fake-peer.ts), drives a complete parent-child workflow across the boundary, and asserts the canonical state-projection rules from [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) §"State projection".
 
 Six scenarios cover the projection table end-to-end:
 
@@ -52,7 +52,7 @@ This example is NOT a production bridge. Specifically:
 
 - **No timeout / retry / backoff.** The polling loop is tight and ungated; a real bridge MUST respect the host's `OPENWOP_A2A_POLL_TIMEOUT_MS` (or analogue) and back off exponentially.
 - **No OAuth2 client-credentials.** The fake peer accepts unauthenticated POSTs; real A2A endpoints typically require an OAuth2 access token per their AgentCard's `securitySchemes`.
-- **No OTel trace propagation.** Production hosts MUST inject the parent run's trace context into `Task.metadata.openwop.traceContext` per [`observability.md`](../../spec/v1/observability.md) §"Cross-host trace propagation" so a single trace spans both hosts.
+- **No OTel trace propagation.** Production hosts MUST inject the parent run's trace context into `Task.metadata.openwop.traceContext` per [`observability.md`](https://github.com/openwop/openwop/blob/main/spec/v1/observability.md) §"Cross-host trace propagation" so a single trace spans both hosts.
 - **No idempotency.** Real bridges MUST key the `message/send` call off `(parentRunId, nodeId)` and reuse the resulting `taskId` on retry — otherwise a retry creates a duplicate task on the peer.
 - **No forward projection.** This example only covers A2A → OpenWOP (reverse). When OpenWOP is the agent and A2A clients call IN, the host applies the forward projection per `a2a-integration.md` §"openwop → A2A". The conformance scenario `a2a-task-roundtrip.test.ts` covers both directions.
 
@@ -62,7 +62,7 @@ The same projection rules are enforced normatively by `conformance/src/scenarios
 
 ## Related material
 
-- [`spec/v1/a2a-integration.md`](../../spec/v1/a2a-integration.md) — normative integration spec (FINAL v1, 2026-05-05).
+- [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) — normative integration spec (FINAL v1, 2026-05-05).
 - [`examples/multi-agent-research-assistant/README.md`](../multi-agent-research-assistant/README.md) — in-host multi-agent composition (orchestrator + dispatch + AgentRef + reasoning events + HITL + memory).
-- [`conformance/src/scenarios/a2a-task-roundtrip.test.ts`](../../conformance/src/scenarios/a2a-task-roundtrip.test.ts) — conformance scenario covering the same projection contract.
-- [`conformance/src/lib/a2a-fake-peer.ts`](../../conformance/src/lib/a2a-fake-peer.ts) — the in-process synthetic peer this example reuses.
+- [`conformance/src/scenarios/a2a-task-roundtrip.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/a2a-task-roundtrip.test.ts) — conformance scenario covering the same projection contract.
+- [`conformance/src/lib/a2a-fake-peer.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/lib/a2a-fake-peer.ts) — the in-process synthetic peer this example reuses.

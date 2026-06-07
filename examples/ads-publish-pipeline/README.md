@@ -96,7 +96,7 @@ The workflow never carries plaintext credentials. Pattern:
 3. **Pack resolves at execution time**: `ctx.secrets.resolve({ ref, purpose: 'ads.publish.meta:campaign.create' })` → `{ plaintext }`.
 4. **Plaintext lives only in local pack variables**, sent only via `Authorization: Bearer` header, never logged via `ctx.log`, never returned in node outputs.
 
-See the [secrets-resolve-in-pack](../../spec/v1/host-capabilities.md#secretsresolveInpack) spec section for the host-side contract.
+See the [secrets-resolve-in-pack](https://github.com/openwop/openwop/blob/main/spec/v1/host-capabilities.md#secretsresolveInpack) spec section for the host-side contract.
 
 ## Activation
 
@@ -110,7 +110,7 @@ To use this workflow on an OpenWOP host:
 4. POST the workflow JSON to `/v1/workflows` (host endpoint)
 5. POST a run via `/v1/runs` with `{ workflowId: "vendor.myndhyve.ads-creative-publish-meta", variables: { campaignGoal, icpContext, productContext, destinationUrl, metaAdAccountId, metaCredentialRef, ... } }`
 
-See [`spec/v1/rest-endpoints.md`](../../spec/v1/rest-endpoints.md) for the run lifecycle wire protocol.
+See [`spec/v1/rest-endpoints.md`](https://github.com/openwop/openwop/blob/main/spec/v1/rest-endpoints.md) for the run lifecycle wire protocol.
 
 ## What's NOT in this JSON
 

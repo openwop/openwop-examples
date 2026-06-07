@@ -1,8 +1,8 @@
 # `vendor.openwop.workflow-chain-sample`
 
-> Reference workflow-chain pack proving [RFC 0013](../../../RFCS/0013-workflow-chain-packs.md) end-to-end. In-tree only — NOT published to `packs.openwop.dev`. Status: example.
+> Reference workflow-chain pack proving [RFC 0013](https://github.com/openwop/openwop/blob/main/RFCS/0013-workflow-chain-packs.md) end-to-end. In-tree only — NOT published to `packs.openwop.dev`. Status: example.
 
-This pack is the canonical proof that the workflow-chain pack contract from [`spec/v1/workflow-chain-packs.md`](../../../spec/v1/workflow-chain-packs.md) is implementable with real-world-shaped content. It exists to:
+This pack is the canonical proof that the workflow-chain pack contract from [`spec/v1/workflow-chain-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/workflow-chain-packs.md) is implementable with real-world-shaped content. It exists to:
 
 1. Exercise the new `schemas/workflow-chain-pack-manifest.schema.json` against a non-trivial manifest.
 2. Demonstrate the `kind: "workflow-chain"` discriminator that distinguishes chain packs from node packs at the registry layer (Phase 2 — `registry/scripts/build-index.mjs` + `conformance-check.mjs`).
@@ -45,7 +45,7 @@ const fragment = expandChain(chain, {
 
 ## What this pack is NOT
 
-- **NOT published** to `packs.openwop.dev`. Public-registry publication of workflow-chain packs is gated on the same external security audit that gates the new `core.openwop.*` packs (see [`SECURITY/external-audit-engagement.md`](../../../SECURITY/external-audit-engagement.md) §2.1). Until that audit completes, chain packs are in-repo / lockfile-resolvable only.
+- **NOT published** to `packs.openwop.dev`. Public-registry publication of workflow-chain packs is gated on the same external security audit that gates the new `core.openwop.*` packs (see [`SECURITY/external-audit-engagement.md`](https://github.com/openwop/openwop/blob/main/SECURITY/external-audit-engagement.md) §2.1). Until that audit completes, chain packs are in-repo / lockfile-resolvable only.
 - **NOT signed**. No `pack.json.sig` or signing keys ship in this directory. Production chain packs MUST be signed per `node-packs.md §Signing` (reused unchanged for chain packs per `workflow-chain-packs.md §"Expansion semantics" step 2`). The signing test path is exercised in `conformance/src/scenarios/workflow-chain-pack-signature-verification.test.ts` using an in-memory keypair.
 - **NOT a runtime artifact**. Workflow-chain packs have NO `runtime` field (that's a node-pack-only surface). Chain packs are workflow-edit-time abstractions — they expand into concrete `core.*` / published-vendor typeIds the runtime already dispatches.
 - **NOT the eventual MyndHyve preset library**. The 55 unpublished editor presets from the CANVAS-PACKS-INVENTORY audit will land as `vendor.myndhyve.app-builder-presets@1.0.0` etc. (RFC 0013 Phase 4 deferred work). This sample is shape-only, not content-equivalent.
@@ -58,8 +58,8 @@ const fragment = expandChain(chain, {
 
 ## Related
 
-- [`RFCS/0013-workflow-chain-packs.md`](../../../RFCS/0013-workflow-chain-packs.md) — the source RFC.
-- [`spec/v1/workflow-chain-packs.md`](../../../spec/v1/workflow-chain-packs.md) — normative manifest format + expansion semantics.
-- [`schemas/workflow-chain-pack-manifest.schema.json`](../../../schemas/workflow-chain-pack-manifest.schema.json) — canonical JSON Schema this pack validates against.
-- [`conformance/src/lib/workflow-chain-expansion.ts`](../../../conformance/src/lib/workflow-chain-expansion.ts) — reference expansion library.
-- [`spec/v1/node-packs.md`](../../../spec/v1/node-packs.md) — sibling pack format whose Naming / Versioning / Signing / Lockfile rules workflow-chain packs reuse unchanged.
+- [`RFCS/0013-workflow-chain-packs.md`](https://github.com/openwop/openwop/blob/main/RFCS/0013-workflow-chain-packs.md) — the source RFC.
+- [`spec/v1/workflow-chain-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/workflow-chain-packs.md) — normative manifest format + expansion semantics.
+- [`schemas/workflow-chain-pack-manifest.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/workflow-chain-pack-manifest.schema.json) — canonical JSON Schema this pack validates against.
+- [`conformance/src/lib/workflow-chain-expansion.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/lib/workflow-chain-expansion.ts) — reference expansion library.
+- [`spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) — sibling pack format whose Naming / Versioning / Signing / Lockfile rules workflow-chain packs reuse unchanged.

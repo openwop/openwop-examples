@@ -2,10 +2,10 @@
 
 Fixture-only WASM node pack for openwop conformance. Exists to drive the
 positive-path assertion in
-[`conformance/src/scenarios/wasm-pack-memory-cap.test.ts`](../../../conformance/src/scenarios/wasm-pack-memory-cap.test.ts):
+[`conformance/src/scenarios/wasm-pack-memory-cap.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/wasm-pack-memory-cap.test.ts):
 exceeds the host's advertised memory ceiling so the host MUST emit
 `cap.breached` with `kind: "wasm-memory"` per
-[RFC 0008 §K](../../../RFCS/0008-wasm-abi.md#k-resource-limits).
+[RFC 0008 §K](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md#k-resource-limits).
 
 ## Status
 
@@ -57,9 +57,9 @@ The conformance scenario asserts all four points end-to-end against the
 
 - [`examples/packs/rust-hello/`](../rust-hello) — the well-behaved
   reference pack this one is the evil twin of.
-- [RFC 0008 §K](../../../RFCS/0008-wasm-abi.md#k-resource-limits) —
+- [RFC 0008 §K](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md#k-resource-limits) —
   normative resource-limit contract.
-- [`schemas/run-event-payloads.schema.json`](../../../schemas/run-event-payloads.schema.json)
+- [`schemas/run-event-payloads.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/run-event-payloads.schema.json)
   `#/$defs/capBreached` — the wire shape of the `cap.breached` payload
   (kind enum extended 2026-05-12 to include `wasm-memory`,
   `wasm-fuel`, `wasm-execution-time`).

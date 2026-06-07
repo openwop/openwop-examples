@@ -108,7 +108,7 @@ To use one of these workflows on an OpenWOP host:
 3. POST the workflow JSON to `/v1/workflows` (host endpoint).
 4. POST a run via `/v1/runs` with `{ workflowId: "vendor.myndhyve.market-intel-research", variables: { researchTopic, icpContext, productContext } }`.
 
-See [`spec/v1/rest-endpoints.md`](../../spec/v1/rest-endpoints.md) for the run lifecycle wire protocol.
+See [`spec/v1/rest-endpoints.md`](https://github.com/openwop/openwop/blob/main/spec/v1/rest-endpoints.md) for the run lifecycle wire protocol.
 
 ## What's NOT in these JSONs
 

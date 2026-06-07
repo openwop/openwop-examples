@@ -58,6 +58,6 @@ The example is designed for CI run-through. CI accepts the gate immediately beca
 
 ## See also
 
-- [`../../spec/v1/interrupt.md`](../../spec/v1/interrupt.md) — full HITL contract
-- [`../../spec/v1/profiles.md`](../../spec/v1/profiles.md) `#openwop-interrupts` — predicate definition
-- [`../../SECURITY/threat-model-prompt-injection.md`](../../SECURITY/threat-model-prompt-injection.md) — refine-quorum + decidedBy invariants
+- [`../../spec/v1/interrupt.md`](https://github.com/openwop/openwop/blob/main/spec/v1/interrupt.md) — full HITL contract
+- [`../../spec/v1/profiles.md`](https://github.com/openwop/openwop/blob/main/spec/v1/profiles.md) `#openwop-interrupts` — predicate definition
+- [`../../SECURITY/threat-model-prompt-injection.md`](https://github.com/openwop/openwop/blob/main/SECURITY/threat-model-prompt-injection.md) — refine-quorum + decidedBy invariants
