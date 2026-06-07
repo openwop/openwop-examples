@@ -33,6 +33,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { isIP } from 'node:net';
+import { createRequire } from 'node:module';
 import { loadWasmPack, type LoadedWasmPack, type WasmHostBridge } from './wasm-loader.js';
 import {
   expandChainFromRegistry,
@@ -171,26 +172,45 @@ eventBus.setMaxListeners(1000);
 
 // ─── Fixture loading ─────────────────────────────────────────────────────────
 
+function loadFixturesFrom(dir: string): boolean {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return false;
+  }
+  let loaded = 0;
+  for (const file of entries) {
+    if (!file.endsWith('.json')) continue;
+    const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as FixtureWorkflow;
+    workflows.set(parsed.id, parsed);
+    loaded++;
+  }
+  return loaded > 0;
+}
+
 function loadFixtures(): void {
-  // Look for fixtures in conformance/fixtures/ at the public-repo root.
-  // Walk up from this file until we find a `conformance/fixtures` dir.
+  // Fixture workflows (`conformance-*`) are owned by @openwop/openwop-conformance.
+  // 1) Co-located checkout: walk up for a `conformance/fixtures/` dir. This path
+  //    is taken when the spec repo's host-conformance gates check this repo out
+  //    next to `conformance/`.
   let probe = __dirname;
   for (let i = 0; i < 10; i++) {
-    const candidate = join(probe, 'conformance', 'fixtures');
-    try {
-      const entries = readdirSync(candidate);
-      for (const file of entries) {
-        if (!file.endsWith('.json')) continue;
-        const raw = readFileSync(join(candidate, file), 'utf8');
-        const parsed = JSON.parse(raw) as FixtureWorkflow;
-        workflows.set(parsed.id, parsed);
-      }
-      return;
-    } catch {
-      probe = dirname(probe);
-    }
+    if (loadFixturesFrom(join(probe, 'conformance', 'fixtures'))) return;
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
   }
-  // No fixtures found — register a synthetic noop so basic discovery works.
+  // 2) Standalone (this repo): the conformance suite is no longer co-located
+  //    (it lives in openwop/openwop). Load its vendored fixtures/ from the
+  //    published package, a devDependency of this host.
+  try {
+    const pkgJson = createRequire(import.meta.url).resolve('@openwop/openwop-conformance/package.json');
+    if (loadFixturesFrom(join(dirname(pkgJson), 'fixtures'))) return;
+  } catch {
+    /* package not installed — fall through to the synthetic noop */
+  }
+  // 3) No fixtures found — register a synthetic noop so basic discovery works.
   workflows.set('conformance-noop', {
     id: 'conformance-noop',
     name: 'Synthetic Noop',
