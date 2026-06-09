@@ -1704,6 +1704,12 @@ function handleDiscovery(_req: IncomingMessage, res: ServerResponse): void {
       supported: true,
     },
     fixtures: advertisedFixtures,
+    // RFC 0073 — capability families are document-root properties of the
+    // discovery response (the normative MUST; the conformance suite reads the
+    // root only). Spread each family to the root. The top-level `capabilities`
+    // wrapper is retained only as the deprecated v1.x backward-compat mirror
+    // for laggard clients and retires at v2.0 (RFC 0073 Unresolved Questions).
+    ...capabilities,
     capabilities,
   };
   sendJSON(res, 200, payload, { 'Cache-Control': 'public, max-age=300' });
