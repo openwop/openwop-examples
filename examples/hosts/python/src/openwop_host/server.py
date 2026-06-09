@@ -56,6 +56,7 @@ _BULK_CANCEL_RE = re.compile(r"^/v1/runs:bulk-cancel$")
 _WEBHOOKS_RE = re.compile(r"^/v1/webhooks$")
 _WEBHOOK_ID_RE = re.compile(r"^/v1/webhooks/([^/]+)$")
 _WORKFLOW_ID_RE = re.compile(r"^/v1/workflows/([^/]+)$")
+_ARTIFACT_RE = re.compile(r"^/v1/runs/([^/]+)/artifacts/([^/]+)$")  # rest-endpoints.md §Artifacts
 
 
 # stream-modes.md §"Mode selection" — closed enum of supported per-event
@@ -292,6 +293,21 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
             m = _WORKFLOW_ID_RE.match(path)
             if m:
                 self._handle_get_workflow(m.group(1))
+                return
+            m = _ARTIFACT_RE.match(path)
+            if m:
+                # rest-endpoints.md §"GET /v1/runs/{runId}/artifacts/{artifactId}".
+                # This host doesn't persist artifacts, but the endpoint MUST
+                # reject unauthenticated requests with 401 BEFORE any existence
+                # check — else a missing Authorization header could probe whether
+                # a run/artifact exists (existence oracle). Auth first, then 404.
+                if not self._check_auth():
+                    return
+                self._send_error_envelope(
+                    404,
+                    "artifact_not_found",
+                    f'No artifact "{m.group(2)}" on run "{m.group(1)}".',
+                )
                 return
             m = _RUN_ID_RE.match(path)
             if m:
