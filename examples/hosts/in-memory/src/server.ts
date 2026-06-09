@@ -2199,6 +2199,22 @@ function handleEventsSse(req: IncomingMessage, res: ServerResponse, runId: strin
   });
 }
 
+// rest-endpoints.md §"GET /v1/runs/{runId}/artifacts/{artifactId}".
+// This host does not persist run artifacts, but the endpoint MUST still
+// reject unauthenticated requests with a canonical 401 BEFORE any existence
+// check — otherwise a missing Authorization header would be answerable with a
+// 404 that leaks whether the run/artifact exists (existence oracle). Auth
+// first, then a 404 `artifact_not_found` for the authenticated caller.
+function handleGetArtifact(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runId: string,
+  artifactId: string,
+): void {
+  if (!checkAuth(req, res)) return;
+  sendError(res, 404, 'artifact_not_found', `No artifact "${artifactId}" on run "${runId}".`);
+}
+
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 const RUN_ID_PATTERN = /^\/v1\/runs\/([^/]+)$/;
@@ -2209,6 +2225,7 @@ const RUN_DEBUG_BUNDLE_PATTERN = /^\/v1\/runs\/([^/]+)\/debug-bundle$/;
 const RUN_ANNOTATIONS_PATTERN = /^\/v1\/runs\/([^/]+)\/annotations$/; // RFC 0056
 const WORKSPACE_FILES_PATTERN = /^\/v1\/host\/workspace\/files$/; // RFC 0059 list
 const WORKSPACE_FILE_PATTERN = /^\/v1\/host\/workspace\/files\/(.+)$/; // RFC 0059 one file
+const RUN_ARTIFACT_PATTERN = /^\/v1\/runs\/([^/]+)\/artifacts\/([^/]+)$/; // rest-endpoints.md §Artifacts
 
 /**
  * RFC 0013 Phase 3 — workflow-chain pack expansion endpoint.
@@ -2398,6 +2415,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   m = RUN_ANNOTATIONS_PATTERN.exec(path); // RFC 0056 — run feedback
   if (m && method === 'POST') return handleCreateAnnotation(req, res, m[1]!);
   if (m && method === 'GET') return handleListAnnotations(req, res, m[1]!);
+
+  m = RUN_ARTIFACT_PATTERN.exec(path);
+  if (m && method === 'GET') return handleGetArtifact(req, res, m[1]!, m[2]!);
 
   m = RUN_ID_PATTERN.exec(path);
   if (m && method === 'GET') return handleGetRun(req, res, m[1]!);
