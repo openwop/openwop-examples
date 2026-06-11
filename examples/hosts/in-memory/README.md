@@ -18,6 +18,7 @@ The server listens on `http://127.0.0.1:3737` by default. Override via env vars:
 | `OPENWOP_HOST` | `127.0.0.1` | Bind address |
 | `OPENWOP_PORT` | `3737` | Bind port |
 | `OPENWOP_API_KEY` | `openwop-inmem-dev-key` | Bearer token accepted on `Authorization: Bearer <key>` |
+| `OPENWOP_FIXTURES_DIR` | _(unset)_ | Explicit path to the conformance fixture catalog (the spec repo's `conformance/fixtures/`). Takes priority over the upward probe, the sibling-checkout probe (`../openwop/conformance/fixtures`), and the vendored-package fallback. The host logs the resolved dir + fixture count at boot. |
 
 ## Smoke test
 

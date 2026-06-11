@@ -13,6 +13,7 @@ and `core.delay`. Hosts that need more node types extend `_execute_node`.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
@@ -27,6 +28,14 @@ def _now_iso() -> str:
 
 # Run states match `schemas/run-snapshot.schema.json` enum.
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
+
+# RFC 0058 — host wall-clock ceiling advertised as
+# `capabilities.limits.maxRunDurationMs`. A caller's
+# `RunOptions.configurable.runTimeoutMs` resolves to
+# `min(runTimeoutMs, MAX_RUN_DURATION_MS)`; the ceiling always applies
+# even when the caller omits `runTimeoutMs`. Default 1h — mirrors the
+# TypeScript reference hosts.
+MAX_RUN_DURATION_MS = int(os.environ.get("OPENWOP_MAX_RUN_DURATION_MS", "3600000"))
 
 
 @dataclass
@@ -73,6 +82,9 @@ class Run:
     status: str  # 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'waiting-approval'
     inputs: dict[str, Any]
     started_at: str
+    # `RunOptions.configurable` from the create-run request (run-options.md).
+    # The executor reads `runTimeoutMs` (RFC 0058) from here.
+    configurable: dict[str, Any] = field(default_factory=dict)
     ended_at: str | None = None
     error: dict[str, str] | None = None
     cancel_requested: bool = False
@@ -141,13 +153,19 @@ class RunRegistry:
     def workflow(self, wf_id: str) -> dict[str, Any] | None:
         return self._workflows.get(wf_id)
 
-    def create_and_start(self, workflow_id: str, inputs: dict[str, Any]) -> Run:
+    def create_and_start(
+        self,
+        workflow_id: str,
+        inputs: dict[str, Any],
+        configurable: dict[str, Any] | None = None,
+    ) -> Run:
         run_id = f"run-{uuid.uuid4()}"
         run = Run(
             run_id=run_id,
             workflow_id=workflow_id,
             status="pending",
             inputs=inputs,
+            configurable=dict(configurable or {}),
             started_at=_now_iso(),
         )
         with self._lock:
@@ -221,7 +239,23 @@ class RunRegistry:
 
     # ─── Execution ────────────────────────────────────────────────────────
 
-    def _append_event(self, run: Run, type_: str, *, node_id: str | None = None, data: Any = None) -> None:
+    def _append_event(
+        self,
+        run: Run,
+        type_: str,
+        *,
+        node_id: str | None = None,
+        data: Any = None,
+        set_status: str | None = None,
+    ) -> None:
+        """Append an event; optionally flip `run.status` atomically with it.
+
+        Terminal transitions MUST pass `set_status` so the status flip and
+        the terminal event land under one lock acquisition, event-first.
+        Otherwise an SSE/poll reader can observe `run.is_terminal()` before
+        the terminal event exists in the log and close with zero events
+        (stream-modes.md §"Server-closed stream" race).
+        """
         event = RunEvent(
             seq=len(run.events),
             run_id=run.run_id,
@@ -232,6 +266,8 @@ class RunRegistry:
         )
         with run.cond:
             run.events.append(event)
+            if set_status is not None:
+                run.status = set_status
             run.cond.notify_all()
         if self._event_hook is not None:
             try:
@@ -241,17 +277,65 @@ class RunRegistry:
                 # the executor. Hosts MAY add structured logging here.
                 pass
 
+    def _fail_run_duration(self, run: Run, limit_ms: int, elapsed_ms: float) -> None:
+        """RFC 0058 — finalize a run that breached its wall-clock deadline.
+
+        Per `run-options.md` §"Reserved keys" (`runTimeoutMs`) +
+        `capabilities.md` §"Engine-enforced limits": emit
+        `cap.breached {kind: 'run-duration'}` so the breach is
+        distinguishable on the wire from an application failure, then
+        transition to `failed` with `error.code = 'run_timeout'`.
+        `observed` MUST be strictly greater than `limit`
+        (run-event-payloads.schema.json §capBreached) — floor to
+        `limit + 1` at the measurement boundary.
+        """
+        observed = max(int(elapsed_ms), limit_ms + 1)
+        self._append_event(
+            run,
+            "cap.breached",
+            data={"kind": "run-duration", "limit": limit_ms, "observed": observed},
+        )
+        run.error = {
+            "code": "run_timeout",
+            "message": (
+                "Run exceeded its wall-clock deadline (RFC 0058 runTimeoutMs): "
+                f"observed {observed}ms vs limit {limit_ms}ms."
+            ),
+        }
+        self._append_event(run, "run.failed", data=run.error, set_status="failed")
+        run.ended_at = _now_iso()
+
     def _execute_workflow(self, run: Run) -> None:
         workflow = self._workflows.get(run.workflow_id)
         if workflow is None:
-            run.status = "failed"
             run.error = {"code": "workflow_not_found", "message": f"Unknown workflowId: {run.workflow_id}"}
-            self._append_event(run, "run.failed", data=run.error)
+            self._append_event(run, "run.failed", data=run.error, set_status="failed")
             run.ended_at = _now_iso()
             return
 
         run.status = "running"
         self._append_event(run, "run.started")
+
+        # RFC 0058 — arm the per-run wall-clock deadline. Resolved bound is
+        # `min(runTimeoutMs, MAX_RUN_DURATION_MS)`; the host ceiling always
+        # applies even when the caller omits `runTimeoutMs`.
+        rt = run.configurable.get("runTimeoutMs")
+        if isinstance(rt, int) and not isinstance(rt, bool) and rt > 0:
+            resolved_timeout_ms = min(rt, MAX_RUN_DURATION_MS)
+        else:
+            resolved_timeout_ms = MAX_RUN_DURATION_MS
+        run_start_monotonic = time.monotonic()
+        deadline_monotonic = run_start_monotonic + resolved_timeout_ms / 1000.0
+
+        # run-options.md §variables — seed the variable map from the
+        # workflow's `variables[].defaultValue` declarations, overlaid
+        # with the run inputs (inputs override defaults). Mirrors the TS
+        # reference hosts' resolution for `core.delay` inputs.
+        variables: dict[str, Any] = {}
+        for v in workflow.get("variables", []) or []:
+            if isinstance(v, dict) and isinstance(v.get("name"), str) and "defaultValue" in v:
+                variables[v["name"]] = v["defaultValue"]
+        variables.update(run.inputs)
 
         nodes = workflow.get("nodes", [])
         i = 0
@@ -276,6 +360,12 @@ class RunRegistry:
         while i < len(nodes):
             if run.cancel_requested:
                 break
+            # RFC 0058 — wall-clock deadline check at the node boundary.
+            if time.monotonic() >= deadline_monotonic:
+                self._fail_run_duration(
+                    run, resolved_timeout_ms, (time.monotonic() - run_start_monotonic) * 1000.0
+                )
+                return
             # drain-current-node pause policy per rest-endpoints.md
             # §pause/resume: pause requested between nodes parks here
             # until resume() or cancel() fires.
@@ -283,10 +373,16 @@ class RunRegistry:
                 if not park_for_pause():
                     break
                 continue
-            outcome = self._execute_node(run, nodes[i])
+            outcome = self._execute_node(run, nodes[i], variables, deadline_monotonic)
+            if outcome == "timeout":
+                # RFC 0058 — the deadline fired mid-node. Re-attribute to
+                # the run-duration breach rather than a caller cancel.
+                self._fail_run_duration(
+                    run, resolved_timeout_ms, (time.monotonic() - run_start_monotonic) * 1000.0
+                )
+                return
             if outcome == "failed":
-                run.status = "failed"
-                self._append_event(run, "run.failed", data=run.error)
+                self._append_event(run, "run.failed", data=run.error, set_status="failed")
                 run.ended_at = _now_iso()
                 return
             if outcome == "cancelled":
@@ -302,14 +398,18 @@ class RunRegistry:
                     break
 
         if run.cancel_requested:
-            run.status = "cancelled"
-            self._append_event(run, "run.cancelled")
+            self._append_event(run, "run.cancelled", set_status="cancelled")
         else:
-            run.status = "completed"
-            self._append_event(run, "run.completed")
+            self._append_event(run, "run.completed", set_status="completed")
         run.ended_at = _now_iso()
 
-    def _execute_node(self, run: Run, node: dict[str, Any]) -> str:
+    def _execute_node(
+        self,
+        run: Run,
+        node: dict[str, Any],
+        variables: dict[str, Any] | None = None,
+        deadline_monotonic: float | None = None,
+    ) -> str:
         node_id = node.get("id", "")
         type_id = node.get("typeId", "")
         if run.cancel_requested:
@@ -326,12 +426,16 @@ class RunRegistry:
             # Resolve effective delay duration. Precedence:
             #   1. Node spec declares delayMs (possibly via variable
             #      reference) — the fixture catalog's canonical shape.
+            #      Resolved against workflow `variables[].defaultValue`
+            #      overlaid with run inputs (inputs win).
             #   2. Run inputs supply `delaySeconds` directly — used by
             #      pause-resume.test.ts (`inputs: { delaySeconds: 30 }`)
             #      and other long-running scenarios.
             #   3. Fallback: 100ms.
             declared_ms = _resolve_input_as_number(
-                node.get("inputs", {}).get("delayMs"), run.inputs, -1
+                node.get("inputs", {}).get("delayMs"),
+                variables if variables is not None else run.inputs,
+                -1,
             )
             if declared_ms >= 0:
                 delay_ms = declared_ms
@@ -365,6 +469,13 @@ class RunRegistry:
                 if run.cancel_event.wait(timeout=step_s):
                     self._append_event(run, "node.cancelled", node_id=node_id)
                     return "cancelled"
+                # RFC 0058 — the run's wall-clock deadline fired mid-delay.
+                # Surface as the node interruption the TS hosts emit (the
+                # abort lands as node.cancelled), then let the outer loop
+                # re-attribute the run to the run-duration breach.
+                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                    self._append_event(run, "node.cancelled", node_id=node_id)
+                    return "timeout"
                 if run.pause_requested:
                     paused_mid_delay = True
                     break

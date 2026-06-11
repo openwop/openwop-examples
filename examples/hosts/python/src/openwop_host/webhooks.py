@@ -97,6 +97,13 @@ def _url_allowed(raw_url: str) -> tuple[bool, str]:
     return True, ""
 
 
+# The single tenant scope this reference host's runs execute under.
+# webhooks.md §Endpoints + RFC 0093 §A.3: the tenant established at
+# registration time scopes both who may manage the subscription and
+# which run events it receives.
+DEFAULT_TENANT_ID = "tenant:default"
+
+
 @dataclass
 class WebhookSubscription:
     subscription_id: str
@@ -104,15 +111,21 @@ class WebhookSubscription:
     secret: str
     event_types: list[str]  # empty = subscribe to all events
     created_at: str
+    # Tenant scope established at registration (RFC 0093 §A.3).
+    tenant_id: str = DEFAULT_TENANT_ID
 
     def to_public_dict(self) -> dict[str, Any]:
         """Shape returned on POST /v1/webhooks (secret included exactly once)."""
         return {
             "subscriptionId": self.subscription_id,
+            # webhooks.md §Register response — canonical id field. Kept
+            # alongside the host's historical `subscriptionId` alias.
+            "webhookId": self.subscription_id,
             "url": self.url,
             "secret": self.secret,
             "eventTypes": list(self.event_types),
             "createdAt": self.created_at,
+            "tenantId": self.tenant_id,
         }
 
 
@@ -129,6 +142,7 @@ class WebhookRegistry:
         *,
         secret: str | None = None,
         event_types: list[str] | None = None,
+        tenant_id: str = DEFAULT_TENANT_ID,
     ) -> WebhookSubscription:
         ok, reason = _url_allowed(url)
         if not ok:
@@ -139,19 +153,37 @@ class WebhookRegistry:
             secret=secret or secrets.token_urlsafe(32),
             event_types=list(event_types or []),
             created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+            tenant_id=tenant_id,
         )
         with self._lock:
             self._subs[sub.subscription_id] = sub
         return sub
 
-    def unregister(self, subscription_id: str) -> bool:
-        with self._lock:
-            return self._subs.pop(subscription_id, None) is not None
+    def unregister(self, subscription_id: str, tenant_id: str = DEFAULT_TENANT_ID) -> bool:
+        """Remove a subscription within a tenant scope.
 
-    def matches(self, event_type: str) -> list[WebhookSubscription]:
+        Scoped to ``tenant_id`` so a subscription held under one tenant
+        can never be removed through another tenant's scope (RFC 0093
+        §A.3); a non-member caller is rejected with 403 by the HTTP
+        handler BEFORE this runs, so no existence information leaks.
+        """
+        with self._lock:
+            sub = self._subs.get(subscription_id)
+            if sub is None or sub.tenant_id != tenant_id:
+                return False
+            del self._subs[subscription_id]
+            return True
+
+    def matches(self, event_type: str, tenant_id: str = DEFAULT_TENANT_ID) -> list[WebhookSubscription]:
+        """Subscriptions for `event_type` **within `tenant_id`** (RFC 0093 §A.3:
+        a subscription receives only events from runs within its tenant scope)."""
         with self._lock:
             snapshot = list(self._subs.values())
-        return [s for s in snapshot if not s.event_types or event_type in s.event_types]
+        return [
+            s
+            for s in snapshot
+            if s.tenant_id == tenant_id and (not s.event_types or event_type in s.event_types)
+        ]
 
 
 def sign_payload(secret: str, timestamp: str, raw_body: str) -> str:
@@ -215,9 +247,17 @@ def deliver(sub: WebhookSubscription, payload: dict[str, Any], *, timeout_s: flo
         return
 
 
-def fan_out_event(registry: WebhookRegistry, event: dict[str, Any]) -> None:
-    """Fan out a single event to every matching subscriber in background threads."""
-    subs = registry.matches(event.get("type", ""))
+def fan_out_event(
+    registry: WebhookRegistry,
+    event: dict[str, Any],
+    tenant_id: str = DEFAULT_TENANT_ID,
+) -> None:
+    """Fan out a single event to every matching subscriber **within the
+    event's tenant scope** in background threads. This reference host
+    executes every run under ``DEFAULT_TENANT_ID``, so deliveries are
+    filtered to subscriptions registered under that scope (RFC 0093 §A.3).
+    """
+    subs = registry.matches(event.get("type", ""), tenant_id)
     if not subs:
         return
     safe = _redact_for_fan_out(event)

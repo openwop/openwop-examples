@@ -39,6 +39,8 @@ Configurable via environment:
 | `OPENWOP_HOST` | `127.0.0.1` | Bind address |
 | `OPENWOP_PORT` | `3737` | TCP port |
 | `OPENWOP_API_KEY` | `openwop-inmem-dev-key` | Bearer token the host requires |
+| `OPENWOP_FIXTURES_DIR` | _(unset)_ | Explicit path to the conformance fixture catalog (the spec repo's `conformance/fixtures/`). Takes priority over the upward probe and the sibling-checkout probe (`../openwop/conformance/fixtures`). The host logs the resolved dir + fixture count at boot. |
+| `OPENWOP_MAX_RUN_DURATION_MS` | `3600000` | RFC 0058 wall-clock ceiling advertised as `limits.maxRunDurationMs`; `RunOptions.configurable.runTimeoutMs` resolves to `min(runTimeoutMs, ceiling)`. |
 
 ## What it implements
 
