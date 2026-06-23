@@ -110,12 +110,22 @@ function redactForFanOut(event: { type: string; [k: string]: unknown }): Record<
   return rest;
 }
 
+/**
+ * The single tenant scope this reference host's runs execute under.
+ * webhooks.md §Endpoints + RFC 0093 §A.3: the tenant established at
+ * registration time scopes both who may manage the subscription and
+ * which run events it receives.
+ */
+export const DEFAULT_TENANT_ID = 'tenant:default';
+
 export interface WebhookSubscription {
   readonly subscriptionId: string;
   readonly url: string;
   readonly secret: string;
   readonly eventTypes: ReadonlyArray<string>;
   readonly createdAt: string;
+  /** Tenant scope established at registration (RFC 0093 §A.3). */
+  readonly tenantId: string;
 }
 
 interface SubscriptionRow {
@@ -125,6 +135,7 @@ interface SubscriptionRow {
   /** JSONB → already-parsed array of strings (or [] default). */
   event_types: string[] | null;
   created_at: string;
+  tenant_id: string;
 }
 
 export async function setupWebhookSchema(q: Querier): Promise<void> {
@@ -134,15 +145,24 @@ export async function setupWebhookSchema(q: Querier): Promise<void> {
       url TEXT NOT NULL,
       secret TEXT NOT NULL,
       event_types JSONB NOT NULL DEFAULT '[]'::JSONB,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}'
     );
   `);
+  // Migration for databases created before the RFC 0093 §A.3 tenant column.
+  await q.query(
+    `ALTER TABLE webhook_subscriptions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '${DEFAULT_TENANT_ID}'`,
+  );
 }
 
 export interface RegisterInput {
   readonly url: string;
   readonly secret?: string;
   readonly eventTypes?: ReadonlyArray<string>;
+  /** Tenant scope the subscription lives under. The HTTP handler MUST
+   *  have already verified the caller's membership (webhooks.md
+   *  §Register: "Caller MUST be a member"). */
+  readonly tenantId: string;
 }
 
 export class WebhookUrlRejected extends Error {
@@ -164,17 +184,28 @@ export async function registerWebhook(
   const eventTypes = Array.isArray(input.eventTypes) ? input.eventTypes : [];
   const createdAt = new Date().toISOString();
   await q.query(
-    `INSERT INTO webhook_subscriptions (subscription_id, url, secret, event_types, created_at)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [subscriptionId, input.url, secret, JSON.stringify(eventTypes), createdAt],
+    `INSERT INTO webhook_subscriptions (subscription_id, url, secret, event_types, created_at, tenant_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [subscriptionId, input.url, secret, JSON.stringify(eventTypes), createdAt, input.tenantId],
   );
-  return { subscriptionId, url: input.url, secret, eventTypes, createdAt };
+  return { subscriptionId, url: input.url, secret, eventTypes, createdAt, tenantId: input.tenantId };
 }
 
-export async function unregisterWebhook(q: Querier, subscriptionId: string): Promise<boolean> {
+/**
+ * Remove a subscription within a tenant scope. The delete is scoped to
+ * `tenantId` so a subscription held under one tenant can never be
+ * removed through another tenant's scope (RFC 0093 §A.3); a non-member
+ * caller is rejected with 403 by the HTTP handler BEFORE this runs, so
+ * no existence information leaks across tenants.
+ */
+export async function unregisterWebhook(
+  q: Querier,
+  subscriptionId: string,
+  tenantId: string,
+): Promise<boolean> {
   const res = await q.query(
-    'DELETE FROM webhook_subscriptions WHERE subscription_id = $1',
-    [subscriptionId],
+    'DELETE FROM webhook_subscriptions WHERE subscription_id = $1 AND tenant_id = $2',
+    [subscriptionId, tenantId],
   );
   return (res.rowCount ?? 0) > 0;
 }
@@ -188,8 +219,12 @@ export async function unregisterWebhook(q: Querier, subscriptionId: string): Pro
 async function loadSubscriptionsForEvent(
   q: Querier,
   eventType: string,
+  tenantId: string,
 ): Promise<WebhookSubscription[]> {
-  const res = await q.query<SubscriptionRow>('SELECT * FROM webhook_subscriptions');
+  const res = await q.query<SubscriptionRow>(
+    'SELECT * FROM webhook_subscriptions WHERE tenant_id = $1',
+    [tenantId],
+  );
   return res.rows
     .map((r) => ({
       subscriptionId: r.subscription_id,
@@ -197,6 +232,7 @@ async function loadSubscriptionsForEvent(
       secret: r.secret,
       eventTypes: (r.event_types ?? []) as string[],
       createdAt: r.created_at,
+      tenantId: r.tenant_id,
     }))
     .filter((s) => s.eventTypes.length === 0 || s.eventTypes.includes(eventType));
 }
@@ -258,14 +294,19 @@ function deliver(sub: WebhookSubscription, payload: unknown): Promise<void> {
 }
 
 /**
- * Fan out a single event to every matching subscriber. Fire-and-forget;
- * caller does not await delivery.
+ * Fan out a single event to every matching subscriber **within the
+ * event's tenant scope**. Fire-and-forget; caller does not await
+ * delivery. RFC 0093 §A.3: a subscription MUST receive only events from
+ * runs within its tenant scope; this reference host executes every run
+ * under `DEFAULT_TENANT_ID`, so deliveries are filtered to
+ * subscriptions registered under that scope.
  */
 export async function fanOutEvent(
   q: Querier,
   event: { type: string; [k: string]: unknown },
+  tenantId: string = DEFAULT_TENANT_ID,
 ): Promise<void> {
-  const subs = await loadSubscriptionsForEvent(q, event.type);
+  const subs = await loadSubscriptionsForEvent(q, event.type, tenantId);
   if (subs.length === 0) return;
   const safe = redactForFanOut(event);
   for (const sub of subs) {

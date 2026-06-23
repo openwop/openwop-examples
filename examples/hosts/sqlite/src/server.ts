@@ -81,6 +81,7 @@ import {
   unregisterWebhook,
   fanOutEvent,
   WebhookUrlRejected,
+  DEFAULT_TENANT_ID,
 } from './webhooks.js';
 import {
   observabilityEnabled,
@@ -368,23 +369,61 @@ const runningHeartbeats = new Map<string, NodeJS.Timeout>();
 
 // ─── Fixture loading ─────────────────────────────────────────────────────────
 
+function loadFixturesFromDir(dir: string): boolean {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return false;
+  }
+  let loaded = 0;
+  for (const file of entries) {
+    if (!file.endsWith('.json')) continue;
+    const raw = readFileSync(join(dir, file), 'utf8');
+    const parsed = JSON.parse(raw) as FixtureWorkflow;
+    workflows.set(parsed.id, parsed);
+    loaded++;
+  }
+  if (loaded > 0) {
+    console.log(`[openwop-host-sqlite] fixtures: loaded ${loaded} from ${dir}`);
+    return true;
+  }
+  return false;
+}
+
 function loadFixtures(): void {
+  // Resolution order (degraded loading MUST be visible, never silent):
+  //   1. OPENWOP_FIXTURES_DIR — explicit operator override.
+  //   2. Upward probe for `conformance/fixtures/` (examples repo nested
+  //      inside the spec repo, or a co-located conformance checkout).
+  //   3. Sibling-checkout probe: `<ancestor>/openwop/conformance/fixtures`
+  //      (the spec repo checked out next to this examples repo).
+  const explicit = process.env.OPENWOP_FIXTURES_DIR;
+  if (explicit) {
+    if (loadFixturesFromDir(explicit)) return;
+    console.warn(
+      `[openwop-host-sqlite] fixtures: OPENWOP_FIXTURES_DIR=${explicit} yielded no fixtures; falling back to probes`,
+    );
+  }
   let probe = __dirname;
   for (let i = 0; i < 10; i++) {
-    const candidate = join(probe, 'conformance', 'fixtures');
-    try {
-      const entries = readdirSync(candidate);
-      for (const file of entries) {
-        if (!file.endsWith('.json')) continue;
-        const raw = readFileSync(join(candidate, file), 'utf8');
-        const parsed = JSON.parse(raw) as FixtureWorkflow;
-        workflows.set(parsed.id, parsed);
-      }
-      return;
-    } catch {
-      probe = dirname(probe);
-    }
+    if (loadFixturesFromDir(join(probe, 'conformance', 'fixtures'))) return;
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
   }
+  probe = __dirname;
+  for (let i = 0; i < 10; i++) {
+    if (loadFixturesFromDir(join(probe, 'openwop', 'conformance', 'fixtures'))) return;
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
+  }
+  console.warn(
+    '[openwop-host-sqlite] fixtures: no conformance/fixtures directory found — ' +
+      'serving the synthetic noop fixture ONLY. Set OPENWOP_FIXTURES_DIR to the ' +
+      "spec repo's conformance/fixtures for the full catalog.",
+  );
   workflows.set('conformance-noop', {
     id: 'conformance-noop',
     name: 'Synthetic Noop',
@@ -1866,6 +1905,27 @@ function principalFor(req: IncomingMessage): 'primary' | 'tenant2' | null {
   return null;
 }
 
+// The tenant2 bearer maps to its own tenant scope so tenant-scoped
+// surfaces (webhooks.md §Endpoints) can enforce the membership gate
+// against a second principal without a real tenant directory.
+const TENANT2_TENANT_ID = 'tenant:tenant2';
+
+/**
+ * webhooks.md §Endpoints — "The caller MUST be a member of the tenant
+ * the subscription will live under." This reference host's membership
+ * model is the principal→tenant map implied by its static API keys:
+ * primary (and the rotation secondary) belong to `tenant:default`;
+ * tenant2 belongs to `tenant:tenant2`. Returns the caller's sole
+ * tenant, or null for unauthenticated callers (checkAuth rejects those
+ * before this is consulted).
+ */
+function callerTenantFor(req: IncomingMessage): string | null {
+  const principal = principalFor(req);
+  if (principal === 'primary') return DEFAULT_TENANT_ID;
+  if (principal === 'tenant2') return TENANT2_TENANT_ID;
+  return null;
+}
+
 function hashBody(body: string): string {
   return createHash('sha256').update(body).digest('hex');
 }
@@ -2658,7 +2718,7 @@ function validateConfigurable(
 async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!checkAuth(req, res)) return;
   const bodyText = await readBody(req);
-  let parsed: { url?: unknown; secret?: unknown; eventTypes?: unknown };
+  let parsed: { url?: unknown; secret?: unknown; eventTypes?: unknown; tenantId?: unknown };
   try {
     parsed = bodyText ? (JSON.parse(bodyText) as typeof parsed) : {};
   } catch {
@@ -2676,6 +2736,27 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
     sendError(res, 400, 'validation_error', 'url MUST be a parseable URL.');
     return;
   }
+  // webhooks.md §Register + RFC 0093 §A.3 — registration-time tenant-
+  // membership gate: "The caller MUST be a member of the tenant the
+  // subscription will live under." When tenantId is omitted, the
+  // subscription scopes to the caller's own tenant.
+  const callerTenant = callerTenantFor(req) ?? DEFAULT_TENANT_ID;
+  if (parsed.tenantId !== undefined) {
+    if (typeof parsed.tenantId !== 'string' || parsed.tenantId.length === 0) {
+      sendError(res, 400, 'validation_error', 'tenantId MUST be a non-empty string when provided.');
+      return;
+    }
+    if (parsed.tenantId !== callerTenant) {
+      sendError(
+        res,
+        403,
+        'tenant_membership_required',
+        'The caller is not a member of the requested tenant.',
+      );
+      return;
+    }
+  }
+  const tenantId = typeof parsed.tenantId === 'string' ? parsed.tenantId : callerTenant;
   const eventTypes = Array.isArray(parsed.eventTypes)
     ? (parsed.eventTypes as string[]).filter((t) => typeof t === 'string')
     : [];
@@ -2685,6 +2766,7 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
       url: parsed.url,
       ...(typeof parsed.secret === 'string' ? { secret: parsed.secret } : {}),
       eventTypes,
+      tenantId,
     });
   } catch (err) {
     if (err instanceof WebhookUrlRejected) {
@@ -2695,10 +2777,14 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
   }
   sendJSON(res, 201, {
     subscriptionId: sub.subscriptionId,
+    // webhooks.md §Register response — canonical id field. Kept alongside
+    // the host's historical `subscriptionId` alias for compatibility.
+    webhookId: sub.subscriptionId,
     url: sub.url,
     secret: sub.secret, // returned once on register, never again
     eventTypes: sub.eventTypes,
     createdAt: sub.createdAt,
+    tenantId: sub.tenantId,
   });
 }
 
@@ -2706,9 +2792,25 @@ function handleUnregisterWebhook(
   req: IncomingMessage,
   res: ServerResponse,
   subscriptionId: string,
+  url: URL,
 ): void {
   if (!checkAuth(req, res)) return;
-  const removed = unregisterWebhook(db, subscriptionId);
+  // webhooks.md §Unregister + RFC 0093 §A.3 — the optional ?tenantId=
+  // names the tenant scope of the delete; the caller MUST be a member.
+  // Reject foreign scopes BEFORE any lookup so no existence information
+  // leaks across tenants. Omitted tenantId scopes to the caller's tenant.
+  const callerTenant = callerTenantFor(req) ?? DEFAULT_TENANT_ID;
+  const requestedTenant = url.searchParams.get('tenantId');
+  if (requestedTenant !== null && requestedTenant !== callerTenant) {
+    sendError(
+      res,
+      403,
+      'tenant_membership_required',
+      'The caller is not a member of the requested tenant.',
+    );
+    return;
+  }
+  const removed = unregisterWebhook(db, subscriptionId, requestedTenant ?? callerTenant);
   if (!removed) {
     sendError(res, 404, 'subscription_not_found', `Unknown subscriptionId: ${subscriptionId}`);
     return;
@@ -3416,7 +3518,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let mw = WORKFLOW_ID_PATTERN.exec(path);
   if (mw && method === 'GET') return handleGetWorkflow(req, res, decodeURIComponent(mw[1]!));
   mw = WEBHOOK_ID_PATTERN.exec(path);
-  if (mw && method === 'DELETE') return handleUnregisterWebhook(req, res, decodeURIComponent(mw[1]!));
+  if (mw && method === 'DELETE') return handleUnregisterWebhook(req, res, decodeURIComponent(mw[1]!), url);
 
   let m = RUN_EVENTS_POLL_PATTERN.exec(path);
   if (m && method === 'GET') return handleEventsPoll(req, res, m[1]!, url);

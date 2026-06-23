@@ -186,11 +186,22 @@ function loadFixturesFrom(dir: string): boolean {
     workflows.set(parsed.id, parsed);
     loaded++;
   }
-  return loaded > 0;
+  if (loaded === 0) return false;
+  console.log(`[openwop-host-in-memory] fixtures: loaded ${loaded} from ${dir}`);
+  return true;
 }
 
 function loadFixtures(): void {
   // Fixture workflows (`conformance-*`) are owned by @openwop/openwop-conformance.
+  // Resolution order (degraded loading MUST be visible, never silent):
+  // 0) OPENWOP_FIXTURES_DIR — explicit operator override.
+  const explicit = process.env.OPENWOP_FIXTURES_DIR;
+  if (explicit) {
+    if (loadFixturesFrom(explicit)) return;
+    console.warn(
+      `[openwop-host-in-memory] fixtures: OPENWOP_FIXTURES_DIR=${explicit} yielded no fixtures; falling back to probes`,
+    );
+  }
   // 1) Co-located checkout: walk up for a `conformance/fixtures/` dir. This path
   //    is taken when the spec repo's host-conformance gates check this repo out
   //    next to `conformance/`.
@@ -201,7 +212,16 @@ function loadFixtures(): void {
     if (up === probe) break;
     probe = up;
   }
-  // 2) Standalone (this repo): the conformance suite is no longer co-located
+  // 2) Sibling checkout: the spec repo checked out next to this examples repo
+  //    (`<ancestor>/openwop/conformance/fixtures`).
+  probe = __dirname;
+  for (let i = 0; i < 10; i++) {
+    if (loadFixturesFrom(join(probe, 'openwop', 'conformance', 'fixtures'))) return;
+    const up = dirname(probe);
+    if (up === probe) break;
+    probe = up;
+  }
+  // 3) Standalone (this repo): the conformance suite is no longer co-located
   //    (it lives in openwop/openwop). Load its vendored fixtures/ from the
   //    published package, a devDependency of this host.
   try {
@@ -210,7 +230,12 @@ function loadFixtures(): void {
   } catch {
     /* package not installed — fall through to the synthetic noop */
   }
-  // 3) No fixtures found — register a synthetic noop so basic discovery works.
+  // 4) No fixtures found — register a synthetic noop so basic discovery works.
+  console.warn(
+    '[openwop-host-in-memory] fixtures: no conformance/fixtures directory found — ' +
+      'serving the synthetic noop fixture ONLY. Set OPENWOP_FIXTURES_DIR to the ' +
+      "spec repo's conformance/fixtures for the full catalog.",
+  );
   workflows.set('conformance-noop', {
     id: 'conformance-noop',
     name: 'Synthetic Noop',

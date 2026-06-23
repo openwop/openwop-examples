@@ -241,6 +241,45 @@ try {
     assert.equal(dup.status, 404, 'unregister on unknown subscription MUST return 404');
     console.log('  ✓ duplicate unregister returns 404');
 
+    // ── 8. RFC 0093 §A.3 tenant-membership gate ───────────────────────
+    // Registering under a tenant the caller is not a member of MUST be
+    // refused (webhooks.md §Register: "Caller MUST be a member").
+    const foreignReg = await fetch(`${baseUrl}/v1/webhooks`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        url: `http://127.0.0.1:${receiverPort}/hook`,
+        tenantId: 'tenant:not-a-member',
+      }),
+    });
+    assert.equal(foreignReg.status, 403, 'foreign-tenant registration MUST be refused with 403');
+    const foreignRegBody = (await foreignReg.json()) as { error: string };
+    assert.equal(foreignRegBody.error, 'tenant_membership_required');
+    console.log('  ✓ foreign-tenant registration refused (403 tenant_membership_required)');
+
+    // A held subscription cannot be unregistered through a foreign
+    // tenant scope (no existence leak: 403 before any lookup).
+    const heldReg = await fetch(`${baseUrl}/v1/webhooks`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ url: `http://127.0.0.1:${receiverPort}/hook` }),
+    });
+    assert.equal(heldReg.status, 201);
+    const heldBody = (await heldReg.json()) as { subscriptionId: string; webhookId: string; tenantId: string };
+    assert.equal(heldBody.webhookId, heldBody.subscriptionId, 'response MUST carry the canonical webhookId alias');
+    assert.equal(heldBody.tenantId, 'tenant:default', 'omitted tenantId MUST scope to the caller tenant');
+    const foreignDel = await fetch(
+      `${baseUrl}/v1/webhooks/${encodeURIComponent(heldBody.subscriptionId)}?tenantId=tenant%3Anot-a-member`,
+      { method: 'DELETE', headers },
+    );
+    assert.equal(foreignDel.status, 403, 'foreign-tenant unregister MUST be refused with 403');
+    const ownDel = await fetch(
+      `${baseUrl}/v1/webhooks/${encodeURIComponent(heldBody.subscriptionId)}`,
+      { method: 'DELETE', headers },
+    );
+    assert.equal(ownDel.status, 200, 'the subscription MUST still exist for its owner after the foreign-scope attempt');
+    console.log('  ✓ foreign-tenant unregister refused; subscription survives for its owner');
+
     console.log('postgres-host webhooks test: PASS');
   } finally {
     await stopReceiver();

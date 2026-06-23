@@ -38,11 +38,12 @@ def _now_iso() -> str:
 from .fixtures import load_fixtures
 from .idempotency import IdempotencyCache, IdempotencyEntry
 from .runs import (
+    MAX_RUN_DURATION_MS,
     RunRegistry,
     iter_events_since,
     wait_for_next_event_or_terminal,
 )
-from .webhooks import WebhookRegistry, WebhookUrlRejected, fan_out_event
+from .webhooks import DEFAULT_TENANT_ID, WebhookRegistry, WebhookUrlRejected, fan_out_event
 import time
 
 _RUN_ID_RE = re.compile(r"^/v1/runs/([^/]+)$")
@@ -360,7 +361,7 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
             path = parsed.path
             m = _WEBHOOK_ID_RE.match(path)
             if m:
-                self._handle_unregister_webhook(m.group(1))
+                self._handle_unregister_webhook(m.group(1), parsed.query)
                 return
             self._send_error_envelope(404, "not_found", f"No route for DELETE {path}")
 
@@ -381,6 +382,10 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                     "schemaRounds": 0,
                     "envelopesPerTurn": 0,
                     "maxNodeExecutions": 1000,
+                    # RFC 0058 — wall-clock ceiling the executor enforces;
+                    # `RunOptions.configurable.runTimeoutMs` resolves to
+                    # `min(runTimeoutMs, maxRunDurationMs)`.
+                    "maxRunDurationMs": MAX_RUN_DURATION_MS,
                 },
                 "supportedTransports": ["rest"],
                 "debugBundle": {"supported": True},
@@ -500,6 +505,15 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                 self._send_error_envelope(400, "validation_error", "inputs MUST be an object when provided.")
                 return
 
+            # run-options.md §RunOptions.configurable — carries the RFC 0058
+            # `runTimeoutMs` wall-clock bound the executor enforces.
+            configurable = parsed.get("configurable") or {}
+            if not isinstance(configurable, dict):
+                self._send_error_envelope(
+                    400, "validation_error", "configurable MUST be an object when provided."
+                )
+                return
+
             # Layer-1 idempotency. Hold the per-key lock across the
             # get → create → put sequence so concurrent requests with
             # the same Idempotency-Key serialize and produce exactly one
@@ -534,7 +548,7 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                         self.wfile.write(raw)
                         return
 
-                run = state.runs.create_and_start(workflow_id, inputs)
+                run = state.runs.create_and_start(workflow_id, inputs, configurable)
                 response_body = {
                     "runId": run.run_id,
                     "status": run.status,
@@ -849,8 +863,34 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            # webhooks.md §Register + RFC 0093 §A.3 — registration-time
+            # tenant-membership gate: "The caller MUST be a member of the
+            # tenant the subscription will live under." This single-tenant
+            # host's only tenant is DEFAULT_TENANT_ID; an explicit foreign
+            # tenantId is refused with 403. Omitted tenantId scopes the
+            # subscription to the caller's tenant.
+            tenant_id = body.get("tenantId")
+            if tenant_id is not None:
+                if not isinstance(tenant_id, str) or not tenant_id:
+                    self._send_error_envelope(
+                        400, "validation_error", "tenantId MUST be a non-empty string when provided."
+                    )
+                    return
+                if tenant_id != DEFAULT_TENANT_ID:
+                    self._send_error_envelope(
+                        403,
+                        "tenant_membership_required",
+                        "The caller is not a member of the requested tenant.",
+                    )
+                    return
+
             try:
-                sub = state.webhooks.register(url, secret=secret, event_types=event_types)
+                sub = state.webhooks.register(
+                    url,
+                    secret=secret,
+                    event_types=event_types,
+                    tenant_id=tenant_id or DEFAULT_TENANT_ID,
+                )
             except WebhookUrlRejected as e:
                 # webhooks.md §"SSRF guard" — rejection error code is
                 # `webhook_url_rejected` per the conformance contract
@@ -868,11 +908,26 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                 return
             self._send_json(201, sub.to_public_dict())
 
-        def _handle_unregister_webhook(self, subscription_id: str) -> None:
-            """DELETE /v1/webhooks/{subscriptionId} — remove a subscriber."""
+        def _handle_unregister_webhook(self, subscription_id: str, query: str = "") -> None:
+            """DELETE /v1/webhooks/{subscriptionId}[?tenantId=] — remove a subscriber.
+
+            webhooks.md §Unregister + RFC 0093 §A.3: the optional
+            ?tenantId= names the tenant scope of the delete; the caller
+            MUST be a member. Foreign scopes are refused with 403 BEFORE
+            any lookup so no existence information leaks across tenants.
+            """
             if not self._check_auth():
                 return
-            removed = state.webhooks.unregister(subscription_id)
+            params = parse_qs(query)
+            requested = params.get("tenantId", [None])[0]
+            if requested is not None and requested != DEFAULT_TENANT_ID:
+                self._send_error_envelope(
+                    403,
+                    "tenant_membership_required",
+                    "The caller is not a member of the requested tenant.",
+                )
+                return
+            removed = state.webhooks.unregister(subscription_id, requested or DEFAULT_TENANT_ID)
             if not removed:
                 # webhooks.md + webhook-negative.test.ts §"unregister of
                 # unknown subscription" — canonical code is

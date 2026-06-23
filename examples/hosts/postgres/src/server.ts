@@ -93,6 +93,7 @@ import {
   unregisterWebhook,
   fanOutEvent,
   WebhookUrlRejected,
+  DEFAULT_TENANT_ID,
 } from './webhooks.js';
 import { resolveCanarySecret, REFERENCE_SECRETS_CAPABILITY } from './secrets.js';
 import {
@@ -395,12 +396,16 @@ const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 function loadFixturesFromDir(dir: string): boolean {
   try {
     const entries = readdirSync(dir);
+    let loaded = 0;
     for (const file of entries) {
       if (!file.endsWith('.json')) continue;
       const raw = readFileSync(join(dir, file), 'utf8');
       const parsed = JSON.parse(raw) as FixtureWorkflow;
       workflows.set(parsed.id, parsed);
+      loaded++;
     }
+    if (loaded === 0) return false;
+    console.log(`[openwop-host-postgres] fixtures: loaded ${loaded} from ${dir}`);
     return true;
   } catch {
     return false;
@@ -408,12 +413,45 @@ function loadFixturesFromDir(dir: string): boolean {
 }
 
 function loadFixtures(): void {
-  let probe = __dirname;
-  for (let i = 0; i < 10; i++) {
-    if (loadFixturesFromDir(join(probe, 'conformance', 'fixtures'))) {
-      break;
+  // Resolution order (degraded loading MUST be visible, never silent):
+  //   1. OPENWOP_FIXTURES_DIR — explicit operator override.
+  //   2. Upward probe for `conformance/fixtures/` (examples repo nested
+  //      inside the spec repo, or a co-located conformance checkout).
+  //   3. Sibling-checkout probe: `<ancestor>/openwop/conformance/fixtures`
+  //      (the spec repo checked out next to this examples repo).
+  const explicit = process.env.OPENWOP_FIXTURES_DIR;
+  let resolved = false;
+  if (explicit) {
+    resolved = loadFixturesFromDir(explicit);
+    if (!resolved) {
+      console.warn(
+        `[openwop-host-postgres] fixtures: OPENWOP_FIXTURES_DIR=${explicit} yielded no fixtures; falling back to probes`,
+      );
     }
-    probe = dirname(probe);
+  }
+  if (!resolved) {
+    let probe = __dirname;
+    for (let i = 0; i < 10; i++) {
+      if (loadFixturesFromDir(join(probe, 'conformance', 'fixtures'))) {
+        resolved = true;
+        break;
+      }
+      const up = dirname(probe);
+      if (up === probe) break;
+      probe = up;
+    }
+  }
+  if (!resolved) {
+    let probe = __dirname;
+    for (let i = 0; i < 10; i++) {
+      if (loadFixturesFromDir(join(probe, 'openwop', 'conformance', 'fixtures'))) {
+        resolved = true;
+        break;
+      }
+      const up = dirname(probe);
+      if (up === probe) break;
+      probe = up;
+    }
   }
   // Test seam: load additional fixtures from an env-pointed directory.
   // Used by host-internal smoke tests that exercise typeIds not yet in
@@ -423,6 +461,11 @@ function loadFixtures(): void {
   if (extra) loadFixturesFromDir(extra);
   if (workflows.size === 0) {
     // Fallback: minimal noop fixture if nothing else loads.
+    console.warn(
+      '[openwop-host-postgres] fixtures: no conformance/fixtures directory found — ' +
+        'serving the synthetic noop fixture ONLY. Set OPENWOP_FIXTURES_DIR to the ' +
+        "spec repo's conformance/fixtures for the full catalog.",
+    );
     workflows.set('conformance-noop', {
       id: 'conformance-noop',
       name: 'Noop',
@@ -2873,6 +2916,27 @@ function principalFor(req: IncomingMessage): 'primary' | 'tenant2' | null {
   return null;
 }
 
+// The tenant2 bearer maps to its own tenant scope so tenant-scoped
+// surfaces (webhooks.md §Endpoints) can enforce the membership gate
+// against a second principal without a real tenant directory.
+const TENANT2_TENANT_ID = 'tenant:tenant2';
+
+/**
+ * webhooks.md §Endpoints — "The caller MUST be a member of the tenant
+ * the subscription will live under." This reference host's membership
+ * model is the principal→tenant map implied by its static API keys:
+ * primary (and the rotation secondary) belong to `tenant:default`;
+ * tenant2 belongs to `tenant:tenant2`. Returns the caller's sole
+ * tenant, or null for unauthenticated callers (checkAuth rejects those
+ * before this is consulted).
+ */
+function callerTenantFor(req: IncomingMessage): string | null {
+  const principal = principalFor(req);
+  if (principal === 'primary') return DEFAULT_TENANT_ID;
+  if (principal === 'tenant2') return TENANT2_TENANT_ID;
+  return null;
+}
+
 // ─── Route handlers ──────────────────────────────────────────────────────────
 
 /** Node typeIds the Postgres host's executor implements today. */
@@ -4043,7 +4107,7 @@ async function handleTestMemoryCompact(
 async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!(await checkAuth(req, res))) return;
   const bodyText = await readBody(req);
-  let parsed: { url?: unknown; secret?: unknown; eventTypes?: unknown };
+  let parsed: { url?: unknown; secret?: unknown; eventTypes?: unknown; tenantId?: unknown };
   try {
     parsed = bodyText ? (JSON.parse(bodyText) as typeof parsed) : {};
   } catch {
@@ -4060,6 +4124,27 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
     sendError(res, 400, 'validation_error', 'url MUST be a parseable URL.');
     return;
   }
+  // webhooks.md §Register + RFC 0093 §A.3 — registration-time tenant-
+  // membership gate: "The caller MUST be a member of the tenant the
+  // subscription will live under." When tenantId is omitted, the
+  // subscription scopes to the caller's own tenant.
+  const callerTenant = callerTenantFor(req) ?? DEFAULT_TENANT_ID;
+  if (parsed.tenantId !== undefined) {
+    if (typeof parsed.tenantId !== 'string' || parsed.tenantId.length === 0) {
+      sendError(res, 400, 'validation_error', 'tenantId MUST be a non-empty string when provided.');
+      return;
+    }
+    if (parsed.tenantId !== callerTenant) {
+      sendError(
+        res,
+        403,
+        'tenant_membership_required',
+        'The caller is not a member of the requested tenant.',
+      );
+      return;
+    }
+  }
+  const tenantId = typeof parsed.tenantId === 'string' ? parsed.tenantId : callerTenant;
   const eventTypes = Array.isArray(parsed.eventTypes)
     ? (parsed.eventTypes as string[]).filter((t) => typeof t === 'string')
     : [];
@@ -4071,6 +4156,7 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
       url: parsed.url,
       ...(typeof parsed.secret === 'string' ? { secret: parsed.secret } : {}),
       eventTypes,
+      tenantId,
     });
   } catch (err) {
     if (err instanceof WebhookUrlRejected) {
@@ -4081,7 +4167,7 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
   }
 
   await logAudit(q, {
-    actor: 'tenant:default',
+    actor: tenantId,
     action: 'webhook.register',
     target: sub.subscriptionId,
     details: { url: sub.url, eventTypes: sub.eventTypes },
@@ -4090,10 +4176,14 @@ async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse):
 
   sendJSON(res, 201, {
     subscriptionId: sub.subscriptionId,
+    // webhooks.md §Register response — canonical id field. Kept alongside
+    // the host's historical `subscriptionId` alias for compatibility.
+    webhookId: sub.subscriptionId,
     url: sub.url,
     secret: sub.secret, // returned once on register, never again
     eventTypes: sub.eventTypes,
     createdAt: sub.createdAt,
+    tenantId: sub.tenantId,
   });
 }
 
@@ -4101,16 +4191,33 @@ async function handleUnregisterWebhook(
   req: IncomingMessage,
   res: ServerResponse,
   subscriptionId: string,
+  url: URL,
 ): Promise<void> {
   if (!(await checkAuth(req, res))) return;
+  // webhooks.md §Unregister + RFC 0093 §A.3 — the optional ?tenantId=
+  // names the tenant scope of the delete; the caller MUST be a member.
+  // Reject foreign scopes BEFORE any lookup so no existence information
+  // leaks across tenants. Omitted tenantId scopes to the caller's tenant.
+  const callerTenant = callerTenantFor(req) ?? DEFAULT_TENANT_ID;
+  const requestedTenant = url.searchParams.get('tenantId');
+  if (requestedTenant !== null && requestedTenant !== callerTenant) {
+    sendError(
+      res,
+      403,
+      'tenant_membership_required',
+      'The caller is not a member of the requested tenant.',
+    );
+    return;
+  }
+  const tenantId = requestedTenant ?? callerTenant;
   const q = await querier();
-  const removed = await unregisterWebhook(q, subscriptionId);
+  const removed = await unregisterWebhook(q, subscriptionId, tenantId);
   if (!removed) {
     sendError(res, 404, 'subscription_not_found', `Unknown subscriptionId: ${subscriptionId}`);
     return;
   }
   await logAudit(q, {
-    actor: 'tenant:default',
+    actor: tenantId,
     action: 'webhook.unregister',
     target: subscriptionId,
     details: {},
@@ -5249,7 +5356,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
   const mwh = WEBHOOK_ID_PATTERN.exec(path);
   if (mwh && method === 'DELETE') {
-    return handleUnregisterWebhook(req, res, decodeURIComponent(mwh[1]!));
+    return handleUnregisterWebhook(req, res, decodeURIComponent(mwh[1]!), url);
   }
 
   let m = RUN_EVENTS_POLL_PATTERN.exec(path);

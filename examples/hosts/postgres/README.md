@@ -58,6 +58,8 @@ npm start
 
 The host's `setupSchema()` creates `runs`, `events`, and `idempotency` tables if missing. For production, run that DDL via your migrator of choice and skip `setupSchema()` — see `src/schema.ts`.
 
+**Fixture catalog resolution.** The conformance fixture workflows (`conformance-*`) resolve in priority order: `OPENWOP_FIXTURES_DIR` (explicit path to the spec repo's `conformance/fixtures/`) → an upward probe for `conformance/fixtures/` → a sibling-checkout probe (`../openwop/conformance/fixtures`). `OPENWOP_EXTRA_FIXTURES_DIR` additionally loads host-internal smoke fixtures. The host logs the resolved dir + fixture count at boot; if nothing resolves it serves only a synthetic noop fixture (logged loudly).
+
 ## Architecture
 
 ```

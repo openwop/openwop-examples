@@ -40,6 +40,7 @@ The server listens on `http://127.0.0.1:3838` by default. SQLite database lives 
 | `OPENWOP_SQLITE_PATH` | `./data/openwop-host.sqlite` | SQLite file location |
 | `OPENWOP_CLAIM_TTL_MS` | `30000` | Lifetime of a run claim before another process can steal it. Tests use ≤ 2000. |
 | `OPENWOP_HEARTBEAT_INTERVAL_MS` | `10000` | How often a holding process renews `claim_expires_at`. SHOULD be ≤ `OPENWOP_CLAIM_TTL_MS / 2`. |
+| `OPENWOP_FIXTURES_DIR` | _(unset)_ | Explicit path to the conformance fixture catalog (the spec repo's `conformance/fixtures/`). Takes priority over the upward probe and the sibling-checkout probe (`../openwop/conformance/fixtures`). The host logs the resolved dir + fixture count at boot. |
 
 ## Demonstrate durability
 
