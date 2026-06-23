@@ -934,6 +934,17 @@ const HOST_ADVERTISED_GATED_CAPABILITIES: ReadonlySet<string> = new Set([
   // refused at run-create with capability_required.
 ]);
 
+// RFC 0101 — multi-party group-conversation conformance seam. The host
+// advertises `multiPartyConversation.supported` (see handleDiscovery) and
+// enforces the §Spec MUSTs through a SELF-CONTAINED in-memory council
+// registry — it does NOT ride the full RFC 0005 conversation gate (which this
+// host doesn't implement). A `multi-party/open` records the participant roster
+// (closed speaking set) for a conversationId; a `multi-party/exchange` checks
+// each submitted turn against it. Conformance-only (`/v1/host/sample/*`), per
+// `host-sample-test-seams.md`.
+const MULTI_PARTY_MAX_PARTICIPANTS = 8;
+const multiPartyCouncils = new Map<string, { participants: ReadonlySet<string> }>();
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error('aborted'));
@@ -3191,6 +3202,16 @@ function handleDiscovery(req: IncomingMessage, res: ServerResponse): void {
         // confidence-escalation contract honored via the
         // node.suspended { reason: 'low-confidence' } path.
         agents: REFERENCE_AGENTS_CAPABILITY,
+        // RFC 0101 — `capabilities.multiPartyConversation` block. The host
+        // enforces the roster-membership + agent-turn-attribution + max-
+        // participants MUSTs via the self-contained conformance seam
+        // `POST /v1/host/sample/conversation/multi-party/{open,exchange}`
+        // (handlers below). Advertised unconditionally on this reference host
+        // (the `workspace` seam #9 precedent); a production deploy gates the
+        // seam per host-sample-test-seams.md §"Production safety". Mirrored to
+        // the document root by the `...advertisement.capabilities` spread, where
+        // the conformance accessor (RFC 0073 root-first) reads it.
+        multiPartyConversation: { supported: true, maxParticipants: MULTI_PARTY_MAX_PARTICIPANTS },
         // RFC 0022 §B+§C — `capabilities.subWorkflow` block. Top-level
         // namespace for additive `core.subWorkflow` extension flags.
         // Carries `inputMapping: true` because the executor block
@@ -5027,6 +5048,98 @@ async function handleListAnnotations(req: IncomingMessage, res: ServerResponse, 
   sendJSON(res, 200, { annotations: r.rows.map((row) => row.data_json) });
 }
 
+// ─── RFC 0101 multi-party group-conversation conformance seam ──────────────────
+//
+// Self-contained roster-membership + agent-turn-attribution + maxParticipants
+// enforcement over an in-memory council registry. RFC 0101 mints no normative
+// client wire-route to open a multi-party conversation, so the conformance
+// driver opens a council + submits turns through these `/v1/host/sample/*`
+// seams (host-sample-test-seams.md). Error codes are uniformly `validation_error`;
+// the HTTP status mirrors the canonical openwop-app wire: over-cap open is open-
+// time INPUT validation (400), per-turn rejections are turn-validation (422,
+// RFC 0005 §E family).
+
+/** POST /v1/host/sample/conversation/multi-party/open — record a council's
+ *  participant roster (the closed speaking set) for a conversationId. */
+async function handleMultiPartyOpen(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!(await checkAuth(req, res))) return;
+  let body: { conversationId?: unknown; participants?: unknown; maxParticipants?: unknown };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
+    return;
+  }
+  const conversationId = typeof body.conversationId === 'string' ? body.conversationId : '';
+  if (conversationId.length === 0) {
+    sendError(res, 400, 'validation_error', '`conversationId` MUST be a non-empty string.');
+    return;
+  }
+  if (!Array.isArray(body.participants) || body.participants.length === 0) {
+    sendError(res, 400, 'validation_error', '`participants` MUST be a non-empty AgentRef[].');
+    return;
+  }
+  const ids: string[] = [];
+  for (const p of body.participants) {
+    const agentId = p && typeof p === 'object' ? (p as { agentId?: unknown }).agentId : undefined;
+    if (typeof agentId !== 'string' || agentId.length === 0) {
+      sendError(res, 400, 'validation_error', 'each participant MUST be an AgentRef with a string agentId.');
+      return;
+    }
+    ids.push(agentId);
+  }
+  // RFC 0101 §Spec(4) — maxParticipants. The advertised ceiling is the host's
+  // floor; a request MAY tighten it. An over-cap roster is open-time INPUT
+  // validation → 400 (parallels openwop-app advisory-board create).
+  const requested = typeof body.maxParticipants === 'number' ? body.maxParticipants : MULTI_PARTY_MAX_PARTICIPANTS;
+  const cap = Math.min(requested, MULTI_PARTY_MAX_PARTICIPANTS);
+  if (ids.length > cap) {
+    sendError(res, 400, 'validation_error', `a multi-party conversation MUST have ${cap} participants or fewer.`);
+    return;
+  }
+  multiPartyCouncils.set(conversationId, { participants: new Set(ids) });
+  sendJSON(res, 200, { conversationId, accepted: true });
+}
+
+/** POST /v1/host/sample/conversation/multi-party/exchange — submit one turn to
+ *  an open council; enforce the RFC 0101 attribution + membership MUSTs. */
+async function handleMultiPartyExchange(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!(await checkAuth(req, res))) return;
+  let body: { conversationId?: unknown; turn?: unknown };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
+    return;
+  }
+  const conversationId = typeof body.conversationId === 'string' ? body.conversationId : '';
+  const council = multiPartyCouncils.get(conversationId);
+  if (!council) {
+    sendError(res, 404, 'not_found', `Unknown conversationId: ${conversationId}`);
+    return;
+  }
+  const turn = body.turn && typeof body.turn === 'object' ? (body.turn as Record<string, unknown>) : null;
+  if (!turn) {
+    sendError(res, 400, 'validation_error', '`turn` MUST be a ConversationTurn object.');
+    return;
+  }
+  const speakerId = turn.speakerId;
+  // RFC 0101 §Spec(2)+(3) — agent-turn attribution + roster membership. Both are
+  // turn-validation rejections (422, RFC 0005 §E family). For role:'user' /
+  // role:'system' turns, speakerId carries no normative meaning (left unchecked).
+  if (turn.role === 'agent') {
+    if (typeof speakerId !== 'string' || speakerId.length === 0) {
+      sendError(res, 422, 'validation_error', "a role:'agent' turn MUST carry a speakerId (RFC 0101 attribution).");
+      return;
+    }
+    if (!council.participants.has(speakerId)) {
+      sendError(res, 422, 'validation_error', `speakerId '${speakerId}' is not a participant in this conversation.`);
+      return;
+    }
+  }
+  sendJSON(res, 200, { accepted: true });
+}
+
 // ─── RFC 0036 conformance seams (gated on MULTI_REGION_TEST) ───────────────────
 //
 // These are host-extension test seams in the `/v1/host/sample/test/*` namespace.
@@ -5205,6 +5318,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // be exercised by the conformance suite without a full run.
   if (method === 'POST' && path === '/v1/host/sample/test/evaluate-model-capability-gate') {
     return handleEvaluateModelCapabilityGate(req, res);
+  }
+  // RFC 0101 multi-party conversation conformance seam (unconditional on this
+  // reference host; workspace seam #9 precedent). Advertised via
+  // `multiPartyConversation.supported` so the gated behavioral leg runs non-vacuously.
+  if (method === 'POST' && path === '/v1/host/sample/conversation/multi-party/open') {
+    return handleMultiPartyOpen(req, res);
+  }
+  if (method === 'POST' && path === '/v1/host/sample/conversation/multi-party/exchange') {
+    return handleMultiPartyExchange(req, res);
   }
   // RFC 0036 conformance seams — only mounted when OPENWOP_TEST_MULTI_REGION is
   // set (same gate as the capability advertisement). When unset, requests fall
