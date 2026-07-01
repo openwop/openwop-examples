@@ -23,15 +23,48 @@ on:
       - 'examples/**'
       - '.github/workflows/examples.yml'
       - 'scripts/check-example-pack-refs.mjs'
+  # PRs trigger WITHOUT a workflow-level path filter so the required `gate`
+  # job always reports a check (a path-filtered workflow that never runs leaves
+  # a required check "expected" forever and deadlocks the merge). Relevance is
+  # instead computed per-job in `changes`, so the heavy matrix still stays lean
+  # on PRs that don't touch examples.
   pull_request:
-    paths:
-      - 'examples/**'
-      - '.github/workflows/examples.yml'
-      - 'scripts/check-example-pack-refs.mjs'
+    branches: [main]
 
 jobs:
+  # Detect whether this PR touches example-relevant paths. The real jobs gate on
+  # this so a docs/registry-only PR skips the matrix, while the always-run `gate`
+  # job below still reports a (passing) required check.
+  changes:
+    name: Detect example-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$BASE_SHA" ]; then
+            # Non-PR (push) events keep the workflow-level path filter, so a run
+            # here is already example-relevant.
+            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
+               | grep -qE '^(examples/|\.github/workflows/examples\.yml$|scripts/check-example-pack-refs\.mjs$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   validate-workflow-defs:
     name: Validate workflow-definition pack references
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     # Workflow-definition examples (market-intel-pipeline, ads-publish-pipeline,
     # rag-grounded-chat) declare their pack dependencies in metadata.packs[].
@@ -49,6 +82,8 @@ jobs:
 
   examples:
     name: examples (${{ matrix.example.name }})
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -134,3 +169,30 @@ jobs:
       - name: Show host log on failure
         if: failure() && matrix.example.host == 'in-memory'
         run: cat /tmp/openwop-host.log
+
+  # Single, always-run required check. Aggregates the (possibly-skipped) real
+  # jobs so branch protection has one stable context to require with
+  # `strict: true` — a docs-only PR skips the matrix and this still passes; an
+  # example-touching PR fails the gate iff a real job failed. Requiring this
+  # (not the 7 matrix legs) also keeps the required-check list stable when
+  # examples are added or removed.
+  gate:
+    name: Examples gate
+    needs: [changes, validate-workflow-defs, examples]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify no required job failed
+        env:
+          VALIDATE_RESULT: ${{ needs.validate-workflow-defs.result }}
+          EXAMPLES_RESULT: ${{ needs.examples.result }}
+        run: |
+          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT"
+          # 'success' and 'skipped' are OK; 'failure'/'cancelled' fail the gate.
+          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required examples job did not succeed ($r)."
+              exit 1
+            fi
+          done
+          echo "Examples gate OK."
