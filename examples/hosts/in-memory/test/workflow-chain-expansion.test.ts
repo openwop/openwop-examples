@@ -212,4 +212,74 @@ console.log('✓ case 4 — chain not found');
   console.log('✓ case 5 — pack_kind_invalid for kind=node');
 }
 
-console.log('\nworkflow-chain-expansion: 5/5 cases passed');
+// ─── Case 6: whole-value token resolves to raw typed value ─────────────
+// RFC 0013 §"Parameter substitution": a config string that is EXACTLY one
+// `{{params.x}}` token resolves to the raw typed value (object/array/number/
+// boolean survive their JSON type); an embedded token does string coercion.
+
+{
+  const tmpDir = mkdtempSync(join(tmpdir(), 'openwop-chain-wholeval-'));
+  const packName = 'vendor.test.typed-params';
+  const packDir = join(tmpDir, packName);
+  mkdirSync(packDir, { recursive: true });
+  writeFileSync(
+    join(packDir, 'pack.json'),
+    JSON.stringify({
+      name: packName,
+      version: '1.0.0',
+      kind: 'workflow-chain',
+      engines: { openwop: '>=1.0.0' },
+      chains: [
+        {
+          chainId: 'vendor.test.typed-params.typed',
+          version: '1.0.0',
+          label: 'Typed',
+          description: 'Whole-value typed param resolution.',
+          parameters: {
+            type: 'object',
+            properties: {
+              retryPolicy: { type: 'object' },
+              maxTokens: { type: 'number' },
+            },
+          },
+          dag: {
+            nodes: [
+              {
+                id: 'n',
+                typeId: 'core.ai.callPrompt',
+                config: {
+                  retryPolicy: '{{params.retryPolicy}}',
+                  maxTokens: '{{params.maxTokens}}',
+                  label: 'tokens: {{params.maxTokens}}',
+                },
+              },
+            ],
+            edges: [],
+          },
+        },
+      ],
+    }),
+  );
+  const result = await expandChainFromRegistry({
+    registryDir: tmpDir,
+    packName,
+    chainId: 'vendor.test.typed-params.typed',
+    parameters: { retryPolicy: { attempts: 3, backoff: 'exponential' }, maxTokens: 4096 },
+    expansionId: 'wv01',
+  });
+  const config = result.nodes[0]!.config as {
+    retryPolicy: unknown;
+    maxTokens: unknown;
+    label: unknown;
+  };
+  assert.deepEqual(
+    config.retryPolicy,
+    { attempts: 3, backoff: 'exponential' },
+    'whole-value object param MUST survive as an object, not "[object Object]"',
+  );
+  assert.equal(config.maxTokens, 4096, 'whole-value number param MUST survive as a number');
+  assert.equal(config.label, 'tokens: 4096', 'embedded token MUST do string coercion');
+  console.log('✓ case 6 — whole-value token resolves to raw typed value');
+}
+
+console.log('\nworkflow-chain-expansion: 6/6 cases passed');
