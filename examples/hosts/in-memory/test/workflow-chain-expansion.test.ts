@@ -36,9 +36,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 
 import {
+  expandChain,
   expandChainFromRegistry,
   WorkflowChainExpansionError,
 } from '../src/workflow-chain-expansion.js';
+import type { WorkflowChain } from '../src/workflow-chain-expansion.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -212,4 +214,58 @@ console.log('✓ case 4 — chain not found');
   console.log('✓ case 5 — pack_kind_invalid for kind=node');
 }
 
-console.log('\nworkflow-chain-expansion: 5/5 cases passed');
+// ─── Case 6: RFC 0125 `triggerRule` survives expansion ─────────────────
+//
+// The fan-in / error-routing rule rides on the fragment edge and MUST be
+// carried onto the expanded WorkflowEdge, exactly as `condition` is. Before
+// this case existed the host dropped it SILENTLY: expansion succeeded, the
+// edge looked correct, and the scheduler simply never saw the rule — so a
+// chain authored with `any_failed` error-routing degraded to default fan-in
+// with no error anywhere. Caught by the cross-repo drift gate
+// (`scripts/check-workflow-chain-expansion-sync.mjs` in `openwop/openwop`),
+// which compares this file's algorithm against the spec-authoritative copy.
+
+{
+  const chain: WorkflowChain = {
+    chainId: 'vendor.test.chain.trigger-rule',
+    version: '1.0.0',
+    label: 'trigger-rule probe',
+    description: 'two nodes, one edge carrying an RFC 0125 triggerRule',
+    parameters: {},
+    dag: {
+      nodes: [
+        { id: 'a', typeId: 'core.openwop.noop' },
+        { id: 'b', typeId: 'core.openwop.noop' },
+        { id: 'c', typeId: 'core.openwop.noop' },
+      ],
+      edges: [
+        { from: 'a', to: 'b', triggerRule: 'any_failed' },
+        { from: 'b', to: 'c' },
+      ],
+    },
+  };
+
+  const out = expandChain(chain, {
+    expansionId: 'trig',
+    params: {},
+    isTypeIdResolvable: () => true,
+  });
+
+  assert.equal(
+    out.edges[0]?.triggerRule,
+    'any_failed',
+    'case 6 — triggerRule MUST be carried onto the expanded edge (RFC 0125)',
+  );
+  // Anti-over-fire: an edge that declares no rule must not acquire one.
+  assert.ok(
+    !('triggerRule' in (out.edges[1] as object)),
+    'case 6 — an edge without triggerRule must not gain the key',
+  );
+  // The rule must not disturb endpoint rewriting.
+  assert.equal(out.edges[0]?.from, out.nodes[0]?.id, 'case 6 — `from` still rewritten');
+  assert.equal(out.edges[0]?.to, out.nodes[1]?.id, 'case 6 — `to` still rewritten');
+
+  console.log('✓ case 6 — RFC 0125 triggerRule survives expansion');
+}
+
+console.log('\nworkflow-chain-expansion: 6/6 cases passed');
