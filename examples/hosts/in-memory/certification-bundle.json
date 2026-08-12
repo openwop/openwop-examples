@@ -197,9 +197,6 @@
   },
   "claimedProfiles": [
     "openwop-core",
-    "openwop-stream-sse",
-    "openwop-stream-poll",
-    "openwop-node-packs",
     "openwop-fixtures"
   ],
   "results": {
@@ -542,6 +539,15 @@
       "sandbox-no-host-process-escape.test.ts",
       "sandbox-no-network-escape.test.ts",
       "secret-leakage-otel-attribute.test.ts"
+    ]
+  },
+  "claimRevision": {
+    "revisedAt": "2026-08-12",
+    "reason": "RFC 0148 \u00a7C transcribed the per-profile floors that `profiles.md` already stated normatively. Three claims in this bundle are positively contradicted by its own `results.failed`: `openwop-stream-sse` (all three `stream-modes*` scenarios failed), `openwop-stream-poll` (`stream-modes.test.ts` failed), and `openwop-node-packs` (`pack-registry.test.ts` failed). Those three are withdrawn rather than the verifier loosened, per RFC 0148 \u00a7D. Retained: `openwop-core` and `openwop-fixtures`, which are discovery-payload-only by design \u2014 their predicates ARE the whole claim, so they say nothing about runtime behavior (RFC 0155 \u00a7A).",
+    "withdrawn": [
+      "openwop-stream-sse",
+      "openwop-stream-poll",
+      "openwop-node-packs"
     ]
   }
 }
