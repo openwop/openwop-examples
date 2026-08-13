@@ -1576,6 +1576,56 @@ function handleOpenApi(_req: IncomingMessage, res: ServerResponse): void {
   });
 }
 
+/**
+ * RFC 0146 — `contractProvenance`, DERIVED from the installed
+ * `@openwop/openwop-conformance` package rather than written as a constant.
+ *
+ * The distinction is the whole point. A hand-written constant states which
+ * corpus revision the host *believes* it implements; it stays put while the
+ * dependency moves, which is exactly the drift RFC 0145 G2 found (an 81-vs-88
+ * vendored copy that validated green because v1.x changes are additive, so a
+ * document written against the old contract still validates against the new
+ * one). Reading the stamp out of the package makes the claim structurally
+ * true instead of merely asserted — RFC 0146 G2's recommended implementation.
+ *
+ * Two silences are deliberate:
+ *
+ *   - **No package, no stamp, or an unreadable one → advertise nothing.**
+ *     Requirement 1: absence means *unspecified*, which is honest. A host that
+ *     cannot determine its corpus revision has nothing to say about it.
+ *   - **Never advertise `{}`.** If neither member survives validation the field
+ *     is omitted entirely. An object conveying neither value is
+ *     indistinguishable from silence while *looking* like an answer, and the
+ *     conformance suite fails it for that reason.
+ *
+ * `corpusCommit` is checked for full 40-hex form before it goes on the wire
+ * (requirement 4). A short SHA or a vendor build string is what turns this
+ * field into a free-text version box, and a host that forwards one unchecked
+ * would be publishing an identifier no consumer can resolve.
+ */
+const contractProvenance = ((): { suiteVersion?: string; corpusCommit?: string } | null => {
+  try {
+    const pkgJson = createRequire(import.meta.url).resolve('@openwop/openwop-conformance/package.json');
+    const stamp = JSON.parse(readFileSync(join(dirname(pkgJson), 'schemas', 'CORPUS-STAMP.json'), 'utf8')) as {
+      suiteVersion?: unknown;
+      corpusCommit?: unknown;
+    };
+    const out: { suiteVersion?: string; corpusCommit?: string } = {};
+    if (typeof stamp.suiteVersion === 'string' && /^\d+\.\d+\.\d+$/.test(stamp.suiteVersion)) {
+      out.suiteVersion = stamp.suiteVersion;
+    }
+    if (typeof stamp.corpusCommit === 'string' && /^[0-9a-f]{40}$/.test(stamp.corpusCommit)) {
+      out.corpusCommit = stamp.corpusCommit;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    // Package absent (a source checkout without `npm install`), stamp absent (a
+    // suite older than 1.72.0), or malformed JSON. All three mean the same
+    // thing: this host cannot substantiate a corpus revision, so it claims none.
+    return null;
+  }
+})();
+
 function handleDiscovery(_req: IncomingMessage, res: ServerResponse): void {
   // Per spec/v1/capabilities.md: protocolVersion / supportedEnvelopes /
   // schemaVersions / limits required. No auth required for /.well-known/openwop.
@@ -1736,6 +1786,10 @@ function handleDiscovery(_req: IncomingMessage, res: ServerResponse): void {
     // for laggard clients and retires at v2.0 (RFC 0073 Unresolved Questions).
     ...capabilities,
     capabilities,
+    // RFC 0146 — a root property, not a capability family: it describes which
+    // contract this host was built against, not something the host can do.
+    // Omitted entirely when the stamp is unavailable (see `contractProvenance`).
+    ...(contractProvenance === null ? {} : { contractProvenance }),
   };
   sendJSON(res, 200, payload, { 'Cache-Control': 'public, max-age=300' });
 }
