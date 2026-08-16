@@ -10,14 +10,16 @@ This pack is the canonical proof that the workflow-chain pack contract from [`sp
 
 ## What's in the pack
 
-Two chains showing the two common shapes:
+Four chains — the two common shapes, plus (pack 1.1.0, 2026-08-16) two RFC 0157 compensating chains:
 
 | chainId | Shape | Demonstrates |
 |---|---|---|
 | `vendor.openwop.workflow-chain-sample.summarize-text` | 1 node, 0 edges | Literal parameter substitution into a single `core.ai.callPrompt` system prompt — the canonical "drag-tile that expands to one configured node" pattern (mirrors the spec's Generate PRD example) |
 | `vendor.openwop.workflow-chain-sample.fetch-and-summarize` | 2 nodes, 1 edge | Multi-node chain composition: `core.openwop.http.get` fetches the URL, then `core.ai.callPrompt` summarizes the body. Edge wiring (`fetch.body → summarize.sourceText`), parameter substitution across multiple nodes, capability propagation (`side-effectful` from HTTP fetch propagates to both expanded nodes per spec §Capability propagation) |
+| `vendor.openwop.workflow-chain-sample.reserve-and-notify` | 2 nodes, 1 edge | RFC 0157 × RFC 0151 §B: the `reserve` node declares an inverse action (`compensation`, retry-bounded, `inputMapping` from the recorded output + a `{{params.*}}` literal); the `notify` node declares `irreversibleEffect: true` (RFC 0151 UQ4). No chain-level policy, so it is acceptable on any host — the declaration describes an inverse, only a policy requests an unwind. |
+| `vendor.openwop.workflow-chain-sample.reserve-and-notify-with-policy` | 2 nodes, 1 edge, chain `compensation` policy | Same DAG plus the RFC 0151 §B policy (a mirror of `compensation-policy.schema.json`). A host that advertises `capabilities.compensation` carries it to the registered definition's `settings.compensation`; one that does not MUST refuse the chain with `capability_required` (`compensation.md` §"Workflow policy"). Exercised by the conformance suite's `workflow-chain-host-expansion` host legs (suite 1.133.0). |
 
-Both chains validate against the new schema:
+All four chains validate against the schema:
 
 ```bash
 cd conformance
