@@ -1,0 +1,3210 @@
+{
+  "bundleVersion": "2",
+  "generatedAt": "2026-08-16T07:55:13.684Z",
+  "generator": {
+    "name": "@openwop/openwop-conformance --certify",
+    "version": "1.116.0"
+  },
+  "suite": {
+    "package": "@openwop/openwop-conformance",
+    "version": "1.116.0"
+  },
+  "host": {
+    "name": "openwop-host-in-memory",
+    "version": "1.1.7",
+    "vendor": "openwop-spec (reference example)"
+  },
+  "discovery": {
+    "url": "http://127.0.0.1:3737/.well-known/openwop",
+    "sha256": "64a3580aad07a7674e8993283f69bfcef9dfec0a8dea2ce811fb4712ec38875f",
+    "document": {
+      "protocolVersion": "1.0",
+      "implementation": {
+        "name": "openwop-host-in-memory",
+        "version": "1.1.7",
+        "vendor": "openwop-spec (reference example)"
+      },
+      "supportedEnvelopes": [],
+      "schemaVersions": {},
+      "limits": {
+        "clarificationRounds": 0,
+        "schemaRounds": 0,
+        "envelopesPerTurn": 0,
+        "maxNodeExecutions": 1000,
+        "maxRunDurationMs": 600000
+      },
+      "supportedTransports": [
+        "rest"
+      ],
+      "debugBundle": {
+        "supported": true
+      },
+      "fixtures": [
+        "conformance-a2a-task-roundtrip",
+        "conformance-agent-channel-dispatch",
+        "conformance-agent-identity",
+        "conformance-agent-low-confidence",
+        "conformance-agent-memory-cross-tenant",
+        "conformance-agent-memory-injection-budget",
+        "conformance-agent-memory-redaction",
+        "conformance-agent-memory-roundtrip",
+        "conformance-agent-memory-ttl",
+        "conformance-agent-pack-export",
+        "conformance-agent-pack-handoff-schema-validation",
+        "conformance-agent-pack-install",
+        "conformance-agent-pack-provenance",
+        "conformance-agent-reasoning-streaming",
+        "conformance-agent-reasoning",
+        "conformance-approval",
+        "conformance-cancellable",
+        "conformance-cap-breach",
+        "conformance-capability-missing",
+        "conformance-channel-ttl",
+        "conformance-clarification",
+        "conformance-configurable-schema",
+        "conformance-context-budget-multiturn",
+        "conformance-conversation-capability-negotiation",
+        "conformance-conversation-lifecycle",
+        "conformance-conversation-replay",
+        "conformance-conversation-vs-clarification",
+        "conformance-delay",
+        "conformance-dispatch-cancellable-child",
+        "conformance-dispatch-cross-worker-handoff-child-a",
+        "conformance-dispatch-cross-worker-handoff-child-b",
+        "conformance-dispatch-cross-worker-handoff",
+        "conformance-dispatch-deterministic-fail-child",
+        "conformance-dispatch-input-mapping-child",
+        "conformance-dispatch-input-mapping-no-default",
+        "conformance-dispatch-input-mapping",
+        "conformance-dispatch-loop",
+        "conformance-dispatch-output-mapping-child",
+        "conformance-dispatch-output-mapping",
+        "conformance-dispatch-per-worker-override",
+        "conformance-envelope-nl-to-format-engaged",
+        "conformance-envelope-recovery-applied",
+        "conformance-envelope-refusal",
+        "conformance-envelope-retry-attempted",
+        "conformance-envelope-retry-exhausted",
+        "conformance-envelope-truncated",
+        "conformance-envelope-truncation-cap-exhaustion",
+        "conformance-failure",
+        "conformance-idempotent",
+        "conformance-identity",
+        "conformance-interrupt-auth-required",
+        "conformance-interrupt-external-event",
+        "conformance-interrupt-parent-child-cancel-child",
+        "conformance-interrupt-parent-child-cancel",
+        "conformance-interrupt-quorum",
+        "conformance-mcp-tool-roundtrip",
+        "conformance-message-reducer",
+        "conformance-model-capability-insufficient",
+        "conformance-multi-agent-confidence-escalation",
+        "conformance-multi-agent-handoff-child",
+        "conformance-multi-agent-handoff",
+        "conformance-multi-node",
+        "conformance-noop",
+        "conformance-orchestrator-dispatch",
+        "conformance-orchestrator-low-confidence",
+        "conformance-orchestrator-terminate",
+        "conformance-phase4-nondet-tool",
+        "conformance-phase4-replay-divergence",
+        "conformance-prompt-all-four-kinds",
+        "conformance-prompt-end-to-end",
+        "conformance-replay-side-effect",
+        "conformance-run-duration-breach",
+        "conformance-stream-text",
+        "conformance-subworkflow-child",
+        "conformance-subworkflow-input-mapping-child",
+        "conformance-subworkflow-input-mapping-no-default",
+        "conformance-subworkflow-input-mapping",
+        "conformance-subworkflow-mid-run-mutation-child",
+        "conformance-subworkflow-mid-run-mutation",
+        "conformance-subworkflow-parent",
+        "conformance-version-fold",
+        "conformance-wasm-pack-memory-cap-breach",
+        "conformance-wasm-pack-roundtrip",
+        "conformance-workflow-variable-format-advisory",
+        "openwop-smoke-byok-roundtrip",
+        "openwop-smoke-cost-emit"
+      ],
+      "workflowChainPacks": {
+        "supported": true
+      },
+      "nodePackRuntimes": {
+        "wasm": {
+          "supported": true,
+          "abiVersions": [
+            1
+          ],
+          "maxMemoryBytes": 67108864,
+          "loadedPacks": [
+            "vendor.openwop.misbehaving",
+            "vendor.openwop.rust-hello"
+          ]
+        }
+      },
+      "feedback": {
+        "supported": true,
+        "targets": [
+          "run"
+        ],
+        "signals": [
+          "rating",
+          "correction",
+          "label",
+          "flag"
+        ]
+      },
+      "workspace": {
+        "supported": true,
+        "versioned": true,
+        "maxFileBytes": 1048576,
+        "maxFiles": 256,
+        "maxVersions": 20
+      },
+      "heartbeat": {
+        "supported": true,
+        "minIntervalSec": 1,
+        "maxRuntimeMs": 5000
+      },
+      "agents": {
+        "subRunAttestation": true
+      },
+      "toolHooks": {
+        "supported": true,
+        "prePostEvents": true,
+        "perToolAuthorization": true,
+        "perToolRateLimit": true
+      },
+      "httpClient": {
+        "supported": true,
+        "ssrfGuard": true,
+        "maxResponseBodyBytes": 10485760,
+        "requestTimeoutMs": 30000,
+        "methods": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE",
+          "HEAD"
+        ],
+        "safeFetch": {
+          "supported": true
+        }
+      },
+      "memory": {
+        "distillation": {
+          "supported": true,
+          "maxTokenBudget": 100000,
+          "scheduled": false,
+          "indexEmitted": true,
+          "tokenizerName": "claude",
+          "archiveRetention": "P30D"
+        }
+      },
+      "host.artifactTypes": {
+        "supported": true,
+        "store": true,
+        "render": false,
+        "export": []
+      },
+      "capabilities": {
+        "workflowChainPacks": {
+          "supported": true
+        },
+        "nodePackRuntimes": {
+          "wasm": {
+            "supported": true,
+            "abiVersions": [
+              1
+            ],
+            "maxMemoryBytes": 67108864,
+            "loadedPacks": [
+              "vendor.openwop.misbehaving",
+              "vendor.openwop.rust-hello"
+            ]
+          }
+        },
+        "feedback": {
+          "supported": true,
+          "targets": [
+            "run"
+          ],
+          "signals": [
+            "rating",
+            "correction",
+            "label",
+            "flag"
+          ]
+        },
+        "workspace": {
+          "supported": true,
+          "versioned": true,
+          "maxFileBytes": 1048576,
+          "maxFiles": 256,
+          "maxVersions": 20
+        },
+        "heartbeat": {
+          "supported": true,
+          "minIntervalSec": 1,
+          "maxRuntimeMs": 5000
+        },
+        "agents": {
+          "subRunAttestation": true
+        },
+        "toolHooks": {
+          "supported": true,
+          "prePostEvents": true,
+          "perToolAuthorization": true,
+          "perToolRateLimit": true
+        },
+        "httpClient": {
+          "supported": true,
+          "ssrfGuard": true,
+          "maxResponseBodyBytes": 10485760,
+          "requestTimeoutMs": 30000,
+          "methods": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD"
+          ],
+          "safeFetch": {
+            "supported": true
+          }
+        },
+        "memory": {
+          "distillation": {
+            "supported": true,
+            "maxTokenBudget": 100000,
+            "scheduled": false,
+            "indexEmitted": true,
+            "tokenizerName": "claude",
+            "archiveRetention": "P30D"
+          }
+        },
+        "host.artifactTypes": {
+          "supported": true,
+          "store": true,
+          "render": false,
+          "export": []
+        }
+      }
+    }
+  },
+  "claimedProfiles": [
+    "openwop-discovery-core",
+    "openwop-stream-sse",
+    "openwop-stream-poll",
+    "openwop-node-packs",
+    "openwop-fixtures"
+  ],
+  "aliases": [
+    "openwop-core"
+  ],
+  "results": {
+    "totals": {
+      "executedPass": 311,
+      "executedFail": 30,
+      "skipped": 0,
+      "inapplicable": 77,
+      "blocked": 43
+    },
+    "requirements": [
+      {
+        "requirementId": "openwop.scenario.a2a-1-0-agent-card",
+        "scenarioId": "a2a-1-0-agent-card.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 52
+      },
+      {
+        "requirementId": "openwop.scenario.a2a-1-0-task-roundtrip",
+        "scenarioId": "a2a-1-0-task-roundtrip.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.a2a-card-runtime-consistency",
+        "scenarioId": "a2a-card-runtime-consistency.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.a2a-peer-authority",
+        "scenarioId": "a2a-peer-authority.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.a2a-task-roundtrip",
+        "scenarioId": "a2a-task-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.a2a-version-negotiation",
+        "scenarioId": "a2a-version-negotiation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.a2ui-surface-degrades",
+        "scenarioId": "a2ui-surface-degrades.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.a2ui-surface-delta-transport",
+        "scenarioId": "a2ui-surface-delta-transport.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 20
+      },
+      {
+        "requirementId": "openwop.scenario.a2ui-surface-replay",
+        "scenarioId": "a2ui-surface-replay.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.a2ui-surface-shape",
+        "scenarioId": "a2ui-surface-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.a2ui-surface-version-refusal",
+        "scenarioId": "a2ui-surface-version-refusal.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.a2ui-untrusted-blocks-approval",
+        "scenarioId": "a2ui-untrusted-blocks-approval.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.agent-capability-degraded-projection",
+        "scenarioId": "agent-capability-degraded-projection.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-channel-dispatch",
+        "scenarioId": "agent-channel-dispatch.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-deployment-lifecycle",
+        "scenarioId": "agent-deployment-lifecycle.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-deployment-shape",
+        "scenarioId": "agent-deployment-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 28
+      },
+      {
+        "requirementId": "openwop.scenario.agent-eval-run",
+        "scenarioId": "agent-eval-run.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-eval-suite-shape",
+        "scenarioId": "agent-eval-suite-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 22
+      },
+      {
+        "requirementId": "openwop.scenario.agent-live-allowlist-enforced",
+        "scenarioId": "agent-live-allowlist-enforced.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-live-invocation-bracket",
+        "scenarioId": "agent-live-invocation-bracket.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-live-runtime-shape",
+        "scenarioId": "agent-live-runtime-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 13
+      },
+      {
+        "requirementId": "openwop.scenario.agent-live-structured-output",
+        "scenarioId": "agent-live-structured-output.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-loop-iteration-monotonic",
+        "scenarioId": "agent-loop-iteration-monotonic.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-loop-stateful-resume",
+        "scenarioId": "agent-loop-stateful-resume.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-loop-version5-shape",
+        "scenarioId": "agent-loop-version5-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-loop-workspace-snapshot",
+        "scenarioId": "agent-loop-workspace-snapshot.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-manifest-role-profile",
+        "scenarioId": "agent-manifest-role-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.agent-manifest-runtime",
+        "scenarioId": "agent-manifest-runtime.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-org-chart-scoping",
+        "scenarioId": "agent-org-chart-scoping.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-org-chart-shape",
+        "scenarioId": "agent-org-chart-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.agent-platform-aggregate-evidence",
+        "scenarioId": "agent-platform-aggregate-evidence.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-platform-profile",
+        "scenarioId": "agent-platform-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 19
+      },
+      {
+        "requirementId": "openwop.scenario.agent-requires-capabilities-shape",
+        "scenarioId": "agent-requires-capabilities-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.agent-roster-attribution",
+        "scenarioId": "agent-roster-attribution.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.agent-roster-shape",
+        "scenarioId": "agent-roster-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 18
+      },
+      {
+        "requirementId": "openwop.scenario.agent-verifier-shape",
+        "scenarioId": "agent-verifier-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.agentConfidenceEscalation",
+        "scenarioId": "agentConfidenceEscalation.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentMemoryCrossTenantIsolation",
+        "scenarioId": "agentMemoryCrossTenantIsolation.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentMemoryRedactionContract",
+        "scenarioId": "agentMemoryRedactionContract.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentMemoryRoundTrip",
+        "scenarioId": "agentMemoryRoundTrip.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentMemoryTtlExpiry",
+        "scenarioId": "agentMemoryTtlExpiry.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentMessageReducer",
+        "scenarioId": "agentMessageReducer.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentMetadata",
+        "scenarioId": "agentMetadata.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentPackCatalog",
+        "scenarioId": "agentPackCatalog.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentPackExport",
+        "scenarioId": "agentPackExport.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentPackHandoffSchemaValidation",
+        "scenarioId": "agentPackHandoffSchemaValidation.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentPackInstall",
+        "scenarioId": "agentPackInstall.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentPackProvenance",
+        "scenarioId": "agentPackProvenance.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentReasoningEvents",
+        "scenarioId": "agentReasoningEvents.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agentReasoningStreaming",
+        "scenarioId": "agentReasoningStreaming.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.agents-run-tool-allowlist",
+        "scenarioId": "agents-run-tool-allowlist.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.ai-envelope-shape",
+        "scenarioId": "ai-envelope-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.capBreached",
+        "scenarioId": "aiEnvelope.capBreached.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.contractRefusal",
+        "scenarioId": "aiEnvelope.contractRefusal.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.correlationReplay",
+        "scenarioId": "aiEnvelope.correlationReplay.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.redaction",
+        "scenarioId": "aiEnvelope.redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.schemaDrift",
+        "scenarioId": "aiEnvelope.schemaDrift.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.trustBoundaryPropagation",
+        "scenarioId": "aiEnvelope.trustBoundaryPropagation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiEnvelope.universalKinds",
+        "scenarioId": "aiEnvelope.universalKinds.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiproviders-input-shape",
+        "scenarioId": "aiproviders-input-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.aiproviders-realtimevoice-shape",
+        "scenarioId": "aiproviders-realtimevoice-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.aiproviders-selfhosted-honesty",
+        "scenarioId": "aiproviders-selfhosted-honesty.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.aiproviders-selfhosted-shape",
+        "scenarioId": "aiproviders-selfhosted-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.aiproviders-speechsynth-shape",
+        "scenarioId": "aiproviders-speechsynth-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.aiproviders-subscription-scope",
+        "scenarioId": "aiproviders-subscription-scope.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.anonymous-actor-audit-opaque",
+        "scenarioId": "anonymous-actor-audit-opaque.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.anonymous-actor-default-deny",
+        "scenarioId": "anonymous-actor-default-deny.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.anonymous-actor-egress-guarded",
+        "scenarioId": "anonymous-actor-egress-guarded.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.anonymous-actor-no-secret-reach",
+        "scenarioId": "anonymous-actor-no-secret-reach.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.anonymous-actor-shape",
+        "scenarioId": "anonymous-actor-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 19
+      },
+      {
+        "requirementId": "openwop.scenario.anonymous-actor-write-gated",
+        "scenarioId": "anonymous-actor-write-gated.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.append-ordering",
+        "scenarioId": "append-ordering.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.approval-gate-events",
+        "scenarioId": "approval-gate-events.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.approval-gate-flow",
+        "scenarioId": "approval-gate-flow.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.approval-payload",
+        "scenarioId": "approval-payload.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-auth",
+        "scenarioId": "artifact-auth.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-schema-compile-bounded",
+        "scenarioId": "artifact-schema-compile-bounded.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-type-legacy-ids",
+        "scenarioId": "artifact-type-legacy-ids.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 12
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-type-pack-install",
+        "scenarioId": "artifact-type-pack-install.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-type-pack-manifest-validation",
+        "scenarioId": "artifact-type-pack-manifest-validation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 15
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-type-registration-source",
+        "scenarioId": "artifact-type-registration-source.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 14
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-type-store-emission",
+        "scenarioId": "artifact-type-store-emission.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.artifact-type-store-without-render",
+        "scenarioId": "artifact-type-store-without-render.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.audit-log-integrity",
+        "scenarioId": "audit-log-integrity.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.auth-api-key-rotation",
+        "scenarioId": "auth-api-key-rotation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.auth-mtls",
+        "scenarioId": "auth-mtls.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.auth-oauth2-client-credentials",
+        "scenarioId": "auth-oauth2-client-credentials.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.auth-oidc-user-bearer",
+        "scenarioId": "auth-oidc-user-bearer.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.auth-saml-profile",
+        "scenarioId": "auth-saml-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 14
+      },
+      {
+        "requirementId": "openwop.scenario.auth-scim-profile",
+        "scenarioId": "auth-scim-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.floor.auth",
+        "scenarioId": "auth.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.authorization-fail-closed",
+        "scenarioId": "authorization-fail-closed.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.authorization-roles-shape",
+        "scenarioId": "authorization-roles-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.blob-cross-tenant-isolation",
+        "scenarioId": "blob-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.blob-presign-expiry",
+        "scenarioId": "blob-presign-expiry.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.blob-roundtrip",
+        "scenarioId": "blob-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.budget-enforcement",
+        "scenarioId": "budget-enforcement.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.budget-policy-shape",
+        "scenarioId": "budget-policy-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 39
+      },
+      {
+        "requirementId": "openwop.scenario.bulk-cancel",
+        "scenarioId": "bulk-cancel.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.byok-auth-modes",
+        "scenarioId": "byok-auth-modes.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.byok-roundtrip",
+        "scenarioId": "byok-roundtrip.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.cache-cross-tenant-isolation",
+        "scenarioId": "cache-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cache-ttl-expiry",
+        "scenarioId": "cache-ttl-expiry.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.callai-multimodal",
+        "scenarioId": "callai-multimodal.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cancellation",
+        "scenarioId": "cancellation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.cap-breach",
+        "scenarioId": "cap-breach.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.capability-arm-witness",
+        "scenarioId": "capability-arm-witness.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.capability-example-root-layout",
+        "scenarioId": "capability-example-root-layout.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.certification-bundle-non-vacuous",
+        "scenarioId": "certification-bundle-non-vacuous.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 40
+      },
+      {
+        "requirementId": "openwop.scenario.certification-bundle-redaction",
+        "scenarioId": "certification-bundle-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 28
+      },
+      {
+        "requirementId": "openwop.scenario.certification-bundle-v2",
+        "scenarioId": "certification-bundle-v2.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 17
+      },
+      {
+        "requirementId": "openwop.scenario.certification-floor-enforcement",
+        "scenarioId": "certification-floor-enforcement.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 31
+      },
+      {
+        "requirementId": "openwop.scenario.chain-compensation-expansion",
+        "scenarioId": "chain-compensation-expansion.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 37
+      },
+      {
+        "requirementId": "openwop.scenario.chain-produced-var-roundtrip",
+        "scenarioId": "chain-produced-var-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 12
+      },
+      {
+        "requirementId": "openwop.scenario.chain-subchain-cycle-rejected",
+        "scenarioId": "chain-subchain-cycle-rejected.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.chain-subchain-fanout",
+        "scenarioId": "chain-subchain-fanout.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.chain-subchain-sibling",
+        "scenarioId": "chain-subchain-sibling.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 15
+      },
+      {
+        "requirementId": "openwop.scenario.chain-subchain-unsupported-refused",
+        "scenarioId": "chain-subchain-unsupported-refused.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.channel-presence-behavioral",
+        "scenarioId": "channel-presence-behavioral.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.channel-presence-shape",
+        "scenarioId": "channel-presence-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.channel-ttl",
+        "scenarioId": "channel-ttl.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.chat-card-pack-execution",
+        "scenarioId": "chat-card-pack-execution.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.chat-card-pack-manifest-validation",
+        "scenarioId": "chat-card-pack-manifest-validation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 20
+      },
+      {
+        "requirementId": "openwop.scenario.commitment-fired",
+        "scenarioId": "commitment-fired.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.compensation-behavior",
+        "scenarioId": "compensation-behavior.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.compensation-profile",
+        "scenarioId": "compensation-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 54
+      },
+      {
+        "requirementId": "openwop.scenario.configurable-schema",
+        "scenarioId": "configurable-schema.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.connection-pack-apihosts",
+        "scenarioId": "connection-pack-apihosts.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 26
+      },
+      {
+        "requirementId": "openwop.scenario.connection-pack-manifest-valid",
+        "scenarioId": "connection-pack-manifest-valid.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 15
+      },
+      {
+        "requirementId": "openwop.scenario.connection-pack-no-credential-material",
+        "scenarioId": "connection-pack-no-credential-material.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 32
+      },
+      {
+        "requirementId": "openwop.scenario.connection-pack-reach-exclusive",
+        "scenarioId": "connection-pack-reach-exclusive.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.connection-pack-write-reconsent",
+        "scenarioId": "connection-pack-write-reconsent.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.connection-provider-resolution",
+        "scenarioId": "connection-provider-resolution.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.connector-manifest-validity",
+        "scenarioId": "connector-manifest-validity.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.context-budget-transcript-bound",
+        "scenarioId": "context-budget-transcript-bound.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.context-summarization-replay",
+        "scenarioId": "context-summarization-replay.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.contract-provenance",
+        "scenarioId": "contract-provenance.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.conversation-turn-model-provenance-shape",
+        "scenarioId": "conversation-turn-model-provenance-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 13
+      },
+      {
+        "requirementId": "openwop.scenario.conversationCapabilityNegotiation",
+        "scenarioId": "conversationCapabilityNegotiation.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.conversationLifecycle",
+        "scenarioId": "conversationLifecycle.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.conversationReplayDeterminism",
+        "scenarioId": "conversationReplayDeterminism.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.conversationVsLegacySuspend",
+        "scenarioId": "conversationVsLegacySuspend.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.core-manifest-and-extension-registry",
+        "scenarioId": "core-manifest-and-extension-registry.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 163
+      },
+      {
+        "requirementId": "openwop.scenario.core-standard-profile",
+        "scenarioId": "core-standard-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.cost-attribution",
+        "scenarioId": "cost-attribution.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.credential-payload-redaction",
+        "scenarioId": "credential-payload-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.credentials-capability-shape",
+        "scenarioId": "credentials-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cross-engine-append-behavior",
+        "scenarioId": "cross-engine-append-behavior.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cross-engine-append-ordering",
+        "scenarioId": "cross-engine-append-ordering.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cross-host-ancestry-endpoint",
+        "scenarioId": "cross-host-ancestry-endpoint.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cross-host-causation-shape",
+        "scenarioId": "cross-host-causation-shape.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.cross-host-traceparent-propagation",
+        "scenarioId": "cross-host-traceparent-propagation.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.cross-workspace-isolation",
+        "scenarioId": "cross-workspace-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.data-residency-admission",
+        "scenarioId": "data-residency-admission.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.deadletter-capability-shape",
+        "scenarioId": "deadletter-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.deadletter-retry-exhaustion",
+        "scenarioId": "deadletter-retry-exhaustion.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.debug-bundle-truncation",
+        "scenarioId": "debug-bundle-truncation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.debugBundle",
+        "scenarioId": "debugBundle.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 23
+      },
+      {
+        "requirementId": "openwop.scenario.discovery-canonical-family-no-shadow",
+        "scenarioId": "discovery-canonical-family-no-shadow.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.floor.discovery",
+        "scenarioId": "discovery.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 192
+      },
+      {
+        "requirementId": "openwop.scenario.dispatch-cross-worker-handoff",
+        "scenarioId": "dispatch-cross-worker-handoff.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.dispatch-fanout-parallel",
+        "scenarioId": "dispatch-fanout-parallel.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 17
+      },
+      {
+        "requirementId": "openwop.scenario.dispatch-input-mapping",
+        "scenarioId": "dispatch-input-mapping.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.dispatch-output-mapping",
+        "scenarioId": "dispatch-output-mapping.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.dispatch-per-item-input",
+        "scenarioId": "dispatch-per-item-input.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.dispatchLoop",
+        "scenarioId": "dispatchLoop.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.distillation-index-roundtrip",
+        "scenarioId": "distillation-index-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.distillation-secret-carryforward",
+        "scenarioId": "distillation-secret-carryforward.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.distillation-shape",
+        "scenarioId": "distillation-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.distillation-stable-archive",
+        "scenarioId": "distillation-stable-archive.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.distillation-token-budget",
+        "scenarioId": "distillation-token-budget.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.edge-condition-truthy-falsy",
+        "scenarioId": "edge-condition-truthy-falsy.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.effect-identity-composition",
+        "scenarioId": "effect-identity-composition.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.effect-identity-cross-scope",
+        "scenarioId": "effect-identity-cross-scope.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.egress-audience-binding",
+        "scenarioId": "egress-audience-binding.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.egress-decision-content-free",
+        "scenarioId": "egress-decision-content-free.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.egress-provenance-shape",
+        "scenarioId": "egress-provenance-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 27
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-completion-distinguishes-truncation",
+        "scenarioId": "envelope-completion-distinguishes-truncation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-nl-to-format-engaged",
+        "scenarioId": "envelope-nl-to-format-engaged.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-reasoning-secret-redaction",
+        "scenarioId": "envelope-reasoning-secret-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-reasoning-shape",
+        "scenarioId": "envelope-reasoning-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-recovery-applied",
+        "scenarioId": "envelope-recovery-applied.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-refusal-shape",
+        "scenarioId": "envelope-refusal-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-rendering-hint",
+        "scenarioId": "envelope-rendering-hint.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-retry-attempted",
+        "scenarioId": "envelope-retry-attempted.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-retry-exhausted",
+        "scenarioId": "envelope-retry-exhausted.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-tier-one-subset-static",
+        "scenarioId": "envelope-tier-one-subset-static.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-truncated",
+        "scenarioId": "envelope-truncated.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-truncation-cap-exhaustion",
+        "scenarioId": "envelope-truncation-cap-exhaustion.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.envelope-variant-discriminator-static",
+        "scenarioId": "envelope-variant-discriminator-static.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 17
+      },
+      {
+        "requirementId": "openwop.scenario.errors",
+        "scenarioId": "errors.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 14
+      },
+      {
+        "requirementId": "openwop.floor.eventOrdering",
+        "scenarioId": "eventOrdering.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 14
+      },
+      {
+        "requirementId": "openwop.scenario.exec-not-protocol-tier",
+        "scenarioId": "exec-not-protocol-tier.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.experimental-tier-shape",
+        "scenarioId": "experimental-tier-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.export-bundle-portability",
+        "scenarioId": "export-bundle-portability.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 30
+      },
+      {
+        "requirementId": "openwop.floor.failure-path",
+        "scenarioId": "failure-path.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-capability-shape",
+        "scenarioId": "feedback-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-correction-redaction",
+        "scenarioId": "feedback-correction-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-cross-tenant-isolation",
+        "scenarioId": "feedback-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-fork-not-copied",
+        "scenarioId": "feedback-fork-not-copied.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-on-terminal-run",
+        "scenarioId": "feedback-on-terminal-run.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-record-and-list",
+        "scenarioId": "feedback-record-and-list.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.feedback-unsupported-501",
+        "scenarioId": "feedback-unsupported-501.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.fixtures-gating",
+        "scenarioId": "fixtures-gating.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 61
+      },
+      {
+        "requirementId": "openwop.scenario.fixtures-valid",
+        "scenarioId": "fixtures-valid.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 294
+      },
+      {
+        "requirementId": "openwop.scenario.form-content-instantiation",
+        "scenarioId": "form-content-instantiation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.form-content-packs",
+        "scenarioId": "form-content-packs.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 72
+      },
+      {
+        "requirementId": "openwop.scenario.frontend-plugin-packs",
+        "scenarioId": "frontend-plugin-packs.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.fs-path-traversal",
+        "scenarioId": "fs-path-traversal.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.goal-standing-continuation",
+        "scenarioId": "goal-standing-continuation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 15
+      },
+      {
+        "requirementId": "openwop.scenario.grpc-framing",
+        "scenarioId": "grpc-framing.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 28
+      },
+      {
+        "requirementId": "openwop.scenario.grpc-transport",
+        "scenarioId": "grpc-transport.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.heartbeat-capability-shape",
+        "scenarioId": "heartbeat-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.heartbeat-fires-once-per-tick",
+        "scenarioId": "heartbeat-fires-once-per-tick.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.heartbeat-idempotent-no-spam",
+        "scenarioId": "heartbeat-idempotent-no-spam.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.heartbeat-runtime-bound",
+        "scenarioId": "heartbeat-runtime-bound.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.highConcurrency",
+        "scenarioId": "highConcurrency.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.host-callback-declaration",
+        "scenarioId": "host-callback-declaration.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.http-client-ssrf",
+        "scenarioId": "http-client-ssrf.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.i18n-negotiation",
+        "scenarioId": "i18n-negotiation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.floor.idempotency-key-determinism",
+        "scenarioId": "idempotency-key-determinism.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.floor.idempotency",
+        "scenarioId": "idempotency.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.idempotencyRetry",
+        "scenarioId": "idempotencyRetry.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 12
+      },
+      {
+        "requirementId": "openwop.scenario.identity-owner-shape",
+        "scenarioId": "identity-owner-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.identity-passthrough",
+        "scenarioId": "identity-passthrough.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-approval",
+        "scenarioId": "interrupt-approval.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-approver-routing",
+        "scenarioId": "interrupt-approver-routing.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 12
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-auth-required-resume",
+        "scenarioId": "interrupt-auth-required-resume.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-clarification",
+        "scenarioId": "interrupt-clarification.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-external-event-correlation",
+        "scenarioId": "interrupt-external-event-correlation.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-parent-child-cascade",
+        "scenarioId": "interrupt-parent-child-cascade.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-quorum-resolution",
+        "scenarioId": "interrupt-quorum-resolution.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.interrupt-token-matrix",
+        "scenarioId": "interrupt-token-matrix.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.interruptRace",
+        "scenarioId": "interruptRace.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.kv-atomic-increment",
+        "scenarioId": "kv-atomic-increment.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.kv-cas",
+        "scenarioId": "kv-cas.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.kv-cross-tenant-isolation",
+        "scenarioId": "kv-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.kv-ttl-expiry",
+        "scenarioId": "kv-ttl-expiry.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.localized-content-delivery",
+        "scenarioId": "localized-content-delivery.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 24
+      },
+      {
+        "requirementId": "openwop.scenario.maliciousManifest",
+        "scenarioId": "maliciousManifest.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-2026-07-28-discover",
+        "scenarioId": "mcp-2026-07-28-discover.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 38
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-cache-tenant-scope",
+        "scenarioId": "mcp-cache-tenant-scope.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-current-auth-boundary",
+        "scenarioId": "mcp-current-auth-boundary.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-discoverability",
+        "scenarioId": "mcp-discoverability.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-extension-opacity",
+        "scenarioId": "mcp-extension-opacity.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-mrtr-roundtrip",
+        "scenarioId": "mcp-mrtr-roundtrip.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-server-elicitation-bridge",
+        "scenarioId": "mcp-server-elicitation-bridge.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-server-prompt-roundtrip",
+        "scenarioId": "mcp-server-prompt-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-server-resource-roundtrip",
+        "scenarioId": "mcp-server-resource-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-server-sampling-bridge",
+        "scenarioId": "mcp-server-sampling-bridge.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-server-tool-roundtrip",
+        "scenarioId": "mcp-server-tool-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-server-untrusted-args",
+        "scenarioId": "mcp-server-untrusted-args.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-stateless-request",
+        "scenarioId": "mcp-stateless-request.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-tool-roundtrip",
+        "scenarioId": "mcp-tool-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-toolcall-redaction",
+        "scenarioId": "mcp-toolcall-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.mcp-version-negotiation",
+        "scenarioId": "mcp-version-negotiation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.media-url-inline-cap",
+        "scenarioId": "media-url-inline-cap.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.memory-attribution-emits-on-write",
+        "scenarioId": "memory-attribution-emits-on-write.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.memory-attribution-no-content",
+        "scenarioId": "memory-attribution-no-content.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-attribution-replay-stable",
+        "scenarioId": "memory-attribution-replay-stable.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-attribution-shape",
+        "scenarioId": "memory-attribution-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-attribution-tenant-scoped",
+        "scenarioId": "memory-attribution-tenant-scoped.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-capability-model-shape",
+        "scenarioId": "memory-capability-model-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 18
+      },
+      {
+        "requirementId": "openwop.scenario.memory-compaction-event-emitted",
+        "scenarioId": "memory-compaction-event-emitted.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-compaction-provenance-tag",
+        "scenarioId": "memory-compaction-provenance-tag.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-compaction-sr1-carry-forward",
+        "scenarioId": "memory-compaction-sr1-carry-forward.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-consolidation-idempotent",
+        "scenarioId": "memory-consolidation-idempotent.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-consolidation-shape",
+        "scenarioId": "memory-consolidation-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.memory-degraded-projection",
+        "scenarioId": "memory-degraded-projection.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.memory-injection-budget",
+        "scenarioId": "memory-injection-budget.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.metric-emission",
+        "scenarioId": "metric-emission.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.model-capability-insufficient",
+        "scenarioId": "model-capability-insufficient.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.model-capability-substituted",
+        "scenarioId": "model-capability-substituted.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.multi-agent-confidence-escalation",
+        "scenarioId": "multi-agent-confidence-escalation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.multi-agent-handoff-state-machine",
+        "scenarioId": "multi-agent-handoff-state-machine.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.multi-agent-memory-lifecycle",
+        "scenarioId": "multi-agent-memory-lifecycle.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.multi-node-ordering",
+        "scenarioId": "multi-node-ordering.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.multi-party-conversation-behavioral",
+        "scenarioId": "multi-party-conversation-behavioral.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.multi-party-conversation-shape",
+        "scenarioId": "multi-party-conversation-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 20
+      },
+      {
+        "requirementId": "openwop.scenario.multi-region-effect-vocabulary",
+        "scenarioId": "multi-region-effect-vocabulary.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.scenario.multi-region-idempotency-behavior",
+        "scenarioId": "multi-region-idempotency-behavior.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.multi-region-idempotency",
+        "scenarioId": "multi-region-idempotency.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.node-module-required-capabilities-shape",
+        "scenarioId": "node-module-required-capabilities-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.normative-example-extraction",
+        "scenarioId": "normative-example-extraction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.oauth-authorization-code-roundtrip",
+        "scenarioId": "oauth-authorization-code-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.oauth-capability-shape",
+        "scenarioId": "oauth-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.oauth-connector-redaction",
+        "scenarioId": "oauth-connector-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.oidc-issuer",
+        "scenarioId": "oidc-issuer.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 46
+      },
+      {
+        "requirementId": "openwop.scenario.openapi-asyncapi-sdk-parity",
+        "scenarioId": "openapi-asyncapi-sdk-parity.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 193
+      },
+      {
+        "requirementId": "openwop.scenario.openapi-resolved-paths",
+        "scenarioId": "openapi-resolved-paths.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.orchestratorConservativePath",
+        "scenarioId": "orchestratorConservativePath.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.orchestratorDispatch",
+        "scenarioId": "orchestratorDispatch.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.orchestratorTermination",
+        "scenarioId": "orchestratorTermination.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.org-position-no-authority-escalation",
+        "scenarioId": "org-position-no-authority-escalation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.otel-collector-canary-inspection",
+        "scenarioId": "otel-collector-canary-inspection.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 19
+      },
+      {
+        "requirementId": "openwop.scenario.otel-collector-grpc",
+        "scenarioId": "otel-collector-grpc.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.otel-collector",
+        "scenarioId": "otel-collector.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 25
+      },
+      {
+        "requirementId": "openwop.scenario.otel-emission-grpc",
+        "scenarioId": "otel-emission-grpc.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.otel-emission",
+        "scenarioId": "otel-emission.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.otel-trace-propagation-subworkflow",
+        "scenarioId": "otel-trace-propagation-subworkflow.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.otel-trace-propagation",
+        "scenarioId": "otel-trace-propagation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.otlp-protobuf",
+        "scenarioId": "otlp-protobuf.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 31
+      },
+      {
+        "requirementId": "openwop.scenario.pack-manifest-extension-opacity",
+        "scenarioId": "pack-manifest-extension-opacity.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.pack-manifest-extensions",
+        "scenarioId": "pack-manifest-extensions.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 51
+      },
+      {
+        "requirementId": "openwop.scenario.pack-registry-isolation",
+        "scenarioId": "pack-registry-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.floor.pack-registry-publish",
+        "scenarioId": "pack-registry-publish.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.floor.pack-registry",
+        "scenarioId": "pack-registry.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.pause-resume",
+        "scenarioId": "pause-resume.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.policies",
+        "scenarioId": "policies.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.production-backpressure",
+        "scenarioId": "production-backpressure.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.production-retention-expiry",
+        "scenarioId": "production-retention-expiry.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.profile-discovery-core-alias",
+        "scenarioId": "profile-discovery-core-alias.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 31
+      },
+      {
+        "requirementId": "openwop.scenario.profileDerivation",
+        "scenarioId": "profileDerivation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 56
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-all-four-kinds-events",
+        "scenarioId": "prompt-all-four-kinds-events.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-composed-secret-redaction",
+        "scenarioId": "prompt-composed-secret-redaction.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-composed-trust-marker",
+        "scenarioId": "prompt-composed-trust-marker.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-end-to-end-events",
+        "scenarioId": "prompt-end-to-end-events.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-list-and-fetch",
+        "scenarioId": "prompt-list-and-fetch.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-mutable-lifecycle",
+        "scenarioId": "prompt-mutable-lifecycle.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-mutation-workspace-membership-enforced",
+        "scenarioId": "prompt-mutation-workspace-membership-enforced.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-pack-install",
+        "scenarioId": "prompt-pack-install.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-prefix-cache",
+        "scenarioId": "prompt-prefix-cache.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-read-workspace-membership-enforced",
+        "scenarioId": "prompt-read-workspace-membership-enforced.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-render-deterministic",
+        "scenarioId": "prompt-render-deterministic.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-resolution-chain-agent-intrinsic",
+        "scenarioId": "prompt-resolution-chain-agent-intrinsic.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-resolution-chain-event",
+        "scenarioId": "prompt-resolution-chain-event.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-resolution-chain-fallback-cascade",
+        "scenarioId": "prompt-resolution-chain-fallback-cascade.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-resolution-chain-node-wins",
+        "scenarioId": "prompt-resolution-chain-node-wins.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.prompt-template-shape",
+        "scenarioId": "prompt-template-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 22
+      },
+      {
+        "requirementId": "openwop.scenario.proposal-reviewable-learning",
+        "scenarioId": "proposal-reviewable-learning.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.protocol-version-grammar",
+        "scenarioId": "protocol-version-grammar.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 26
+      },
+      {
+        "requirementId": "openwop.scenario.provider-usage",
+        "scenarioId": "provider-usage.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.providerPolicyEnforcement",
+        "scenarioId": "providerPolicyEnforcement.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.purpose-propagation",
+        "scenarioId": "purpose-propagation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.queue-ack-nack-dlq",
+        "scenarioId": "queue-ack-nack-dlq.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.queue-cross-tenant-isolation",
+        "scenarioId": "queue-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.queue-publish-consume-roundtrip",
+        "scenarioId": "queue-publish-consume-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.rate-limit-envelope",
+        "scenarioId": "rate-limit-envelope.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.redaction",
+        "scenarioId": "redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.redactionAdversarial",
+        "scenarioId": "redactionAdversarial.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 12
+      },
+      {
+        "requirementId": "openwop.scenario.registry-declarative-kinds",
+        "scenarioId": "registry-declarative-kinds.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 13
+      },
+      {
+        "requirementId": "openwop.scenario.registry-public",
+        "scenarioId": "registry-public.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-divergence-at-refusal",
+        "scenarioId": "replay-divergence-at-refusal.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-fork-arbitrary",
+        "scenarioId": "replay-fork-arbitrary.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-fork",
+        "scenarioId": "replay-fork.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-llm-cache-key-portable",
+        "scenarioId": "replay-llm-cache-key-portable.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-llm-cache-key",
+        "scenarioId": "replay-llm-cache-key.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-observable-sequence-determinism",
+        "scenarioId": "replay-observable-sequence-determinism.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-retention-expiry",
+        "scenarioId": "replay-retention-expiry.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.replay-side-effect-suppression",
+        "scenarioId": "replay-side-effect-suppression.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.replayDeterminism",
+        "scenarioId": "replayDeterminism.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.requirement-ledger",
+        "scenarioId": "requirement-ledger.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 28
+      },
+      {
+        "requirementId": "openwop.scenario.restart-during-run",
+        "scenarioId": "restart-during-run.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.rfc-0147-self-audit",
+        "scenarioId": "rfc-0147-self-audit.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.rfc-lifecycle-coherence",
+        "scenarioId": "rfc-lifecycle-coherence.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.route-coverage",
+        "scenarioId": "route-coverage.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 26
+      },
+      {
+        "requirementId": "openwop.scenario.run-diff",
+        "scenarioId": "run-diff.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.run-execution-bounds-shape",
+        "scenarioId": "run-execution-bounds-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 9
+      },
+      {
+        "requirementId": "openwop.scenario.run-transport-economy",
+        "scenarioId": "run-transport-economy.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.runner-ledger",
+        "scenarioId": "runner-ledger.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 68
+      },
+      {
+        "requirementId": "openwop.floor.runs-lifecycle",
+        "scenarioId": "runs-lifecycle.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.runtime-capabilities",
+        "scenarioId": "runtime-capabilities.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.runtime-requires-install-gate",
+        "scenarioId": "runtime-requires-install-gate.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.runtime-requires-shape",
+        "scenarioId": "runtime-requires-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 15
+      },
+      {
+        "requirementId": "openwop.scenario.safefetch-behavior",
+        "scenarioId": "safefetch-behavior.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.safefetch-live-audit",
+        "scenarioId": "safefetch-live-audit.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-capability-gate-respected",
+        "scenarioId": "sandbox-capability-gate-respected.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-memory-cap",
+        "scenarioId": "sandbox-memory-cap.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-mvp-behavior",
+        "scenarioId": "sandbox-mvp-behavior.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-no-cross-pack-mutation",
+        "scenarioId": "sandbox-no-cross-pack-mutation.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-no-host-env-leak",
+        "scenarioId": "sandbox-no-host-env-leak.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-no-host-fs-escape",
+        "scenarioId": "sandbox-no-host-fs-escape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-no-host-process-escape",
+        "scenarioId": "sandbox-no-host-process-escape.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-no-network-escape",
+        "scenarioId": "sandbox-no-network-escape.test.ts",
+        "disposition": "blocked",
+        "detail": "unclassified return: the file recorded no disposition — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-timeout-cap",
+        "scenarioId": "sandbox-timeout-cap.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-wasm-isolation",
+        "scenarioId": "sandbox-wasm-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 20
+      },
+      {
+        "requirementId": "openwop.scenario.sandbox-wasm-timeout",
+        "scenarioId": "sandbox-wasm-timeout.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.scheduling-capability-shape",
+        "scenarioId": "scheduling-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.scheduling-cron-fires-once",
+        "scenarioId": "scheduling-cron-fires-once.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.search-bm25-roundtrip",
+        "scenarioId": "search-bm25-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.secret-leakage-otel-attribute",
+        "scenarioId": "secret-leakage-otel-attribute.test.ts",
+        "disposition": "blocked",
+        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.self-hosted-runner",
+        "scenarioId": "self-hosted-runner.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 22
+      },
+      {
+        "requirementId": "openwop.scenario.semantic-digest-v2",
+        "scenarioId": "semantic-digest-v2.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 12
+      },
+      {
+        "requirementId": "openwop.scenario.semantic-digest-vectors",
+        "scenarioId": "semantic-digest-vectors.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 43
+      },
+      {
+        "requirementId": "openwop.scenario.spec-corpus-validity",
+        "scenarioId": "spec-corpus-validity.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 5826
+      },
+      {
+        "requirementId": "openwop.scenario.speech-synthesis-roundtrip",
+        "scenarioId": "speech-synthesis-roundtrip.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.speech-synthesis-unadvertised",
+        "scenarioId": "speech-synthesis-unadvertised.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sql-injection-rejection",
+        "scenarioId": "sql-injection-rejection.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.sql-transaction-atomicity",
+        "scenarioId": "sql-transaction-atomicity.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.staleClaim",
+        "scenarioId": "staleClaim.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.floor.stream-modes-buffer",
+        "scenarioId": "stream-modes-buffer.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.floor.stream-modes-mixed",
+        "scenarioId": "stream-modes-mixed.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 10
+      },
+      {
+        "requirementId": "openwop.floor.stream-modes",
+        "scenarioId": "stream-modes.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.stream-subscribe-from-beginning",
+        "scenarioId": "stream-subscribe-from-beginning.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.stream-text-fixture",
+        "scenarioId": "stream-text-fixture.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.streamReconnect",
+        "scenarioId": "streamReconnect.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.strict-behavior-gate",
+        "scenarioId": "strict-behavior-gate.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.subrun-approval-fail-closed",
+        "scenarioId": "subrun-approval-fail-closed.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.subrun-approval-gate",
+        "scenarioId": "subrun-approval-gate.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.subrun-attestation-shape",
+        "scenarioId": "subrun-attestation-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.subrun-checksum-stable",
+        "scenarioId": "subrun-checksum-stable.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.subworkflow-input-mapping",
+        "scenarioId": "subworkflow-input-mapping.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.subworkflow",
+        "scenarioId": "subworkflow.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.table-cross-tenant-isolation",
+        "scenarioId": "table-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.table-cursor-pagination",
+        "scenarioId": "table-cursor-pagination.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.table-schema-enforcement",
+        "scenarioId": "table-schema-enforcement.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.test-seam-unauthenticated",
+        "scenarioId": "test-seam-unauthenticated.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.tool-catalog-compact-projection",
+        "scenarioId": "tool-catalog-compact-projection.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.tool-catalog-projection",
+        "scenarioId": "tool-catalog-projection.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.tool-descriptor-shape",
+        "scenarioId": "tool-descriptor-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 16
+      },
+      {
+        "requirementId": "openwop.scenario.tool-hooks-authorization-fail-closed",
+        "scenarioId": "tool-hooks-authorization-fail-closed.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.tool-hooks-content-free",
+        "scenarioId": "tool-hooks-content-free.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.tool-hooks-rate-limit",
+        "scenarioId": "tool-hooks-rate-limit.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.tool-hooks-secret-redaction",
+        "scenarioId": "tool-hooks-secret-redaction.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 1
+      },
+      {
+        "requirementId": "openwop.scenario.tool-hooks-shape",
+        "scenarioId": "tool-hooks-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.tool-result-trust-monotone",
+        "scenarioId": "tool-result-trust-monotone.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 22
+      },
+      {
+        "requirementId": "openwop.scenario.tool-session-lifecycle",
+        "scenarioId": "tool-session-lifecycle.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.trigger-bridge-delivery",
+        "scenarioId": "trigger-bridge-delivery.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.trigger-bridge-shape",
+        "scenarioId": "trigger-bridge-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 19
+      },
+      {
+        "requirementId": "openwop.scenario.trigger-ingestion",
+        "scenarioId": "trigger-ingestion.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 20
+      },
+      {
+        "requirementId": "openwop.scenario.trigger-stream-cdc-sources",
+        "scenarioId": "trigger-stream-cdc-sources.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 11
+      },
+      {
+        "requirementId": "openwop.scenario.vector-knn-roundtrip",
+        "scenarioId": "vector-knn-roundtrip.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.verifier-gating",
+        "scenarioId": "verifier-gating.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.version-fold",
+        "scenarioId": "version-fold.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.version-negotiation",
+        "scenarioId": "version-negotiation.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 42
+      },
+      {
+        "requirementId": "openwop.scenario.versioned-composition-profiles",
+        "scenarioId": "versioned-composition-profiles.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 20
+      },
+      {
+        "requirementId": "openwop.scenario.voice-bargein-no-partial-leak",
+        "scenarioId": "voice-bargein-no-partial-leak.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.voice-event-payloads-shape",
+        "scenarioId": "voice-event-payloads-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 31
+      },
+      {
+        "requirementId": "openwop.scenario.voice-interim-not-durable",
+        "scenarioId": "voice-interim-not-durable.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.voice-streamref-tenant-bound",
+        "scenarioId": "voice-streamref-tenant-bound.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.voice-synthesis-streaming",
+        "scenarioId": "voice-synthesis-streaming.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.voice-transcription-streaming",
+        "scenarioId": "voice-transcription-streaming.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.voice-transcription-unadvertised",
+        "scenarioId": "voice-transcription-unadvertised.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.wasm-pack-abi-version-rejection",
+        "scenarioId": "wasm-pack-abi-version-rejection.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.wasm-pack-invoke-completed",
+        "scenarioId": "wasm-pack-invoke-completed.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.wasm-pack-invoke-suspended",
+        "scenarioId": "wasm-pack-invoke-suspended.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 2
+      },
+      {
+        "requirementId": "openwop.scenario.wasm-pack-load",
+        "scenarioId": "wasm-pack-load.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 3
+      },
+      {
+        "requirementId": "openwop.scenario.wasm-pack-memory-cap",
+        "scenarioId": "wasm-pack-memory-cap.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.wasm-pack-replay-determinism",
+        "scenarioId": "wasm-pack-replay-determinism.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.floor.webhook-negative",
+        "scenarioId": "webhook-negative.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.webhook-receiver-adversarial",
+        "scenarioId": "webhook-receiver-adversarial.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 14
+      },
+      {
+        "requirementId": "openwop.scenario.webhook-sig-algorithm",
+        "scenarioId": "webhook-sig-algorithm.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.webhook-signed-delivery",
+        "scenarioId": "webhook-signed-delivery.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.webhook-tenant-isolation",
+        "scenarioId": "webhook-tenant-isolation.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-deferred-parameters",
+        "scenarioId": "workflow-chain-deferred-parameters.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 24
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-expansion",
+        "scenarioId": "workflow-chain-expansion.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 41
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-host-expansion",
+        "scenarioId": "workflow-chain-host-expansion.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-internal-flag",
+        "scenarioId": "workflow-chain-internal-flag.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-pack-manifest-validation",
+        "scenarioId": "workflow-chain-pack-manifest-validation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-pack-signature-verification",
+        "scenarioId": "workflow-chain-pack-signature-verification.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-chain-unresolvable-typeid",
+        "scenarioId": "workflow-chain-unresolvable-typeid.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 8
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-primary-output-annotation",
+        "scenarioId": "workflow-primary-output-annotation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 7
+      },
+      {
+        "requirementId": "openwop.scenario.workflow-variable-format",
+        "scenarioId": "workflow-variable-format.test.ts",
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 13
+      },
+      {
+        "requirementId": "openwop.scenario.workload-identity-behavior",
+        "scenarioId": "workload-identity-behavior.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.workload-identity-profile",
+        "scenarioId": "workload-identity-profile.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 18
+      },
+      {
+        "requirementId": "openwop.scenario.workspace-behavior",
+        "scenarioId": "workspace-behavior.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 17
+      },
+      {
+        "requirementId": "openwop.scenario.workspace-capability-shape",
+        "scenarioId": "workspace-capability-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 4
+      },
+      {
+        "requirementId": "openwop.scenario.workspace-cross-tenant-isolation-blackbox",
+        "scenarioId": "workspace-cross-tenant-isolation-blackbox.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 0
+      },
+      {
+        "requirementId": "openwop.scenario.workspace-cross-tenant-isolation",
+        "scenarioId": "workspace-cross-tenant-isolation.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 6
+      },
+      {
+        "requirementId": "openwop.scenario.x-openwop-form-pack-manifest",
+        "scenarioId": "x-openwop-form-pack-manifest.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 14
+      },
+      {
+        "requirementId": "openwop.floor.any.interrupt-",
+        "scenarioId": "interrupt-*",
+        "disposition": "executed-pass",
+        "assertionCount": 17
+      }
+    ]
+  },
+  "scenarioManifestSha256": "4cb030ab48e4600d6c385cf817dd8a95988a89cdfdc7bf4f829faf8be2752075",
+  "targetConfigurationSha256": "eded08df74a6d18f6ec8afd79f24c19595dd672bc69fc53ef7dd4792afe989b7"
+}
