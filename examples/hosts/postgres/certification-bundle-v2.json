@@ -1,13 +1,13 @@
 {
   "bundleVersion": "2",
-  "generatedAt": "2026-08-16T07:53:24.965Z",
+  "generatedAt": "2026-08-16T18:07:20.265Z",
   "generator": {
     "name": "@openwop/openwop-conformance --certify",
-    "version": "1.116.0"
+    "version": "1.130.0"
   },
   "suite": {
     "package": "@openwop/openwop-conformance",
-    "version": "1.116.0"
+    "version": "1.130.0"
   },
   "host": {
     "name": "openwop-host-postgres",
@@ -16,7 +16,7 @@
   },
   "discovery": {
     "url": "http://127.0.0.1:3839/.well-known/openwop",
-    "sha256": "fdfdea492b78a98514450c342ff114dec1a1f65c8cb4e0b9ecfb86f132e11881",
+    "sha256": "562e314efd6f0fca73f86ce51ff70907f045e2e97da89521b6688263180aee19",
     "document": {
       "protocolVersion": "1.0",
       "implementation": {
@@ -127,7 +127,7 @@
           "auditLogIntegrity": {
             "hashChain": true,
             "checkpointSignatureAlgorithm": "ed25519",
-            "checkpointPublicKey": "MCowBQYDK2VwAyEAw7vO5H+z0dCDfw+O/v9HiglqMEarqstAVj293Var6zE=",
+            "checkpointPublicKey": "MCowBQYDK2VwAyEA8BHdn1Elxgy0eNJvbSYa8dJUmBMnQUGKrVlia9wKlEs=",
             "checkpointIntervalEntries": 1000,
             "checkpointIntervalSeconds": 300
           }
@@ -321,7 +321,7 @@
         "auditLogIntegrity": {
           "hashChain": true,
           "checkpointSignatureAlgorithm": "ed25519",
-          "checkpointPublicKey": "MCowBQYDK2VwAyEAw7vO5H+z0dCDfw+O/v9HiglqMEarqstAVj293Var6zE=",
+          "checkpointPublicKey": "MCowBQYDK2VwAyEA8BHdn1Elxgy0eNJvbSYa8dJUmBMnQUGKrVlia9wKlEs=",
           "checkpointIntervalEntries": 1000,
           "checkpointIntervalSeconds": 300
         }
@@ -498,7 +498,6 @@
     "openwop-stream-sse",
     "openwop-stream-poll",
     "openwop-provider-policy",
-    "openwop-node-packs",
     "openwop-fixtures",
     "openwop-memory"
   ],
@@ -507,11 +506,11 @@
   ],
   "results": {
     "totals": {
-      "executedPass": 353,
+      "executedPass": 230,
       "executedFail": 2,
       "skipped": 0,
-      "inapplicable": 74,
-      "blocked": 32
+      "inapplicable": 138,
+      "blocked": 96
     },
     "requirements": [
       {
@@ -660,25 +659,29 @@
       {
         "requirementId": "openwop.scenario.agent-loop-iteration-monotonic",
         "scenarioId": "agent-loop-iteration-monotonic.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!isVersion5(await readExecutionModelCap())` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.agent-loop-stateful-resume",
         "scenarioId": "agent-loop-stateful-resume.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `em?.statefulResume !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.agent-loop-version5-shape",
         "scenarioId": "agent-loop-version5-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "no execution model — valid (em === null)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.agent-loop-workspace-snapshot",
         "scenarioId": "agent-loop-workspace-snapshot.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!isVersion5(await readExecutionModelCap())` returned early",
         "assertionCount": 0
       },
       {
@@ -690,7 +693,8 @@
       {
         "requirementId": "openwop.scenario.agent-manifest-runtime",
         "scenarioId": "agent-manifest-runtime.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -789,13 +793,15 @@
       {
         "requirementId": "openwop.scenario.agentPackCatalog",
         "scenarioId": "agentPackCatalog.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.agentPackExport",
         "scenarioId": "agentPackExport.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -807,7 +813,8 @@
       {
         "requirementId": "openwop.scenario.agentPackInstall",
         "scenarioId": "agentPackInstall.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -849,13 +856,15 @@
       {
         "requirementId": "openwop.scenario.aiEnvelope.contractRefusal",
         "scenarioId": "aiEnvelope.contractRefusal.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.aiEnvelope.correlationReplay",
         "scenarioId": "aiEnvelope.correlationReplay.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -867,7 +876,8 @@
       {
         "requirementId": "openwop.scenario.aiEnvelope.schemaDrift",
         "scenarioId": "aiEnvelope.schemaDrift.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -879,7 +889,8 @@
       {
         "requirementId": "openwop.scenario.aiEnvelope.universalKinds",
         "scenarioId": "aiEnvelope.universalKinds.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -975,7 +986,8 @@
       {
         "requirementId": "openwop.scenario.approval-gate-flow",
         "scenarioId": "approval-gate-flow.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability-gated",
         "assertionCount": 0
       },
       {
@@ -1077,7 +1089,8 @@
       {
         "requirementId": "openwop.scenario.auth-scim-profile",
         "scenarioId": "auth-scim-profile.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] profile not claimed; [inapplicable] capability-gated",
         "assertionCount": 0
       },
       {
@@ -1089,31 +1102,36 @@
       {
         "requirementId": "openwop.scenario.authorization-fail-closed",
         "scenarioId": "authorization-fail-closed.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] capability or profile not advertised by this host — gate `!authz?.supported || authz.failClosed === undefined` returned early; [inapplicable] capability-gated",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.authorization-roles-shape",
         "scenarioId": "authorization-roles-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.blob-cross-tenant-isolation",
         "scenarioId": "blob-cross-tenant-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.blob-presign-expiry",
         "scenarioId": "blob-presign-expiry.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.blob-roundtrip",
         "scenarioId": "blob-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1142,7 +1160,7 @@
         "assertionCount": 5
       },
       {
-        "requirementId": "openwop.scenario.byok-roundtrip",
+        "requirementId": "openwop.floor.byok-roundtrip",
         "scenarioId": "byok-roundtrip.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 13
@@ -1150,13 +1168,15 @@
       {
         "requirementId": "openwop.scenario.cache-cross-tenant-isolation",
         "scenarioId": "cache-cross-tenant-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.cache-ttl-expiry",
         "scenarioId": "cache-ttl-expiry.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1188,13 +1208,13 @@
         "requirementId": "openwop.scenario.capability-example-root-layout",
         "scenarioId": "capability-example-root-layout.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 3
+        "assertionCount": 16
       },
       {
         "requirementId": "openwop.scenario.certification-bundle-non-vacuous",
         "scenarioId": "certification-bundle-non-vacuous.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 40
+        "assertionCount": 42
       },
       {
         "requirementId": "openwop.scenario.certification-bundle-redaction",
@@ -1212,13 +1232,13 @@
         "requirementId": "openwop.scenario.certification-floor-enforcement",
         "scenarioId": "certification-floor-enforcement.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 31
+        "assertionCount": 49
       },
       {
         "requirementId": "openwop.scenario.chain-compensation-expansion",
         "scenarioId": "chain-compensation-expansion.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 37
+        "assertionCount": 44
       },
       {
         "requirementId": "openwop.scenario.chain-produced-var-roundtrip",
@@ -1285,7 +1305,8 @@
       {
         "requirementId": "openwop.scenario.commitment-fired",
         "scenarioId": "commitment-fired.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability absent — gated skip",
         "assertionCount": 0
       },
       {
@@ -1299,13 +1320,32 @@
         "requirementId": "openwop.scenario.compensation-profile",
         "scenarioId": "compensation-profile.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 54
+        "assertionCount": 58
+      },
+      {
+        "requirementId": "openwop.scenario.compensation-recovery",
+        "scenarioId": "compensation-recovery.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.configurable-schema",
         "scenarioId": "configurable-schema.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 5
+      },
+      {
+        "requirementId": "openwop.scenario.conformance-advertised-seam-required",
+        "scenarioId": "conformance-advertised-seam-required.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 13
+      },
+      {
+        "requirementId": "openwop.scenario.conformance-execution-witness",
+        "scenarioId": "conformance-execution-witness.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 24
       },
       {
         "requirementId": "openwop.scenario.connection-pack-apihosts",
@@ -1405,7 +1445,7 @@
         "requirementId": "openwop.scenario.core-manifest-and-extension-registry",
         "scenarioId": "core-manifest-and-extension-registry.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 163
+        "assertionCount": 792
       },
       {
         "requirementId": "openwop.scenario.core-standard-profile",
@@ -1422,40 +1462,43 @@
       {
         "requirementId": "openwop.scenario.credential-payload-redaction",
         "scenarioId": "credential-payload-redaction.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] capability or profile not advertised by this host — gate `cred === null` returned early; [inapplicable] capability-gated",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.credentials-capability-shape",
         "scenarioId": "credentials-capability-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] host doesn't advertise host.credentials at all; [inapplicable] capability or profile not advertised by this host — gate `!cred?.supported || cred.scopes === undefined` returned early; [inapplicable] capability or profile not advertised by this host — gate `!cred?.supported || cred.rotation === undefined` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.cross-engine-append-behavior",
         "scenarioId": "cross-engine-append-behavior.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "optional advertisement — `eventLog.crossEngineOrdering` not advertised by this host, and the cross-engine harness seam is absent (RFC 0036 §B)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.cross-engine-append-ordering",
         "scenarioId": "cross-engine-append-ordering.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "host doesn't advertise — soft-skip",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.cross-host-ancestry-endpoint",
         "scenarioId": "cross-host-ancestry-endpoint.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] capability or profile not advertised by this host — gate `chc?.ancestryEndpointSupported !== true` returned early; [inapplicable] capability or profile not advertised by this host — gate `chc?.supported !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.cross-host-causation-shape",
         "scenarioId": "cross-host-causation-shape.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "optional advertisement — `multiAgent.executionModel.crossHostCausation` not advertised by this host (RFC 0040 §D)",
         "assertionCount": 0
       },
       {
@@ -1467,7 +1510,8 @@
       {
         "requirementId": "openwop.scenario.cross-workspace-isolation",
         "scenarioId": "cross-workspace-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[blocked] no sample-run seam — soft-skip; [blocked] seam unwired — soft-skip",
         "assertionCount": 0
       },
       {
@@ -1479,13 +1523,15 @@
       {
         "requirementId": "openwop.scenario.deadletter-capability-shape",
         "scenarioId": "deadletter-capability-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.deadletter-retry-exhaustion",
         "scenarioId": "deadletter-retry-exhaustion.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability-gated",
         "assertionCount": 0
       },
       {
@@ -1551,31 +1597,36 @@
       {
         "requirementId": "openwop.scenario.distillation-index-roundtrip",
         "scenarioId": "distillation-index-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `cap?.supported !== true || cap?.indexEmitted !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.distillation-secret-carryforward",
         "scenarioId": "distillation-secret-carryforward.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `(await readDistillationCap())?.supported !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.distillation-shape",
         "scenarioId": "distillation-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "not advertised — valid",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.distillation-stable-archive",
         "scenarioId": "distillation-stable-archive.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `(await readDistillationCap())?.supported !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.distillation-token-budget",
         "scenarioId": "distillation-token-budget.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `(await readDistillationCap())?.supported !== true` returned early",
         "assertionCount": 0
       },
       {
@@ -1619,19 +1670,22 @@
       {
         "requirementId": "openwop.scenario.envelope-completion-distinguishes-truncation",
         "scenarioId": "envelope-completion-distinguishes-truncation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.envelope-nl-to-format-engaged",
         "scenarioId": "envelope-nl-to-format-engaged.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.envelope-reasoning-secret-redaction",
         "scenarioId": "envelope-reasoning-secret-redaction.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1643,13 +1697,15 @@
       {
         "requirementId": "openwop.scenario.envelope-recovery-applied",
         "scenarioId": "envelope-recovery-applied.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.envelope-refusal-shape",
         "scenarioId": "envelope-refusal-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1661,13 +1717,15 @@
       {
         "requirementId": "openwop.scenario.envelope-retry-attempted",
         "scenarioId": "envelope-retry-attempted.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.envelope-retry-exhausted",
         "scenarioId": "envelope-retry-exhausted.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1679,13 +1737,15 @@
       {
         "requirementId": "openwop.scenario.envelope-truncated",
         "scenarioId": "envelope-truncated.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.envelope-truncation-cap-exhaustion",
         "scenarioId": "envelope-truncation-cap-exhaustion.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1693,6 +1753,12 @@
         "scenarioId": "envelope-variant-discriminator-static.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 17
+      },
+      {
+        "requirementId": "openwop.scenario.error-envelope-canonical-shape",
+        "scenarioId": "error-envelope-canonical-shape.test.ts",
+        "disposition": "executed-pass",
+        "assertionCount": 24
       },
       {
         "requirementId": "openwop.scenario.errors",
@@ -1769,7 +1835,8 @@
       {
         "requirementId": "openwop.scenario.feedback-unsupported-501",
         "scenarioId": "feedback-unsupported-501.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "host supports feedback — 501 N/A (cap?.supported === true)",
         "assertionCount": 0
       },
       {
@@ -1806,7 +1873,8 @@
       {
         "requirementId": "openwop.scenario.fs-path-traversal",
         "scenarioId": "fs-path-traversal.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -1831,25 +1899,29 @@
       {
         "requirementId": "openwop.scenario.heartbeat-capability-shape",
         "scenarioId": "heartbeat-capability-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "not advertised — valid",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.heartbeat-fires-once-per-tick",
         "scenarioId": "heartbeat-fires-once-per-tick.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!heartbeatSupported(await readHeartbeatCap())` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.heartbeat-idempotent-no-spam",
         "scenarioId": "heartbeat-idempotent-no-spam.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!heartbeatSupported(await readHeartbeatCap())` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.heartbeat-runtime-bound",
         "scenarioId": "heartbeat-runtime-bound.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!heartbeatSupported(await readHeartbeatCap())` returned early",
         "assertionCount": 0
       },
       {
@@ -1926,7 +1998,7 @@
         "assertionCount": 4
       },
       {
-        "requirementId": "openwop.scenario.interrupt-clarification",
+        "requirementId": "openwop.floor.interrupt-clarification",
         "scenarioId": "interrupt-clarification.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 4
@@ -1964,25 +2036,29 @@
       {
         "requirementId": "openwop.scenario.kv-atomic-increment",
         "scenarioId": "kv-atomic-increment.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.kv-cas",
         "scenarioId": "kv-cas.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.kv-cross-tenant-isolation",
         "scenarioId": "kv-cross-tenant-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.kv-ttl-expiry",
         "scenarioId": "kv-ttl-expiry.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2020,7 +2096,8 @@
       {
         "requirementId": "openwop.scenario.mcp-discoverability",
         "scenarioId": "mcp-discoverability.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2040,37 +2117,43 @@
       {
         "requirementId": "openwop.scenario.mcp-server-elicitation-bridge",
         "scenarioId": "mcp-server-elicitation-bridge.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.mcp-server-prompt-roundtrip",
         "scenarioId": "mcp-server-prompt-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.mcp-server-resource-roundtrip",
         "scenarioId": "mcp-server-resource-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.mcp-server-sampling-bridge",
         "scenarioId": "mcp-server-sampling-bridge.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.mcp-server-tool-roundtrip",
         "scenarioId": "mcp-server-tool-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.mcp-server-untrusted-args",
         "scenarioId": "mcp-server-untrusted-args.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2083,7 +2166,8 @@
       {
         "requirementId": "openwop.scenario.mcp-tool-roundtrip",
         "scenarioId": "mcp-tool-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[blocked] precondition not met — `!probe` returned early (seam, prior step, or fixture unavailable); [blocked] [mcp-tool-roundtrip] fake server not started; skipping host-mediated test",
         "assertionCount": 0
       },
       {
@@ -2106,7 +2190,7 @@
         "assertionCount": 8
       },
       {
-        "requirementId": "openwop.scenario.memory-attribution-emits-on-write",
+        "requirementId": "openwop.floor.memory-attribution-emits-on-write",
         "scenarioId": "memory-attribution-emits-on-write.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 1
@@ -2120,11 +2204,12 @@
       {
         "requirementId": "openwop.scenario.memory-attribution-replay-stable",
         "scenarioId": "memory-attribution-replay-stable.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "replay fork unsupported — soft-skip (fork.status !== 200 && fork.status !== 201)",
         "assertionCount": 0
       },
       {
-        "requirementId": "openwop.scenario.memory-attribution-shape",
+        "requirementId": "openwop.floor.memory-attribution-shape",
         "scenarioId": "memory-attribution-shape.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 2
@@ -2136,7 +2221,7 @@
         "assertionCount": 1
       },
       {
-        "requirementId": "openwop.scenario.memory-capability-model-shape",
+        "requirementId": "openwop.floor.memory-capability-model-shape",
         "scenarioId": "memory-capability-model-shape.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 18
@@ -2144,25 +2229,29 @@
       {
         "requirementId": "openwop.scenario.memory-compaction-event-emitted",
         "scenarioId": "memory-compaction-event-emitted.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[rfc0012-event] capabilities.memory.compaction.supported not advertised; skipping",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.memory-compaction-provenance-tag",
         "scenarioId": "memory-compaction-provenance-tag.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[rfc0012-tag] capabilities.memory.compaction.supported not advertised; skipping",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.memory-compaction-sr1-carry-forward",
         "scenarioId": "memory-compaction-sr1-carry-forward.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[rfc0012-sr1] capabilities.memory.compaction.supported not advertised; skipping",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.memory-consolidation-idempotent",
         "scenarioId": "memory-consolidation-idempotent.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability absent — gated skip",
         "assertionCount": 0
       },
       {
@@ -2172,7 +2261,7 @@
         "assertionCount": 10
       },
       {
-        "requirementId": "openwop.scenario.memory-degraded-projection",
+        "requirementId": "openwop.floor.memory-degraded-projection",
         "scenarioId": "memory-degraded-projection.test.ts",
         "disposition": "inapplicable",
         "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
@@ -2188,7 +2277,8 @@
       {
         "requirementId": "openwop.scenario.metric-emission",
         "scenarioId": "metric-emission.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "precondition not met — `!getCollector()` returned early (seam, prior step, or fixture unavailable)",
         "assertionCount": 0
       },
       {
@@ -2206,20 +2296,22 @@
       {
         "requirementId": "openwop.scenario.multi-agent-confidence-escalation",
         "scenarioId": "multi-agent-confidence-escalation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] capability or profile not advertised by this host — gate `em === undefined` returned early; [inapplicable] soft-skip — `version: 1` hosts pass via this absence (!supported || version < 2)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.multi-agent-handoff-state-machine",
         "scenarioId": "multi-agent-handoff-state-machine.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] host doesn't advertise — soft-skip; [inapplicable] soft-skip — host honest about not implementing",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.multi-agent-memory-lifecycle",
         "scenarioId": "multi-agent-memory-lifecycle.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] optional advertisement — `multiAgent.executionModel.crossChildMemoryConcurrency` not advertised by this host; [inapplicable] capability or profile not advertised by this host — gate `!phase2OrLater || memorySupported !== true || !expiredRunId` returned early",
         "assertionCount": 0
       },
       {
@@ -2249,20 +2341,22 @@
       {
         "requirementId": "openwop.scenario.multi-region-idempotency-behavior",
         "scenarioId": "multi-region-idempotency-behavior.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "optional advertisement — `idempotency.crossRegion` not advertised by this host, and the multi-region simulator seam is absent (RFC 0036 §C)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.multi-region-idempotency",
         "scenarioId": "multi-region-idempotency.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[blocked] precondition not met — `!idem || idem.crossRegion === undefined` returned early (seam, prior step, or fixture unavailable); [blocked] precondition not met — `crossRegion !== 'reconciled-records' && crossRegion !== 'fenced-effects'` returned early (seam, prior step, or fixture unavailable); [inapplicable] host doesn't advertise the granular block — soft-skip",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.node-module-required-capabilities-shape",
         "scenarioId": "node-module-required-capabilities-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2274,19 +2368,22 @@
       {
         "requirementId": "openwop.scenario.oauth-authorization-code-roundtrip",
         "scenarioId": "oauth-authorization-code-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability-gated",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.oauth-capability-shape",
         "scenarioId": "oauth-capability-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] host doesn't advertise host.oauth at all; [inapplicable] capability or profile not advertised by this host — gate `!oauth?.supported || oauth.grants === undefined` returned early; [inapplicable] capability or profile not advertised by this host — gate `!oauth?.supported || oauth.providers === undefined` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.oauth-connector-redaction",
         "scenarioId": "oauth-connector-redaction.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] capability or profile not advertised by this host — gate `oauth === null` returned early; [inapplicable] capability-gated",
         "assertionCount": 0
       },
       {
@@ -2353,25 +2450,29 @@
       {
         "requirementId": "openwop.scenario.otel-emission-grpc",
         "scenarioId": "otel-emission-grpc.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[otel-emission-grpc] collector not started; set OPENWOP_OTEL_COLLECTOR=true to run",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.otel-emission",
         "scenarioId": "otel-emission.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[otel-emission] collector not started; set OPENWOP_OTEL_COLLECTOR=true to run",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.otel-trace-propagation-subworkflow",
         "scenarioId": "otel-trace-propagation-subworkflow.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[otel-trace-propagation-subworkflow] collector not started; skipping",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.otel-trace-propagation",
         "scenarioId": "otel-trace-propagation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[otel-trace-propagation] collector not started; skipping",
         "assertionCount": 0
       },
       {
@@ -2396,20 +2497,21 @@
       {
         "requirementId": "openwop.scenario.pack-registry-isolation",
         "scenarioId": "pack-registry-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "host doesn't advertise the seam",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.floor.pack-registry-publish",
         "scenarioId": "pack-registry-publish.test.ts",
-        "disposition": "executed-pass",
-        "assertionCount": 0
+        "disposition": "inapplicable",
+        "detail": "host does not advertise packs.testMode.supported (RFC 0025 §A optional test-mode namespace) — the publish error catalog is unobservable without it; openwop-node-packs (read/write) is not held by this host"
       },
       {
         "requirementId": "openwop.floor.pack-registry",
         "scenarioId": "pack-registry.test.ts",
-        "disposition": "executed-pass",
-        "assertionCount": 0
+        "disposition": "inapplicable",
+        "detail": "host ships no pack registry (GET /v1/packs/-/search?q= → 404, non-OpenWOP body); RFC 0025 read surface is unadvertised-when-shipped, so absence is a probe result — openwop-node-packs is not held by this host"
       },
       {
         "requirementId": "openwop.scenario.pause-resume",
@@ -2418,7 +2520,7 @@
         "assertionCount": 18
       },
       {
-        "requirementId": "openwop.scenario.policies",
+        "requirementId": "openwop.floor.policies",
         "scenarioId": "policies.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 23
@@ -2504,7 +2606,8 @@
       {
         "requirementId": "openwop.scenario.prompt-prefix-cache",
         "scenarioId": "prompt-prefix-cache.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2531,7 +2634,8 @@
       {
         "requirementId": "openwop.scenario.prompt-resolution-chain-event",
         "scenarioId": "prompt-resolution-chain-event.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2573,7 +2677,7 @@
         "assertionCount": 4
       },
       {
-        "requirementId": "openwop.scenario.providerPolicyEnforcement",
+        "requirementId": "openwop.floor.providerPolicyEnforcement",
         "scenarioId": "providerPolicyEnforcement.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 14
@@ -2587,25 +2691,29 @@
       {
         "requirementId": "openwop.scenario.queue-ack-nack-dlq",
         "scenarioId": "queue-ack-nack-dlq.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.queue-cross-tenant-isolation",
         "scenarioId": "queue-cross-tenant-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.queue-publish-consume-roundtrip",
         "scenarioId": "queue-publish-consume-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.rate-limit-envelope",
         "scenarioId": "rate-limit-envelope.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "precondition not met — `!last || last.status !== 429` returned early (seam, prior step, or fixture unavailable)",
         "assertionCount": 0
       },
       {
@@ -2629,14 +2737,15 @@
       {
         "requirementId": "openwop.scenario.registry-public",
         "scenarioId": "registry-public.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!ENABLED` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.replay-divergence-at-refusal",
         "scenarioId": "replay-divergence-at-refusal.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "optional advertisement — `multiAgent.executionModel.replayDeterminism` not advertised by this host (RFC 0041 §D)",
         "assertionCount": 0
       },
       {
@@ -2647,7 +2756,7 @@
         "assertionCount": 0
       },
       {
-        "requirementId": "openwop.scenario.replay-fork",
+        "requirementId": "openwop.floor.replay-fork",
         "scenarioId": "replay-fork.test.ts",
         "disposition": "blocked",
         "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
@@ -2663,14 +2772,15 @@
       {
         "requirementId": "openwop.scenario.replay-llm-cache-key",
         "scenarioId": "replay-llm-cache-key.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.replay-observable-sequence-determinism",
         "scenarioId": "replay-observable-sequence-determinism.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "optional advertisement — `multiAgent.executionModel.replayDeterminism.supported` with `version >= 4` not advertised by this host (RFC 0041 §C)",
         "assertionCount": 0
       },
       {
@@ -2681,22 +2791,23 @@
         "assertionCount": 0
       },
       {
-        "requirementId": "openwop.scenario.replay-side-effect-suppression",
+        "requirementId": "openwop.floor.replay-side-effect-suppression",
         "scenarioId": "replay-side-effect-suppression.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 5
       },
       {
-        "requirementId": "openwop.scenario.replayDeterminism",
+        "requirementId": "openwop.floor.replayDeterminism",
         "scenarioId": "replayDeterminism.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.requirement-ledger",
         "scenarioId": "requirement-ledger.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 28
+        "assertionCount": 39
       },
       {
         "requirementId": "openwop.scenario.restart-during-run",
@@ -2719,8 +2830,9 @@
       {
         "requirementId": "openwop.scenario.route-coverage",
         "scenarioId": "route-coverage.test.ts",
-        "disposition": "executed-pass",
-        "assertionCount": 28
+        "disposition": "executed-fail",
+        "detail": "one or more assertions in the file failed",
+        "assertionCount": 6
       },
       {
         "requirementId": "openwop.scenario.run-diff",
@@ -2746,7 +2858,7 @@
         "requirementId": "openwop.scenario.runner-ledger",
         "scenarioId": "runner-ledger.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 68
+        "assertionCount": 93
       },
       {
         "requirementId": "openwop.floor.runs-lifecycle",
@@ -2763,7 +2875,8 @@
       {
         "requirementId": "openwop.scenario.runtime-requires-install-gate",
         "scenarioId": "runtime-requires-install-gate.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "seam absent — soft-skip",
         "assertionCount": 0
       },
       {
@@ -2775,7 +2888,8 @@
       {
         "requirementId": "openwop.scenario.safefetch-behavior",
         "scenarioId": "safefetch-behavior.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2794,14 +2908,15 @@
       {
         "requirementId": "openwop.scenario.sandbox-memory-cap",
         "scenarioId": "sandbox-memory-cap.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "soft-skip (!sb)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.sandbox-mvp-behavior",
         "scenarioId": "sandbox-mvp-behavior.test.ts",
-        "disposition": "blocked",
-        "detail": "every test skipped with no recorded reason — unclassified return (RFC 0148 §A resolves it to blocked)",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!(await isSandboxAdvertised())` returned early",
         "assertionCount": 0
       },
       {
@@ -2819,7 +2934,8 @@
       {
         "requirementId": "openwop.scenario.sandbox-no-host-fs-escape",
         "scenarioId": "sandbox-no-host-fs-escape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "host omits the block — soft-skip cleanly (sb === null)",
         "assertionCount": 0
       },
       {
@@ -2837,7 +2953,8 @@
       {
         "requirementId": "openwop.scenario.sandbox-timeout-cap",
         "scenarioId": "sandbox-timeout-cap.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "precondition not met — `!sb` returned early (seam, prior step, or fixture unavailable)",
         "assertionCount": 0
       },
       {
@@ -2855,19 +2972,22 @@
       {
         "requirementId": "openwop.scenario.scheduling-capability-shape",
         "scenarioId": "scheduling-capability-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.scheduling-cron-fires-once",
         "scenarioId": "scheduling-cron-fires-once.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.search-bm25-roundtrip",
         "scenarioId": "search-bm25-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2899,7 +3019,7 @@
         "requirementId": "openwop.scenario.spec-corpus-validity",
         "scenarioId": "spec-corpus-validity.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 5826
+        "assertionCount": 5851
       },
       {
         "requirementId": "openwop.scenario.speech-synthesis-roundtrip",
@@ -2911,19 +3031,22 @@
       {
         "requirementId": "openwop.scenario.speech-synthesis-unadvertised",
         "scenarioId": "speech-synthesis-unadvertised.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.sql-injection-rejection",
         "scenarioId": "sql-injection-rejection.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.sql-transaction-atomicity",
         "scenarioId": "sql-transaction-atomicity.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -2953,9 +3076,9 @@
       {
         "requirementId": "openwop.scenario.stream-subscribe-from-beginning",
         "scenarioId": "stream-subscribe-from-beginning.test.ts",
-        "disposition": "executed-fail",
-        "detail": "one or more assertions in the file failed",
-        "assertionCount": 1
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
+        "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.stream-text-fixture",
@@ -2978,25 +3101,29 @@
       {
         "requirementId": "openwop.scenario.subrun-approval-fail-closed",
         "scenarioId": "subrun-approval-fail-closed.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `(await readSubRunAttestationCap()) !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.subrun-approval-gate",
         "scenarioId": "subrun-approval-gate.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `(await readSubRunAttestationCap()) !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.subrun-attestation-shape",
         "scenarioId": "subrun-attestation-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `cap === null` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.subrun-checksum-stable",
         "scenarioId": "subrun-checksum-stable.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `(await readSubRunAttestationCap()) !== true` returned early",
         "assertionCount": 0
       },
       {
@@ -3014,19 +3141,22 @@
       {
         "requirementId": "openwop.scenario.table-cross-tenant-isolation",
         "scenarioId": "table-cross-tenant-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.table-cursor-pagination",
         "scenarioId": "table-cursor-pagination.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.table-schema-enforcement",
         "scenarioId": "table-schema-enforcement.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -3058,31 +3188,36 @@
       {
         "requirementId": "openwop.scenario.tool-hooks-authorization-fail-closed",
         "scenarioId": "tool-hooks-authorization-fail-closed.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `cap?.perToolAuthorization !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.tool-hooks-content-free",
         "scenarioId": "tool-hooks-content-free.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `cap?.prePostEvents !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.tool-hooks-rate-limit",
         "scenarioId": "tool-hooks-rate-limit.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `cap?.perToolRateLimit !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.tool-hooks-secret-redaction",
         "scenarioId": "tool-hooks-secret-redaction.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `cap?.prePostEvents !== true` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.tool-hooks-shape",
         "scenarioId": "tool-hooks-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "not advertised — valid",
         "assertionCount": 0
       },
       {
@@ -3099,14 +3234,14 @@
         "assertionCount": 0
       },
       {
-        "requirementId": "openwop.scenario.trigger-bridge-delivery",
+        "requirementId": "openwop.floor.trigger-bridge-delivery",
         "scenarioId": "trigger-bridge-delivery.test.ts",
         "disposition": "inapplicable",
         "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
         "assertionCount": 0
       },
       {
-        "requirementId": "openwop.scenario.trigger-bridge-shape",
+        "requirementId": "openwop.floor.trigger-bridge-shape",
         "scenarioId": "trigger-bridge-shape.test.ts",
         "disposition": "executed-pass",
         "assertionCount": 19
@@ -3126,7 +3261,8 @@
       {
         "requirementId": "openwop.scenario.vector-knn-roundtrip",
         "scenarioId": "vector-knn-roundtrip.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
@@ -3139,7 +3275,8 @@
       {
         "requirementId": "openwop.scenario.version-fold",
         "scenarioId": "version-fold.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "[blocked] precondition not met — `seam === null` returned early (seam, prior step, or fixture unavailable); [inapplicable] [version-fold] forceEngineVersionRange not advertised; skipping negative leg",
         "assertionCount": 0
       },
       {
@@ -3198,43 +3335,50 @@
       {
         "requirementId": "openwop.scenario.voice-transcription-unadvertised",
         "scenarioId": "voice-transcription-unadvertised.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.wasm-pack-abi-version-rejection",
         "scenarioId": "wasm-pack-abi-version-rejection.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!wasm?.supported` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.wasm-pack-invoke-completed",
         "scenarioId": "wasm-pack-invoke-completed.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!isFixtureAdvertised(FIXTURE)` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.wasm-pack-invoke-suspended",
         "scenarioId": "wasm-pack-invoke-suspended.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!isFixtureAdvertised(FIXTURE)` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.wasm-pack-load",
         "scenarioId": "wasm-pack-load.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] [wasm-pack-load] host does not advertise WASM support; skipping; [inapplicable] capability or profile not advertised by this host — gate `!wasm?.supported` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.wasm-pack-memory-cap",
         "scenarioId": "wasm-pack-memory-cap.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "[inapplicable] capability or profile not advertised by this host — gate `!wasm?.supported` returned early; [inapplicable] capability or profile not advertised by this host — gate `!isFixtureAdvertised(CAP_BREACH_FIXTURE)` returned early",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.wasm-pack-replay-determinism",
         "scenarioId": "wasm-pack-replay-determinism.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability or profile not advertised by this host — gate `!isFixtureAdvertised(FIXTURE)` returned early",
         "assertionCount": 0
       },
       {
@@ -3331,33 +3475,44 @@
         "assertionCount": 0
       },
       {
+        "requirementId": "openwop.scenario.workload-identity-chain-bounds",
+        "scenarioId": "workload-identity-chain-bounds.test.ts",
+        "disposition": "inapplicable",
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set",
+        "assertionCount": 0
+      },
+      {
         "requirementId": "openwop.scenario.workload-identity-profile",
         "scenarioId": "workload-identity-profile.test.ts",
         "disposition": "executed-pass",
-        "assertionCount": 18
+        "assertionCount": 22
       },
       {
         "requirementId": "openwop.scenario.workspace-behavior",
         "scenarioId": "workspace-behavior.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.workspace-capability-shape",
         "scenarioId": "workspace-capability-shape.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "blocked",
+        "detail": "every test returned early with zero assertions and no recorded reason — unclassified return; RFC 0148 §A resolves it to blocked (add softSkip(kind, reason) at the early return)",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.workspace-cross-tenant-isolation-blackbox",
         "scenarioId": "workspace-cross-tenant-isolation-blackbox.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability not advertised — skip",
         "assertionCount": 0
       },
       {
         "requirementId": "openwop.scenario.workspace-cross-tenant-isolation",
         "scenarioId": "workspace-cross-tenant-isolation.test.ts",
-        "disposition": "executed-pass",
+        "disposition": "inapplicable",
+        "detail": "capability not advertised — skip",
         "assertionCount": 0
       },
       {
@@ -3374,6 +3529,6 @@
       }
     ]
   },
-  "scenarioManifestSha256": "4cb030ab48e4600d6c385cf817dd8a95988a89cdfdc7bf4f829faf8be2752075",
-  "targetConfigurationSha256": "93fdc80191682f79243eec2212085abdaa426ed28978f5cae356d1823e17ffd6"
+  "scenarioManifestSha256": "5fd17bf2211f661a1e2af18356d705ee939e686b9ffa111381b82ef9e9296e0b",
+  "targetConfigurationSha256": "9105ab8d2246e5b3e5c4f8fddb06f64ca654fdafef30bef050c74c686ff16e12"
 }
