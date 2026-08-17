@@ -1168,7 +1168,32 @@ async function executeNode(
           });
           const entries = await listMemoryEntries(q, tenantId, memoryRef, { limit: 1 });
           await setRunVariable(runId, 'memoryReadback', entries[0] ?? null);
+        } else if (memoryAction === 'cross-tenant-probe') {
+          // CTI-1, TWO-SIDED (openwop S35, suite 1.136.1): the positive control
+          // first — write under the run's own tenant and read it back — then the
+          // deliberately cross-tenant probe, which MUST come back empty. Before
+          // this branch existed the host ignored the action, left
+          // `crossTenantProbe` unset, and the old scenario passed vacuously.
+          const ownerEntryId = `mem-${runId}-owner`;
+          await writeMemoryEntry(q, {
+            tenantId,
+            memoryRef,
+            memoryId: ownerEntryId,
+            content: `Owner-tenant entry written by run ${runId} (CTI-1 positive control).`,
+            tags: ['conformance', 'agent-memory', 'cti-1'],
+          });
+          const ownerProbe = await listMemoryEntries(q, tenantId, memoryRef, { limit: 50 });
+          const probeRef =
+            typeof node.config?.probeMemoryRef === 'string' ? node.config.probeMemoryRef : memoryRef;
+          // Another tenant's view of the probe ref: the adapter is tenant-scoped,
+          // so tenant B sees nothing of tenant A regardless of the ref it names.
+          const crossTenantProbe = await listMemoryEntries(q, 'tenant:another', probeRef, { limit: 50 });
+          await setRunVariable(runId, 'ownerEntryId', ownerEntryId);
+          await setRunVariable(runId, 'ownerProbe', ownerProbe);
+          await setRunVariable(runId, 'crossTenantProbe', crossTenantProbe);
         } else if (memoryAction === 'ttl-probe') {
+          await setRunVariable(runId, 'expiredId', `mem-${runId}-expired`);
+          await setRunVariable(runId, 'freshId', `mem-${runId}-live`);
           await writeMemoryEntry(q, {
             tenantId,
             memoryRef,
