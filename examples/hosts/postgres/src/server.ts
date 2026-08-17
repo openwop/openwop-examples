@@ -696,6 +696,35 @@ async function readReasoningVerbosity(
   );
 }
 
+
+// S34 (openwop 1.136.0, 2026-08-17): `run-event-payloads.schema.json` §nodeFailed /
+// §runFailed require `error: { code, message }` — an OBJECT (`_errorObject`), and
+// REQUIRED. This host emitted `data: { code }` / a bare RunError at the top level
+// for years and nothing on the wire checked until `node-failed-payload-shape.test.ts`.
+// Normalize at the single append point so every emit site conforms; the original
+// fields are kept alongside (`additionalProperties: true`).
+function normalizeFailurePayload(data: unknown, nodeId?: string | null): Record<string, unknown> {
+  const d: Record<string, unknown> =
+    data !== null && typeof data === 'object' && !Array.isArray(data) ? { ...(data as Record<string, unknown>) } : {};
+  // §nodeFailed requires `nodeId` IN the payload (the event-level nodeId is a projection convenience).
+  if (typeof nodeId === 'string' && nodeId.length > 0 && typeof d.nodeId !== 'string') d.nodeId = nodeId;
+  const e = d.error;
+  const eo = e !== null && typeof e === 'object' && !Array.isArray(e) ? (e as Record<string, unknown>) : undefined;
+  if (eo && typeof eo.code === 'string' && eo.code.length > 0 && typeof eo.message === 'string' && eo.message.length > 0) return d;
+  const code =
+    typeof eo?.code === 'string' && eo.code.length > 0 ? eo.code
+    : typeof d.code === 'string' && d.code.length > 0 ? d.code
+    : typeof e === 'string' && e.length > 0 ? e
+    : 'node_failed';
+  const message =
+    typeof eo?.message === 'string' && eo.message.length > 0 ? eo.message
+    : typeof d.message === 'string' && d.message.length > 0 ? d.message
+    : typeof e === 'string' && e.length > 0 ? e
+    : `failed (${code})`;
+  d.error = { ...(eo ?? {}), code, message };
+  return d;
+}
+
 async function appendEvent(
   runId: string,
   type: string,
@@ -716,12 +745,13 @@ async function appendEvent(
       throw new Error(`appendEvent: runId ${runId} not found`);
     }
     const seq = Number(seqRes.rows[0]!.seq);
+    const data = type === 'node.failed' || type === 'run.failed' ? normalizeFailurePayload(opts.data, opts.nodeId) : opts.data;
     const ev: RunEvent = {
       seq,
       runId,
       type,
       nodeId: opts.nodeId ?? null,
-      data: opts.data ?? null,
+      data: data ?? null,
       timestamp: new Date().toISOString(),
       ...(opts.causationId !== undefined ? { causationId: opts.causationId } : {}),
     };

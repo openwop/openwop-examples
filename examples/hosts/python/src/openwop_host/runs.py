@@ -118,6 +118,37 @@ class Run:
         return self.status in TERMINAL_STATES
 
 
+
+def _normalize_failure_payload(data: Any, node_id: str | None = None) -> dict[str, Any]:
+    """S34 (openwop 1.136.0, 2026-08-17): ``run-event-payloads.schema.json``
+    §nodeFailed / §runFailed require ``error: {code, message}`` — an object,
+    and REQUIRED. This host emitted ``{"code": ...}`` at the top level for
+    years and nothing on the wire checked until
+    ``node-failed-payload-shape.test.ts``. Normalize at the single append
+    point; original fields are kept alongside (``additionalProperties: true``).
+    """
+    d: dict[str, Any] = dict(data) if isinstance(data, dict) else {}
+    if isinstance(node_id, str) and node_id and not isinstance(d.get("nodeId"), str):
+        d["nodeId"] = node_id  # §nodeFailed requires nodeId IN the payload
+    e = d.get("error")
+    eo = e if isinstance(e, dict) else None
+    if eo and isinstance(eo.get("code"), str) and eo["code"] and isinstance(eo.get("message"), str) and eo["message"]:
+        return d
+    code = (
+        eo["code"] if eo and isinstance(eo.get("code"), str) and eo["code"]
+        else d["code"] if isinstance(d.get("code"), str) and d["code"]
+        else e if isinstance(e, str) and e
+        else "node_failed"
+    )
+    message = (
+        eo["message"] if eo and isinstance(eo.get("message"), str) and eo["message"]
+        else d["message"] if isinstance(d.get("message"), str) and d["message"]
+        else e if isinstance(e, str) and e
+        else f"failed ({code})"
+    )
+    d["error"] = {**(eo or {}), "code": code, "message": message}
+    return d
+
 class RunRegistry:
     """Thread-safe (run_id → Run) mapping + execution kickoff.
 
@@ -256,6 +287,8 @@ class RunRegistry:
         the terminal event exists in the log and close with zero events
         (stream-modes.md §"Server-closed stream" race).
         """
+        if type_ in ("node.failed", "run.failed"):
+            data = _normalize_failure_payload(data, node_id)
         event = RunEvent(
             seq=len(run.events),
             run_id=run.run_id,

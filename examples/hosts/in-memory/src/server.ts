@@ -368,13 +368,43 @@ function failRunDuration(run: Run, limitMs: number, elapsedMs: number): void {
   run.endedAt = new Date().toISOString();
 }
 
+
+// S34 (openwop 1.136.0, 2026-08-17): `run-event-payloads.schema.json` §nodeFailed /
+// §runFailed require `error: { code, message }` — an OBJECT (`_errorObject`), and
+// REQUIRED. This host emitted `data: { code }` / a bare RunError at the top level
+// for years and nothing on the wire checked until `node-failed-payload-shape.test.ts`.
+// Normalize at the single append point so every emit site conforms; the original
+// fields are kept alongside (`additionalProperties: true`).
+function normalizeFailurePayload(data: unknown, nodeId?: string | null): Record<string, unknown> {
+  const d: Record<string, unknown> =
+    data !== null && typeof data === 'object' && !Array.isArray(data) ? { ...(data as Record<string, unknown>) } : {};
+  // §nodeFailed requires `nodeId` IN the payload (the event-level nodeId is a projection convenience).
+  if (typeof nodeId === 'string' && nodeId.length > 0 && typeof d.nodeId !== 'string') d.nodeId = nodeId;
+  const e = d.error;
+  const eo = e !== null && typeof e === 'object' && !Array.isArray(e) ? (e as Record<string, unknown>) : undefined;
+  if (eo && typeof eo.code === 'string' && eo.code.length > 0 && typeof eo.message === 'string' && eo.message.length > 0) return d;
+  const code =
+    typeof eo?.code === 'string' && eo.code.length > 0 ? eo.code
+    : typeof d.code === 'string' && d.code.length > 0 ? d.code
+    : typeof e === 'string' && e.length > 0 ? e
+    : 'node_failed';
+  const message =
+    typeof eo?.message === 'string' && eo.message.length > 0 ? eo.message
+    : typeof d.message === 'string' && d.message.length > 0 ? d.message
+    : typeof e === 'string' && e.length > 0 ? e
+    : `failed (${code})`;
+  d.error = { ...(eo ?? {}), code, message };
+  return d;
+}
+
 function appendEvent(run: Run, type: string, opts: { nodeId?: string; data?: unknown } = {}): void {
+  const data = type === 'node.failed' || type === 'run.failed' ? normalizeFailurePayload(opts.data, opts.nodeId) : opts.data;
   const event: RunEvent = {
     seq: run.events.length,
     runId: run.runId,
     type,
     ...(opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {}),
-    ...(opts.data !== undefined ? { data: opts.data } : {}),
+    ...(data !== undefined ? { data } : {}),
     timestamp: new Date().toISOString(),
   };
   run.events.push(event);
@@ -409,7 +439,7 @@ async function executeNode(
         // a cancelled node `cancelled`. The loop's `run.timedOut` check then
         // emits the run-level `cap.breached` + `run.failed { run_timeout }`.
         if (run.timedOut) {
-          appendEvent(run, 'node.failed', { nodeId: node.id, data: { code: 'run_timeout' } });
+          appendEvent(run, 'node.failed', { nodeId: node.id, data: { code: 'run_timeout', message: 'node exceeded the run wall-clock ceiling (RFC 0058)' } });
           return 'failed';
         }
         appendEvent(run, 'node.cancelled', { nodeId: node.id });
@@ -446,7 +476,7 @@ async function executeNode(
           };
           appendEvent(run, 'node.failed', {
             nodeId: node.id,
-            data: { code: result.error.code, typeId: node.typeId },
+            data: { code: result.error.code, message: result.error.message, typeId: node.typeId },
           });
           return 'failed';
         }
@@ -468,7 +498,7 @@ async function executeNode(
           };
           appendEvent(run, 'node.failed', {
             nodeId: node.id,
-            data: { code: 'wasm_cap_breached', typeId: node.typeId, kind: result.kind },
+            data: { code: 'wasm_cap_breached', typeId: node.typeId, kind: result.kind, message: `WASM node ${node.typeId} breached its ${String(result.kind)} cap` },
           });
           return 'failed';
         }
@@ -482,7 +512,7 @@ async function executeNode(
           };
           appendEvent(run, 'node.failed', {
             nodeId: node.id,
-            data: { code: 'wasm_suspend_not_implemented' },
+            data: { code: 'wasm_suspend_not_implemented', message: 'this reference host does not implement WASM-driven suspends' },
           });
           return 'failed';
         }
@@ -500,7 +530,7 @@ async function executeNode(
       };
       appendEvent(run, 'node.failed', {
         nodeId: node.id,
-        data: { code: 'unsupported_node_type', typeId: node.typeId },
+        data: { code: 'unsupported_node_type', typeId: node.typeId, message: `In-memory host does not implement node type "${node.typeId}"` },
       });
       return 'failed';
     }
