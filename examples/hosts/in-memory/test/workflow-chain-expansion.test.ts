@@ -38,9 +38,15 @@ import { dirname } from 'node:path';
 import {
   expandChain,
   expandChainFromRegistry,
+  expandChainWithCompensation,
+  ChainCompensationPolicyConflictError,
+  ChainIrreversibleWithCompensationError,
   WorkflowChainExpansionError,
 } from '../src/workflow-chain-expansion.js';
-import type { WorkflowChain } from '../src/workflow-chain-expansion.js';
+import type {
+  WorkflowChain,
+  WorkflowChainWithCompensation,
+} from '../src/workflow-chain-expansion.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -336,4 +342,113 @@ console.log('✓ case 4 — chain not found');
   console.log('✓ case 7 — whole-value {{params.x}} resolves raw-typed; embedded tokens stringify');
 }
 
-console.log('\nworkflow-chain-expansion: 7/7 cases passed');
+// ─── Case 8: RFC 0157 compensation carry (the SECOND mirrored region) ──
+//
+// `carryCompensation` / `expandChainWithCompensation` are byte-mirrored from
+// `conformance/src/lib/workflow-chain-expansion.ts` and gated by the openwop
+// repo's `check-workflow-chain-expansion-sync.mjs` (SP-01, 2026-08-18). Gating
+// proves the two copies agree; this case proves the copy RUNS — the failure
+// mode the whole-value rule showed is a mirror nobody executes.
+//
+// Carrying is unconditional: a host that does not advertise
+// `capabilities.compensation` still carries the node-level declaration verbatim
+// (it is descriptive) and refuses only a chain-level POLICY.
+
+{
+  const chain: WorkflowChainWithCompensation = {
+    chainId: 'vendor.test.chain.compensating',
+    version: '1.0.0',
+    label: 'compensating probe',
+    description: 'a charge node with an inverse, and an irreversible sibling',
+    parameters: { acct: { type: 'string' } },
+    dag: {
+      nodes: [
+        {
+          id: 'charge',
+          typeId: 'core.openwop.noop',
+          compensation: {
+            nodeTypeId: 'core.openwop.noop',
+            inputMapping: {
+              account: '{{params.acct}}',
+              chargeRef: '${nodes.charge.output.id}',
+              external: '${nodes.notMine.output.id}',
+            },
+            retry: { maxAttempts: 3 },
+            requiresApproval: true,
+          },
+        },
+        { id: 'email', typeId: 'core.openwop.noop', irreversibleEffect: true },
+      ],
+      edges: [{ from: 'charge', to: 'email' }],
+    },
+    compensation: {
+      triggers: ['node-failure', 'run-cancel'],
+      orderingModel: 'reverse-completion',
+    },
+  } as unknown as WorkflowChainWithCompensation;
+
+  const ctx = { expansionId: 'cmp', params: { acct: 'acct_42' }, isTypeIdResolvable: () => true };
+  const out = expandChainWithCompensation(chain, ctx);
+  const prefix = out.nodes[0]!.id.slice(0, out.nodes[0]!.id.length - 'charge'.length);
+
+  const charge = out.nodes[0] as { compensation?: { nodeTypeId: string; inputMapping?: Record<string, unknown>; retry?: { maxAttempts?: number }; requiresApproval?: boolean } };
+  assert.equal(charge.compensation?.nodeTypeId, 'core.openwop.noop', 'case 8 — node compensation is carried');
+  // 5b — `{{params.*}}` inside inputMapping substituted at expansion time.
+  assert.equal(charge.compensation?.inputMapping?.account, 'acct_42', 'case 8 — inputMapping params substituted');
+  // 6b — fragment node-id refs rewritten with the expansion prefix; a ref to a
+  // node that is NOT in this fragment survives verbatim.
+  assert.equal(
+    charge.compensation?.inputMapping?.chargeRef,
+    `\${nodes.${prefix}charge.output.id}`,
+    'case 8 — fragment node-id refs inside inputMapping are prefixed',
+  );
+  assert.equal(
+    charge.compensation?.inputMapping?.external,
+    '${nodes.notMine.output.id}',
+    'case 8 — a non-fragment node ref is NOT rewritten',
+  );
+  assert.equal(charge.compensation?.retry?.maxAttempts, 3, 'case 8 — retry carried');
+  assert.equal(charge.compensation?.requiresApproval, true, 'case 8 — requiresApproval carried');
+  // 6c — irreversibleEffect copied verbatim, and it does not gain a compensation.
+  const email = out.nodes[1] as { irreversibleEffect?: boolean; compensation?: unknown };
+  assert.equal(email.irreversibleEffect, true, 'case 8 — irreversibleEffect copied');
+  assert.equal(email.compensation, undefined, 'case 8 — an irreversible node gains no compensation');
+  // 9b — the chain policy becomes settings.compensation when the parent has none.
+  assert.deepEqual(
+    out.settingsCompensation?.triggers,
+    ['node-failure', 'run-cancel'],
+    'case 8 — chain policy becomes settings.compensation',
+  );
+
+  // 9b conflict — a DIFFERENT parent policy is refused, never merged.
+  assert.throws(
+    () => expandChainWithCompensation(chain, ctx, { triggers: ['operator-request'] }),
+    (err: unknown) => err instanceof ChainCompensationPolicyConflictError,
+    'case 8 — a differing parent settings.compensation is refused, not merged',
+  );
+
+  // 6c contradiction — both irreversibleEffect and compensation is refused.
+  const contradictory = {
+    ...chain,
+    dag: {
+      nodes: [
+        {
+          id: 'both',
+          typeId: 'core.openwop.noop',
+          irreversibleEffect: true,
+          compensation: { nodeTypeId: 'core.openwop.noop' },
+        },
+      ],
+      edges: [],
+    },
+  } as unknown as WorkflowChainWithCompensation;
+  assert.throws(
+    () => expandChainWithCompensation(contradictory, ctx),
+    (err: unknown) => err instanceof ChainIrreversibleWithCompensationError,
+    'case 8 — irreversibleEffect + compensation on one node is refused',
+  );
+
+  console.log('✓ case 8 — RFC 0157 compensation carried, policy conflict + irreversible contradiction refused');
+}
+
+console.log('\nworkflow-chain-expansion: 8/8 cases passed');

@@ -233,6 +233,255 @@ export function expandChain(chain: WorkflowChain, ctx: ExpansionContext): Expand
   return { nodes: expandedNodes, edges: expandedEdges, idMap };
 }
 
+// ─── End of the MIRRORED CORE ───────────────────────────────────────────────
+//
+// Everything above mirrors `conformance/src/lib/workflow-chain-expansion.ts`
+// byte-for-byte (whitespace-tolerant) and is compared by
+// `scripts/check-workflow-chain-expansion-sync.mjs` in the openwop/openwop repo.
+// The sentinel is explicit here (it used to be implied by the I/O wrapper banner
+// below) because a SECOND mirrored region now follows, and without this marker
+// the core comparison would swallow it.
+
+// ─── Begin the MIRRORED COMPENSATION pass ───────────────────────────────────
+//
+// SP-01 (2026-08-18): this pass is a SECOND byte-mirrored region, gated by
+// `scripts/check-workflow-chain-expansion-sync.mjs` alongside the core above.
+//
+// It sits below "End of the MIRRORED CORE" because it composes on the core's
+// OUTPUT rather than editing it — but unlike the capability-gated surfaces that
+// follow (RFC 0124 deferred parameters, RFC 0133 sub-chains, which a host that
+// does not advertise them MUST REFUSE rather than implement), carrying a
+// chain's compensation declaration is UNCONDITIONAL: `compensation.md`
+// §"Workflow policy" makes the declaration descriptive, so a host that does not
+// advertise `capabilities.compensation` still MUST carry it verbatim and refuse
+// only a chain-level POLICY (`capability_required`). Unconditional ⇒ genuinely
+// mirrorable ⇒ gated. RFC 0157's own commit claimed this pass was already
+// "CI-gated against the reference host"; it was not — the gate stopped at the
+// core sentinel — so the mirror never received it. Anything added between the
+// two sentinels below MUST be mirrored in the reference host — that is the
+// whole RFC 0157 unit: the types, the two error classes, the helpers, and
+// `carryCompensation` / `expandChainWithCompensation`.
+
+// ---------------------------------------------------------------------------
+// RFC 0157 (RFC 0013 revision × RFC 0151 §B) — chain fragments carry
+// compensation.
+//
+// A workflow that is "a chain or a stack" could not own an inverse action:
+// `FragmentNode` had no `compensation` and the chain had no policy, so RFC 0151
+// §B was reachable only through a hand-authored `POST /v1/workflows`. This pass
+// carries the node-level `compensation` declaration and the chain-level policy
+// through expansion into the registered `WorkflowDefinition`.
+//
+// It sits BELOW the mirrored core deliberately: the core is byte-mirrored by
+// the in-memory reference host and gated in CI, and this pass composes on the
+// core's output rather than editing it — a host runs `expandChain` then
+// `carryCompensation` (or `expandChainWithCompensation`). It is NOT capability
+// gated on the host's `compensation` advert: a host that does not advertise
+// `capabilities.compensation` still MUST carry the declaration verbatim (it is
+// descriptive) and MUST refuse a chain-level POLICY with `capability_required`
+// per `compensation.md` §"Workflow policy" — the same rule as for a hand-authored
+// `settings.compensation`.
+//
+// Normative reference: `spec/v1/workflow-chain-packs.md` §"Compensation
+// (RFC 0157)"; error code `chain_compensation_policy_conflict`.
+// ---------------------------------------------------------------------------
+
+/** Mirror of `WorkflowNode.compensation` (workflow-definition.schema.json). */
+export interface FragmentNodeCompensation {
+  nodeTypeId: string;
+  inputMapping?: Record<string, unknown>;
+  retry?: { maxAttempts?: number; backoffMs?: number };
+  requiresApproval?: boolean;
+}
+
+/** Mirror of `compensation-policy.schema.json` (RFC 0151 §B). */
+export interface ChainCompensationPolicy {
+  profileVersion?: string;
+  orderingModel?: 'reverse-completion' | 'dependency-graph';
+  triggers: ReadonlyArray<'node-failure' | 'run-cancel' | 'cap-breach' | 'operator-request'>;
+  retry?: { maxAttempts?: number; backoffMs?: number };
+  timeoutMs?: number;
+  exhaustedDisposition?: 'record-outcome' | 'manual-intervention';
+  approvalScope?: 'declared' | 'all';
+  onParentCancel?: 'continue' | 'pause' | 'manual';
+}
+
+/** A chain as RFC 0157 sees it: the RFC 0013 shape plus the two optional
+ *  compensation surfaces. */
+export type WorkflowChainWithCompensation = Omit<WorkflowChain, 'dag'> & {
+  dag: {
+    nodes: ReadonlyArray<FragmentNode & { compensation?: FragmentNodeCompensation; irreversibleEffect?: boolean }>;
+    edges?: ReadonlyArray<FragmentEdge>;
+  };
+  compensation?: ChainCompensationPolicy;
+};
+
+/** Thrown when a fragment node declares BOTH `irreversibleEffect: true` and a
+ *  `compensation` (RFC 0151 UQ4 / `compensation.md` §B): a contradiction the
+ *  schema also rejects; expansion refuses it fail-closed rather than pick one.
+ *  Wire code `chain_irreversible_with_compensation`. */
+export class ChainIrreversibleWithCompensationError extends Error {
+  readonly code = 'chain_irreversible_with_compensation' as const;
+  constructor(
+    public readonly nodeId: string,
+    public readonly chainId: string,
+  ) {
+    super(
+      `chain_irreversible_with_compensation: fragment node "${nodeId}" in chain "${chainId}" declares both ` +
+        'irreversibleEffect: true and a compensation — an effect cannot both have and lack an inverse',
+    );
+    this.name = 'ChainIrreversibleWithCompensationError';
+  }
+}
+
+/** Thrown when the parent already carries a `settings.compensation` policy that
+ *  is not deep-equal to the chain's. Wire code
+ *  `chain_compensation_policy_conflict` (`workflow-chain-packs.md` §"Error
+ *  codes"). Fail closed: a merged policy nobody wrote is exactly the
+ *  guess-at-a-contract failure the policy exists to prevent. */
+export class ChainCompensationPolicyConflictError extends Error {
+  readonly code = 'chain_compensation_policy_conflict' as const;
+  constructor(
+    public readonly chainId: string,
+  ) {
+    super(
+      `chain_compensation_policy_conflict: chain "${chainId}" declares a compensation policy that differs ` +
+        'from the parent workflow\'s settings.compensation; expansion MUST NOT merge policies',
+    );
+    this.name = 'ChainCompensationPolicyConflictError';
+  }
+}
+
+/** Rewrite fragment node-id references inside an `inputMapping` value the same
+ *  way edge refs are rewritten: any string of the form
+ *  `${nodes.<fragmentNodeId>.<path>}` (or bare `nodes.<id>.<path>` / `<id>.<port>`)
+ *  gets its node-id segment prefixed. Everything else passes through. Recurses
+ *  through objects/arrays. Deliberately conservative: only ids that ARE
+ *  fragment node ids are rewritten, so a reference to a parent-workflow node
+ *  survives verbatim (same rule as `rewriteEdgeRef`). */
+function rewriteInputMappingRefs(value: unknown, fragmentNodeIds: ReadonlySet<string>, prefix: string): unknown {
+  if (typeof value === 'string') {
+    // `${nodes.<id>.…}` template form (RFC 0151 §B example) and `nodes.<id>.…`
+    return value.replace(/(\$\{\s*nodes\.|\bnodes\.)([A-Za-z0-9_.-]+?)(\.)/g, (m, lead: string, id: string, dot: string) =>
+      fragmentNodeIds.has(id) ? `${lead}${prefix}${id}${dot}` : m,
+    );
+  }
+  if (Array.isArray(value)) return value.map((v) => rewriteInputMappingRefs(v, fragmentNodeIds, prefix));
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = rewriteInputMappingRefs(v, fragmentNodeIds, prefix);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Stable deep equality for policy comparison (key order insensitive). */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return '[' + v.map(canonicalJson).join(',') + ']';
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return '{' + Object.keys(o).sort().map((k) => JSON.stringify(k) + ':' + canonicalJson(o[k])).join(',') + '}';
+  }
+  return JSON.stringify(v);
+}
+
+export interface CarriedCompensation {
+  /** The expanded fragment with `compensation` carried onto each node that
+   *  declared one (typeIds validated, params substituted, id refs rewritten)
+   *  and `irreversibleEffect` copied verbatim where declared. */
+  nodes: ReadonlyArray<ExpandedFragment['nodes'][number] & { compensation?: FragmentNodeCompensation; irreversibleEffect?: boolean }>;
+  /** The `settings.compensation` the registered definition MUST carry after
+   *  this expansion: the parent's when the chain declares none; the chain's
+   *  when the parent had none; the (equal) shared policy when both agree.
+   *  `undefined` when neither side declares one. */
+  settingsCompensation: ChainCompensationPolicy | undefined;
+}
+
+/**
+ * RFC 0157 — carry the chain's compensation surfaces through expansion.
+ *
+ * Steps (numbered to slot into `workflow-chain-packs.md` §"Expansion
+ * semantics"):
+ *   3b. every `compensation.nodeTypeId` MUST resolve exactly as `typeId` does
+ *       (`chain_unresolvable_typeid`) — an unwind must not fail on a typo first
+ *       discovered during a failure;
+ *   5b. `{{params.*}}` inside `inputMapping` are substituted (author-time
+ *       literals; the recorded-facts rule is unaffected);
+ *   6b. fragment node-id references inside `inputMapping` are rewritten with
+ *       the expansion prefix, exactly as edge refs are;
+ *   6c. `irreversibleEffect: true` (RFC 0151 UQ4) is copied onto the expanded
+ *       node unchanged; a fragment node declaring both it and a `compensation`
+ *       is refused (`chain_irreversible_with_compensation`) — the schema rejects
+ *       the shape too, and expansion does not pick a side;
+ *   9b. the chain-level policy becomes the definition's `settings.compensation`
+ *       — copied when the parent has none, accepted when equal, otherwise
+ *       `chain_compensation_policy_conflict`.
+ *
+ * @throws ChainUnresolvableTypeIdError, ChainCompensationPolicyConflictError, ChainIrreversibleWithCompensationError
+ */
+export function carryCompensation(
+  chain: WorkflowChainWithCompensation,
+  expanded: ExpandedFragment,
+  ctx: ExpansionContext,
+  parentSettingsCompensation?: ChainCompensationPolicy,
+): CarriedCompensation {
+  const prefix = computePrefix(chain.chainId, ctx.expansionId);
+  const srcNodes = chain.dag.nodes;
+  const fragmentNodeIds = new Set(srcNodes.map((n) => n.id));
+  const byOriginalId = new Map(srcNodes.map((n) => [n.id, n] as const));
+
+  // 3b (+ 6c's contradiction check, before any node is emitted)
+  for (const n of srcNodes) {
+    if (n.irreversibleEffect === true && n.compensation !== undefined) {
+      throw new ChainIrreversibleWithCompensationError(n.id, chain.chainId);
+    }
+    if (n.compensation !== undefined && !ctx.isTypeIdResolvable(n.compensation.nodeTypeId)) {
+      throw new ChainUnresolvableTypeIdError(n.compensation.nodeTypeId, chain.chainId);
+    }
+  }
+
+  // 5b + 6b + 6c
+  const nodes = expanded.nodes.map((en) => {
+    const originalId = en.id.startsWith(prefix) ? en.id.slice(prefix.length) : en.id;
+    const src = byOriginalId.get(originalId);
+    if (src?.irreversibleEffect === true) return { ...en, irreversibleEffect: true };
+    if (src?.compensation === undefined) return en;
+    const c: FragmentNodeCompensation = { nodeTypeId: src.compensation.nodeTypeId };
+    if (src.compensation.inputMapping !== undefined) {
+      const substituted = substitute(src.compensation.inputMapping, ctx.params) as Record<string, unknown>;
+      c.inputMapping = rewriteInputMappingRefs(substituted, fragmentNodeIds, prefix) as Record<string, unknown>;
+    }
+    if (src.compensation.retry !== undefined) c.retry = { ...src.compensation.retry };
+    if (src.compensation.requiresApproval !== undefined) c.requiresApproval = src.compensation.requiresApproval;
+    return { ...en, compensation: c };
+  });
+
+  // 9b
+  let settingsCompensation: ChainCompensationPolicy | undefined = parentSettingsCompensation;
+  if (chain.compensation !== undefined) {
+    if (parentSettingsCompensation === undefined) {
+      settingsCompensation = { ...chain.compensation, triggers: [...chain.compensation.triggers] };
+    } else if (canonicalJson(parentSettingsCompensation) !== canonicalJson(chain.compensation)) {
+      throw new ChainCompensationPolicyConflictError(chain.chainId);
+    }
+  }
+  return { nodes, settingsCompensation };
+}
+
+/** Convenience: `expandChain` followed by `carryCompensation`. */
+export function expandChainWithCompensation(
+  chain: WorkflowChainWithCompensation,
+  ctx: ExpansionContext,
+  parentSettingsCompensation?: ChainCompensationPolicy,
+): ExpandedFragment & CarriedCompensation {
+  const expanded = expandChain(chain, ctx);
+  const carried = carryCompensation(chain, expanded, ctx, parentSettingsCompensation);
+  return { ...expanded, nodes: carried.nodes, settingsCompensation: carried.settingsCompensation };
+}
+// ─── End of the MIRRORED COMPENSATION pass ──────────────────────────────────
+
 // ─── Host-side I/O wrapper ──────────────────────────────────────────────
 
 /**
