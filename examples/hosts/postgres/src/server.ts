@@ -3503,10 +3503,14 @@ async function handleCreateRun(req: IncomingMessage, res: ServerResponse): Promi
     const cached = await getIdempotency(cacheKey);
     if (cached) {
       if (cached.body_hash !== incomingBodyHash) {
+        // SP-03 (2026-08-18): canonical code per `spec/v1/idempotency.md` v1.5
+        // §"Record shape, digest, and lease"; `idempotency_key_conflict` is
+        // retired there ("conflict" reads as the in-flight case, which has its
+        // own code).
         sendError(
           res,
           409,
-          'idempotency_key_conflict',
+          'idempotency_key_mismatch',
           'Idempotency-Key reused with a different request body.',
         );
         return;

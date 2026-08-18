@@ -2283,10 +2283,16 @@ async function handleCreateRun(req: IncomingMessage, res: ServerResponse): Promi
       | undefined;
     if (cached) {
       if (cached.body_hash !== incomingBodyHash) {
+        // SP-03 (2026-08-18): `idempotency_key_mismatch` is the canonical code
+        // (`spec/v1/idempotency.md` v1.5 §"Record shape, digest, and lease").
+        // This host emitted `idempotency_key_conflict`, which that section
+        // retires — "conflict" reads as the in-flight case, which has its own
+        // code (`idempotency_in_flight`). The spec named no mismatch error at
+        // all until v1.5, which is how three spellings ended up in the wild.
         sendError(
           res,
           409,
-          'idempotency_key_conflict',
+          'idempotency_key_mismatch',
           'Idempotency-Key reused with a different request body.',
         );
         return;
