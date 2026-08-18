@@ -29,7 +29,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,13 @@ const __dirname = dirname(__filename);
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
 const SAMPLE_REGISTRY = join(REPO_ROOT, 'examples', 'packs');
 const SAMPLE_PACK_NAME = 'vendor.openwop.workflow-chain-sample';
+// `examples/packs/` uses the short dirname (`workflow-chain-sample`), not the
+// fully-qualified pack name — same convention `findPackDir` tolerates.
+const SAMPLE_PACK_VERSION = (
+  JSON.parse(readFileSync(join(SAMPLE_REGISTRY, 'workflow-chain-sample', 'pack.json'), 'utf8')) as {
+    version: string;
+  }
+).version;
 
 async function expectThrow(
   fn: () => Promise<unknown>,
@@ -82,7 +89,10 @@ async function expectThrow(
   });
 
   assert.equal(result.packName, SAMPLE_PACK_NAME);
-  assert.equal(result.packVersion, '1.0.0');
+  // The sample chain pack's version moves (1.0.0 → 1.1.0 in #16, the RFC 0157
+  // compensating chains); pin the assertion to the registry's own manifest so
+  // this test measures expansion, not the pack's release cadence.
+  assert.equal(result.packVersion, SAMPLE_PACK_VERSION);
   assert.equal(result.chainId, 'vendor.openwop.workflow-chain-sample.summarize-text');
   assert.equal(result.expansionId, 'abcd');
   assert.equal(result.nodes.length, 1);
@@ -268,4 +278,62 @@ console.log('✓ case 4 — chain not found');
   console.log('✓ case 6 — RFC 0125 triggerRule survives expansion');
 }
 
-console.log('\nworkflow-chain-expansion: 6/6 cases passed');
+// ─── Case 7: whole-value `{{params.x}}` resolves RAW-TYPED (RFC 0013 WCP2) ──
+//
+// `workflow-chain-packs.md` §"Parameter substitution": a config string that
+// is EXACTLY one `{{params.<name>}}` token resolves to the raw typed parameter
+// value (object / array / number / boolean survive as their JSON type); a token
+// EMBEDDED in surrounding text does literal string substitution. The spec-
+// authoritative conformance copy gained this in openwop/openwop#819
+// (2026-07-05); this mirror did not, and every typed chain parameter reached
+// the node config stringified (`"42"`, `"[object Object]"`-class coercions)
+// until the cross-repo drift gate was re-read. This case pins the rule here.
+
+{
+  const chain: WorkflowChain = {
+    chainId: 'vendor.test.chain.whole-value',
+    version: '1.0.0',
+    label: 'whole-value probe',
+    description: 'one node whose config mixes whole-value and embedded tokens',
+    parameters: {
+      count: { type: 'number' },
+      flags: { type: 'object' },
+      tags: { type: 'array' },
+      on: { type: 'boolean' },
+      name: { type: 'string' },
+    },
+    dag: {
+      nodes: [
+        {
+          id: 'a',
+          typeId: 'core.openwop.noop',
+          config: {
+            count: '{{params.count}}',
+            flags: '{{params.flags}}',
+            tags: '{{params.tags}}',
+            on: '{{params.on}}',
+            greeting: 'hello {{params.name}} x{{params.count}}',
+            missing: '{{params.undeclared}}',
+          },
+        },
+      ],
+      edges: [],
+    },
+  } as unknown as WorkflowChain;
+
+  const out = expandChain(chain, {
+    expansionId: 'whole',
+    params: { count: 42, flags: { a: 1 }, tags: ['x', 'y'], on: false, name: 'ada' },
+    isTypeIdResolvable: () => true,
+  });
+  const cfg = (out.nodes[0] as { config: Record<string, unknown> }).config;
+  assert.strictEqual(cfg.count, 42, 'case 7 — whole-value number stays a number');
+  assert.deepStrictEqual(cfg.flags, { a: 1 }, 'case 7 — whole-value object stays an object');
+  assert.deepStrictEqual(cfg.tags, ['x', 'y'], 'case 7 — whole-value array stays an array');
+  assert.strictEqual(cfg.on, false, 'case 7 — whole-value boolean stays a boolean');
+  assert.strictEqual(cfg.greeting, 'hello ada x42', 'case 7 — embedded tokens substitute as strings');
+  assert.strictEqual(cfg.missing, '', 'case 7 — undeclared whole-value token collapses to the empty string');
+  console.log('✓ case 7 — whole-value {{params.x}} resolves raw-typed; embedded tokens stringify');
+}
+
+console.log('\nworkflow-chain-expansion: 7/7 cases passed');
