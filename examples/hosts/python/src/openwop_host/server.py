@@ -219,8 +219,10 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
             with the final response to register the cache entry.
 
             On Idempotency-Key reuse with a different body, this helper writes
-            a 409 `idempotency_key_conflict` response and signals replayed=True
-            so the caller short-circuits cleanly.
+            a 409 `idempotency_key_mismatch` response and signals replayed=True
+            so the caller short-circuits cleanly. (SP-03, 2026-08-18: canonical
+            per `spec/v1/idempotency.md` v1.5 §"Record shape, digest, and
+            lease"; `idempotency_key_conflict` is retired there.)
             """
             idempotency_key = self.headers.get("Idempotency-Key")
             body_hash = IdempotencyCache.hash_body(body_text)
@@ -233,7 +235,7 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
             if cached.body_hash != body_hash:
                 self._send_error_envelope(
                     409,
-                    "idempotency_key_conflict",
+                    "idempotency_key_mismatch",
                     "Idempotency-Key reused with a different request body.",
                 )
                 return idempotency_key, body_hash, True
@@ -535,7 +537,7 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                         if cached.body_hash != incoming_body_hash:
                             self._send_error_envelope(
                                 409,
-                                "idempotency_key_conflict",
+                                "idempotency_key_mismatch",
                                 "Idempotency-Key reused with a different request body.",
                             )
                             return
