@@ -52,6 +52,7 @@ interface ReceivedDelivery {
   timestamp: string;
   algorithm: string;
   subscriptionId: string;
+  eventType: string;
   body: string;
   parsed: Record<string, unknown>;
 }
@@ -64,15 +65,24 @@ function bootReceiver(port: number, deliveries: ReceivedDelivery[]): Promise<() 
         body += c.toString('utf8');
       });
       req.on('end', () => {
+        // Header names per `webhooks.md` §"Delivery headers". Corrected
+        // 2026-08-25 alongside the host: this receiver read
+        // `x-openwop-signature-timestamp` and `x-openwop-subscription-id`,
+        // names the spec does not define — so it was a MIRROR of the host's
+        // invented naming, and it could only have gone red if the host had
+        // disagreed with itself. The HMAC below was always a real oracle
+        // (`node:crypto` over the spec recipe); the header names were not.
         const sig = req.headers['x-openwop-signature'];
-        const ts = req.headers['x-openwop-signature-timestamp'];
+        const ts = req.headers['x-openwop-timestamp'];
         const alg = req.headers['x-openwop-signature-algorithm'];
-        const subId = req.headers['x-openwop-subscription-id'];
+        const subId = req.headers['x-openwop-webhook-id'];
+        const evType = req.headers['x-openwop-event-type'];
         deliveries.push({
           signature: typeof sig === 'string' ? sig : '',
           timestamp: typeof ts === 'string' ? ts : '',
           algorithm: typeof alg === 'string' ? alg : '',
           subscriptionId: typeof subId === 'string' ? subId : '',
+          eventType: typeof evType === 'string' ? evType : '',
           body,
           parsed: JSON.parse(body) as Record<string, unknown>,
         });
@@ -185,11 +195,23 @@ try {
     // ── 4. Verify signature ───────────────────────────────────────────
     const sample = completedDeliveries[0]!;
     assert.equal(sample.algorithm, 'v1', 'signature algorithm MUST be v1');
-    assert.equal(sample.subscriptionId, subscriptionId);
+    assert.equal(sample.subscriptionId, subscriptionId, 'X-openwop-Webhook-Id MUST carry the subscription id');
+    assert.ok(sample.eventType.length > 0, 'X-openwop-Event-Type MUST be present');
+    // `webhooks.md` §"Delivery headers": the value is `sha256={hex}`. Assert the
+    // prefix separately from the digest — a shape check and a correctness check
+    // are different assertions, and only the second needs an independent recipe.
+    assert.ok(
+      sample.signature.startsWith('sha256='),
+      'X-openwop-Signature MUST carry the `sha256=` prefix',
+    );
     const expectedSig = createHmac('sha256', secret)
       .update(`${sample.timestamp}.${sample.body}`, 'utf8')
       .digest('hex');
-    assert.equal(sample.signature, expectedSig, 'HMAC-SHA256 signature MUST validate');
+    assert.equal(
+      sample.signature.slice('sha256='.length),
+      expectedSig,
+      'HMAC-SHA256 signature MUST validate',
+    );
     console.log('  ✓ HMAC-SHA256 signature validates');
 
     // ── 5. Payload redaction — no `data` field ────────────────────────
