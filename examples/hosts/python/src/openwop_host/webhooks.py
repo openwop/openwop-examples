@@ -6,11 +6,13 @@ surface from `spec/v1/webhooks.md`:
     - POST   /v1/webhooks          register
     - DELETE /v1/webhooks/{id}     unregister
     - Best-effort HTTP POST delivery on every run event
-    - HMAC-SHA256 signing over `{timestamp}.{rawBody}` with headers
-        X-openwop-Signature
-        X-openwop-Signature-Timestamp
+    - HMAC-SHA256 signing over `{timestamp}.{rawBody}`, emitted as the
+      `webhooks.md` §"Delivery headers" set:
+        X-openwop-Webhook-Id
+        X-openwop-Event-Type
+        X-openwop-Timestamp
+        X-openwop-Signature: sha256={hex}
         X-openwop-Signature-Algorithm: v1
-        X-openwop-Subscription-Id
 
 Reference-only properties:
 
@@ -43,6 +45,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
+
+from . import __version__
 
 
 class WebhookUrlRejected(Exception):
@@ -189,8 +193,19 @@ class WebhookRegistry:
 def sign_payload(secret: str, timestamp: str, raw_body: str) -> str:
     """HMAC-SHA256 hex digest of `{timestamp}.{rawBody}` per webhooks.md.
 
-    The same recipe the TypeScript host emits and the conformance suite
-    verifies — making cross-host signature parity mechanical.
+    Returns the BARE hex digest. The `sha256=` prefix that
+    `webhooks.md` §"Delivery headers" requires on the wire is added by
+    `deliver()`, so callers that need the raw digest (tests, tooling)
+    are not forced to strip it.
+
+    NOTE: this docstring used to claim "the same recipe the TypeScript
+    host emits and the conformance suite verifies — making cross-host
+    signature parity mechanical." The signed BYTES were always right;
+    the claim was about parity and nothing checked it. On 2026-08-09 the
+    suite was corrected against the spec and this host was not, so the
+    docstring asserted a parity that had stopped holding — a comment
+    with no oracle behind it. The claim is removed rather than restated:
+    `webhook-signed-delivery.test.ts` is the thing that checks parity.
     """
     mac = hmac.new(
         secret.encode("utf-8"),
@@ -230,11 +245,23 @@ def deliver(sub: WebhookSubscription, payload: dict[str, Any], *, timeout_s: flo
             data=body.encode("utf-8"),
             method="POST",
             headers={
+                # Header names + value shapes per `webhooks.md`
+                # §"Delivery headers" (the SSoT). Corrected 2026-08-25:
+                # this host emitted `X-openwop-Subscription-Id`,
+                # `X-openwop-Signature-Timestamp`, a BARE-HEX signature,
+                # a `Python-urllib/3.11` User-Agent, and no
+                # `X-openwop-Event-Type` at all. The first three are the
+                # exact names the conformance suite recorded in 2026-08-09
+                # as appearing "in NO spec file or RFC" — the suite was
+                # fixed against the spec then; this host was not, and no
+                # re-measurement happened, so nothing went red for 16 days.
                 "Content-Type": "application/json",
-                "X-openwop-Signature": signature,
-                "X-openwop-Signature-Timestamp": timestamp,
+                "User-Agent": f"openwop-webhook-dispatcher/{__version__}",
+                "X-openwop-Webhook-Id": sub.subscription_id,
+                "X-openwop-Event-Type": str(payload.get("type", "")),
+                "X-openwop-Timestamp": timestamp,
+                "X-openwop-Signature": f"sha256={signature}",
                 "X-openwop-Signature-Algorithm": "v1",
-                "X-openwop-Subscription-Id": sub.subscription_id,
             },
         )
         with urllib.request.urlopen(request, timeout=timeout_s) as resp:
