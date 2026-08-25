@@ -5,8 +5,10 @@
  * the webhook surface from `spec/v1/webhooks.md`:
  *   - `POST /v1/webhooks` register
  *   - `DELETE /v1/webhooks/{id}` unregister
- *   - HMAC-SHA256 over `{timestamp}.{rawBody}` with `X-openwop-Signature*`
- *     and `X-openwop-Signature-Algorithm: v1` headers.
+ *   - HMAC-SHA256 over `{timestamp}.{rawBody}` emitted as the
+ *     `webhooks.md` §"Delivery headers" set (`X-openwop-Webhook-Id`,
+ *     `X-openwop-Event-Type`, `X-openwop-Timestamp`,
+ *     `X-openwop-Signature: sha256={hex}`, `X-openwop-Signature-Algorithm`).
  *   - Best-effort fire-and-forget delivery; receivers fetch authenticated
  *     run snapshot or debug-bundle for the full payload.
  *   - SSRF guard rejects RFC1918 / link-local / loopback / .local /
@@ -251,6 +253,15 @@ export function signPayload(secret: string, timestamp: string, rawBody: string):
  * Best-effort POST to a single subscriber. Errors swallowed. Returns a
  * promise that resolves when the request completes (success or failure).
  */
+/** `X-openwop-Event-Type` per `webhooks.md` §"Delivery headers". The payload is
+ *  typed `unknown` at this boundary, so read the field defensively rather than
+ *  casting — an absent type yields an empty header, never a crash in a
+ *  fire-and-forget delivery thread. */
+function eventTypeOf(payload: unknown): string {
+  const t = (payload as { type?: unknown } | null)?.type;
+  return typeof t === 'string' ? t : '';
+}
+
 function deliver(sub: WebhookSubscription, payload: unknown): Promise<void> {
   return new Promise((resolve) => {
     let url: URL;
@@ -272,10 +283,25 @@ function deliver(sub: WebhookSubscription, payload: unknown): Promise<void> {
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
-        'X-openwop-Signature': signature,
-        'X-openwop-Signature-Timestamp': timestamp,
+        // Header names + value shapes per `webhooks.md` §"Delivery headers"
+        // (the SSoT). Corrected 2026-08-25: this host emitted
+        // `X-openwop-Subscription-Id`, `X-openwop-Signature-Timestamp`, a
+        // BARE-HEX `X-openwop-Signature`, and no `X-openwop-Event-Type`.
+        // Those are the exact names the conformance suite recorded on
+        // 2026-08-09 as appearing "in NO spec file or RFC": a tier-2 host
+        // emitted what the spec shows and failed, so the SUITE was fixed
+        // against the spec — and none of the three reference hosts were.
+        // Suite and hosts had been mirrors of each other's naming; the spec
+        // was the oracle neither was checked against. No host was
+        // re-measured afterwards, so nothing went red for 16 days.
+        // `User-Agent` was `node`/`Python-urllib` and is unasserted by the
+        // suite — found by reading the spec table, not by running anything.
+        'User-Agent': `openwop-webhook-dispatcher/1.1.7`,
+        'X-openwop-Webhook-Id': sub.subscriptionId,
+        'X-openwop-Event-Type': eventTypeOf(payload),
+        'X-openwop-Timestamp': timestamp,
+        'X-openwop-Signature': `sha256=${signature}`,
         'X-openwop-Signature-Algorithm': 'v1',
-        'X-openwop-Subscription-Id': sub.subscriptionId,
       },
     };
     const reqFn = url.protocol === 'https:' ? httpsRequest : httpRequest;
