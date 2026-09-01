@@ -11,7 +11,7 @@
     "test": "tsx test/audit-tamper.test.ts && tsx test/cost-attribution.test.ts && tsx test/model-capability-insufficient.test.ts && tsx test/webhook-tenant-gate.test.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0"
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
