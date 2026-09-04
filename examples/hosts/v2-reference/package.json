@@ -2,7 +2,7 @@
   "name": "@openwop/openwop-host-v2-reference",
   "version": "2.0.0-rc.1",
   "private": true,
-  "description": "Reference OpenWOP v2 host — the charter §F witness. Implemented from spec/v2/core/*.md and the generated v2 documents; node:http + better-sqlite3 + node:crypto, no framework.",
+  "description": "Reference OpenWOP v2 host \u2014 the charter \u00a7F witness. Implemented from spec/v2/core/*.md and the generated v2 documents; node:http + better-sqlite3 + node:crypto, no framework.",
   "type": "module",
   "scripts": {
     "start": "tsx src/server.ts",
@@ -16,8 +16,8 @@
     "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
-    "@openwop/openwop-conformance": "2.0.0-rc.2",
-    "@openwop/spec-artifacts": "2.0.0-rc.2",
+    "@openwop/openwop-conformance": "2.0.0-rc.13",
+    "@openwop/spec-artifacts": "2.0.0-rc.13",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "ajv": "^8.17.0",
