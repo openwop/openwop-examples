@@ -13,6 +13,15 @@ import { ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, EXTENSION_ORG, HOST_ID, HOST_
 import type { Host } from './host.js';
 
 const SINCE = '2.0';
+/**
+ * capabilities.md §8 — the `technical` maturity axis IS the record's `status`,
+ * and `until` is REQUIRED when a record is not `stable`. `spec/v2/declaration.json`
+ * declares every family this host advertises `technical: experimental` except
+ * `limits`, so the records say so rather than over-claiming maturity. `2.1` is
+ * the horizon by which each either stabilises or carries a removal row; it is
+ * not in the past while the host serves 2.0.
+ */
+const EXPERIMENTAL_UNTIL = '2.1';
 
 export function advertisedFixtures(host: Host): string[] {
   return [...host.workflows.keys()].sort();
@@ -21,7 +30,8 @@ export function advertisedFixtures(host: Host): string[] {
 /** The closed v2 root (schemas/v2/capabilities.schema.json). */
 export function v2Document(host: Host): Record<string, unknown> {
   const c = host.config;
-  const record = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'stable', since: SINCE, witness, ...facets });
+  const record = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'experimental', since: SINCE, until: EXPERIMENTAL_UNTIL, witness, ...facets });
+  const stable = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'stable', since: SINCE, witness, ...facets });
   const doc: Record<string, unknown> = {
     protocolVersions: [...PROTOCOL_VERSIONS],
     preferredVersion: c.preferredVersion,
@@ -35,7 +45,7 @@ export function v2Document(host: Host): Record<string, unknown> {
       [`${EXTENSION_ORG}.host`]: { hostId: HOST_ID, build: c.hostBuild, webhookBackoffBaseMs: c.webhookBackoffBaseMs, deadLetterRetentionDays: c.webhookRetentionDays, deadLetterRead: '/webhooks/{webhookId}/dead-letters' },
     },
     // ── core families ───────────────────────────────────────────────────
-    limits: record('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
+    limits: stable('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
     eventLog: record('claims-check', { crossEngineOrdering: { orderingModel: 'global-sequencer' } }),
     interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),
     replay: record('witnessable-gated', { modes: ['replay', 'branch'], retention: { days: c.replayRetentionDays }, effectSeamsManifest: '/host/effect-seams' }),

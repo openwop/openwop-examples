@@ -1,12 +1,12 @@
 {
   "bundleVersion": "3",
-  "generatedAt": "2026-09-04T02:33:44.730Z",
+  "generatedAt": "2026-09-04T03:10:56.281Z",
   "suite": {
     "name": "@openwop/openwop-conformance",
     "version": "2.0.0-rc.1",
-    "targetMajor": 1,
+    "targetMajor": 2,
     "specArtifactsVersion": "2.0.0-rc.1",
-    "stampSha256": "b61ef928f41c356584b252410e349a3d531d0828037d35b6226bccddf3324eb4"
+    "stampSha256": "c588b39fdcedb05d753c738cfe8e335093cdd2e9431f789d9d2085df4629e794"
   },
   "host": {
     "name": "openwop-host-v2-reference",
@@ -14,7 +14,7 @@
     "vendor": "openwop (reference example)",
     "build": {
       "kind": "commit",
-      "id": "996abcae9f8d7fe7349965b983cf45fb037f0053"
+      "id": "50814360c24f7b246fcc8b08f8f44d88af23a462"
     },
     "signingKeyId": "v2-reference-1",
     "relaxations": [
@@ -27,58 +27,21 @@
   },
   "discovery": {
     "url": "http://127.0.0.1:3838/.well-known/openwop",
-    "sha256": "b1ef2c3acc9f5804d3ce8816855dc49b4dce6227b9ed46436455a5f4a0d25a75",
+    "sha256": "7780f4d1fe717d229941d1b33fba5a1ad0db6cd2b4a722b5cf31103e2eb154ae",
     "protocolVersions": [
       "1.11",
       "2.0"
     ],
     "preferredVersion": "1.11"
   },
-  "claimedProfiles": [
-    {
-      "id": "openwop-discovery-core",
-      "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
-    },
-    {
-      "id": "openwop-stream-sse",
-      "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
-    },
-    {
-      "id": "openwop-stream-poll",
-      "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
-    },
-    {
-      "id": "openwop-node-packs",
-      "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
-    },
-    {
-      "id": "openwop-replay-fork",
-      "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
-    },
-    {
-      "id": "openwop-fixtures",
-      "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
-    }
-  ],
+  "claimedProfiles": [],
   "results": {
     "totals": {
-      "executedPass": 54,
-      "executedFail": 2,
+      "executedPass": 142,
+      "executedFail": 0,
       "skipped": 0,
       "inapplicable": 24,
-      "blocked": 19
+      "blocked": 17
     },
     "requirements": [
       {
@@ -115,8 +78,7 @@
         "id": "openwop.scenario.v2-capability-record-shape",
         "scenario": "v2-capability-record-shape.test.ts",
         "result": "executed-pass",
-        "assertions": 60,
-        "detail": "partial-witness: inapplicable: no advertised family record carries an `until` (every record is stable, or none is advertised)"
+        "assertions": 82
       },
       {
         "id": "openwop.scenario.v2-chain-pin-exact",
@@ -128,9 +90,9 @@
       {
         "id": "openwop.scenario.v2-coherence-not-in-bundle",
         "scenario": "v2-coherence-not-in-bundle.test.ts",
-        "result": "executed-fail",
+        "result": "executed-pass",
         "assertions": 2,
-        "detail": "one or more assertions in the file failed"
+        "detail": "partial-witness: blocked: evidence/corpus-ledger.json is absent from this layout — the corpus id set cannot be read"
       },
       {
         "id": "openwop.scenario.v2-compensation-read-projection",
@@ -321,8 +283,7 @@
         "id": "openwop.scenario.v2-pinned-run-disposition",
         "scenario": "v2-pinned-run-disposition.test.ts",
         "result": "executed-pass",
-        "assertions": 6,
-        "detail": "partial-witness: skipped: opt-in not supplied: no normative surface lists the change ids a host implements, so the continue leg needs OPENWOP_TEST_IMPLEMENTED_CHANGE_ID naming one"
+        "assertions": 9
       },
       {
         "id": "openwop.scenario.v2-poll-cursor-v2",
@@ -359,9 +320,8 @@
       {
         "id": "openwop.scenario.v2-relaxation-recorded",
         "scenario": "v2-relaxation-recorded.test.ts",
-        "result": "executed-fail",
-        "assertions": 15,
-        "detail": "one or more assertions in the file failed"
+        "result": "executed-pass",
+        "assertions": 16
       },
       {
         "id": "openwop.scenario.v2-revocation-honored",
@@ -502,13 +462,6 @@
         "scenario": "fixtures-valid.test.ts",
         "result": "executed-pass",
         "assertions": 1
-      },
-      {
-        "id": "openwop.it.v2-capability-record-shape.no-advertised-record-carries-an-until-already-in-the-past",
-        "scenario": "v2-capability-record-shape.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.it.v2-chain-pin-exact.a-chain-reference-carrying-a-range-core-ai-callprompt-1-is-refused-at-register",
@@ -686,13 +639,6 @@
         "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
-        "id": "openwop.it.v2-pinned-run-disposition.a-pin-naming-a-change-id-the-host-still-implements-continues-under-the-reader-ru",
-        "scenario": "v2-pinned-run-disposition.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
         "id": "openwop.it.v2-provider-conflict.the-qualified-form-packname-github-resolves-to-the-named-pack-s-definition",
         "scenario": "v2-provider-conflict.test.ts",
         "result": "inapplicable",
@@ -726,22 +672,533 @@
         "result": "blocked",
         "assertions": 0,
         "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0168.bundle-v3-signed.independent-self-signed",
+        "scenario": "v2-bundle-v3-signed.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0168.bundle-v3-signed.schema-closed-root",
+        "scenario": "v2-bundle-v3-signed.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0168.bundle-v3-signed.witness-digest",
+        "scenario": "v2-bundle-v3-signed.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0168.coherence-not-in-bundle.schema-forbids-coherence-ids",
+        "scenario": "v2-coherence-not-in-bundle.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0169.capabilities-root-closed.dotted-key",
+        "scenario": "v2-capabilities-root-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0169.capabilities-root-closed.profiles",
+        "scenario": "v2-capabilities-root-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0169.capabilities-root-closed.unknown-root-key",
+        "scenario": "v2-capabilities-root-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0169.capabilities-root-closed.valid",
+        "scenario": "v2-capabilities-root-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0169.capabilities-root-closed.wrapper",
+        "scenario": "v2-capabilities-root-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0169.capability-record-shape.required-fields",
+        "scenario": "v2-capability-record-shape.test.ts",
+        "result": "executed-pass",
+        "assertions": 48
+      },
+      {
+        "id": "openwop.requirement.0169.capability-record-shape.until-iff-not-stable",
+        "scenario": "v2-capability-record-shape.test.ts",
+        "result": "executed-pass",
+        "assertions": 23
+      },
+      {
+        "id": "openwop.requirement.0169.capability-record-shape.until-not-past",
+        "scenario": "v2-capability-record-shape.test.ts",
+        "result": "executed-pass",
+        "assertions": 11
+      },
+      {
+        "id": "openwop.requirement.0169.profiles-derived-only.derivable",
+        "scenario": "v2-profiles-derived-only.test.ts",
+        "result": "executed-pass",
+        "assertions": 10
+      },
+      {
+        "id": "openwop.requirement.0169.profiles-derived-only.no-root-profiles",
+        "scenario": "v2-profiles-derived-only.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0170.assurance-downgrade-audited.audited",
+        "scenario": "v2-assurance-downgrade-audited.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.assurance-downgrade-audited.refused",
+        "scenario": "v2-assurance-downgrade-audited.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.id-grammar.events",
+        "scenario": "v2-id-grammar.test.ts",
+        "result": "executed-pass",
+        "assertions": 8
+      },
+      {
+        "id": "openwop.requirement.0170.id-grammar.snapshot",
+        "scenario": "v2-id-grammar.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.id-grammar.tenant-binding",
+        "scenario": "v2-id-grammar.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0170.idempotency-key-grammar.invalid-refused",
+        "scenario": "v2-idempotency-key-grammar.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.idempotency-key-grammar.valid-accepted",
+        "scenario": "v2-idempotency-key-grammar.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.interrupt-token-scheme.unheld-kid-refused",
+        "scenario": "v2-interrupt-token-scheme.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.interrupt-token-scheme.unprefixed-refused",
+        "scenario": "v2-interrupt-token-scheme.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.lane-issuer-advertised.members",
+        "scenario": "v2-lane-issuer-advertised.test.ts",
+        "result": "executed-pass",
+        "assertions": 13
+      },
+      {
+        "id": "openwop.requirement.0170.owner-subject-required.no-principal",
+        "scenario": "v2-owner-subject-required.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0170.owner-subject-required.subject",
+        "scenario": "v2-owner-subject-required.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0170.revocation-honored",
+        "scenario": "v2-revocation-honored.test.ts",
+        "result": "executed-pass",
+        "assertions": 10
+      },
+      {
+        "id": "openwop.requirement.0171.configurable-closed.dotted-key",
+        "scenario": "v2-configurable-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0171.configurable-closed.schema",
+        "scenario": "v2-configurable-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0171.configurable-closed.unknown-key",
+        "scenario": "v2-configurable-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0171.enum-growth-rule.reserved-rejected",
+        "scenario": "v2-enum-growth-rule.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0171.enum-growth-rule.unknown-member-accepted",
+        "scenario": "v2-enum-growth-rule.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0171.error-registry.envelope",
+        "scenario": "v2-error-registry.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0171.error-registry.no-retry-details",
+        "scenario": "v2-error-registry.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0171.event-type-closed.envelope",
+        "scenario": "v2-event-type-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 8
+      },
+      {
+        "id": "openwop.requirement.0171.event-type-closed.type",
+        "scenario": "v2-event-type-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0171.header-scheme.no-legacy-headers",
+        "scenario": "v2-header-scheme.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0171.header-scheme.version-on-every-response",
+        "scenario": "v2-header-scheme.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0171.payload-registry-closed",
+        "scenario": "v2-payload-registry-closed.test.ts",
+        "result": "executed-pass",
+        "assertions": 8
+      },
+      {
+        "id": "openwop.requirement.0171.poll-cursor-v2.after-sequence",
+        "scenario": "v2-poll-cursor-v2.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0171.poll-cursor-v2.from-first",
+        "scenario": "v2-poll-cursor-v2.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0171.poll-cursor-v2.past-end",
+        "scenario": "v2-poll-cursor-v2.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0171.poll-cursor-v2.shape",
+        "scenario": "v2-poll-cursor-v2.test.ts",
+        "result": "executed-pass",
+        "assertions": 8
+      },
+      {
+        "id": "openwop.requirement.0172.dual-stack-negotiation.cross-major-read",
+        "scenario": "v2-dual-stack-negotiation.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0172.dual-stack-negotiation.response-header",
+        "scenario": "v2-dual-stack-negotiation.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0172.dual-stack-negotiation.unlisted-major",
+        "scenario": "v2-dual-stack-negotiation.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0172.dual-stack-negotiation.v1-path-mismatch",
+        "scenario": "v2-dual-stack-negotiation.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0172.min-client-version",
+        "scenario": "v2-min-client-version.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0172.preferred-version-default.headerless",
+        "scenario": "v2-preferred-version-default.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0172.preferred-version-default.member",
+        "scenario": "v2-preferred-version-default.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0172.preferred-version-default.overlap",
+        "scenario": "v2-preferred-version-default.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0173.approver-enforced",
+        "scenario": "v2-approver-enforced.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0173.compensation-read-projection",
+        "scenario": "v2-compensation-read-projection.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0173.compensation-read-projection.not-found",
+        "scenario": "v2-compensation-read-projection.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0173.effect-identity-business-key",
+        "scenario": "v2-effect-identity-business-key.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0173.effect-identity-business-key.retry",
+        "scenario": "v2-effect-identity-business-key.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0173.effect-seam-manifest",
+        "scenario": "v2-effect-seam-manifest.test.ts",
+        "result": "executed-pass",
+        "assertions": 12
+      },
+      {
+        "id": "openwop.requirement.0173.effect-seam-manifest.facet",
+        "scenario": "v2-effect-seam-manifest.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0173.effect-seam-manifest.no-re-fire",
+        "scenario": "v2-effect-seam-manifest.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0173.relaxation-recorded",
+        "scenario": "v2-relaxation-recorded.test.ts",
+        "result": "executed-pass",
+        "assertions": 7
+      },
+      {
+        "id": "openwop.requirement.0173.relaxation-recorded.durability-closed",
+        "scenario": "v2-relaxation-recorded.test.ts",
+        "result": "executed-pass",
+        "assertions": 9
+      },
+      {
+        "id": "openwop.requirement.0173.webhook-durable-delivery",
+        "scenario": "v2-webhook-durable-delivery.test.ts",
+        "result": "executed-pass",
+        "assertions": 7
+      },
+      {
+        "id": "openwop.requirement.0173.webhook-durable-delivery.dead-letter",
+        "scenario": "v2-webhook-durable-delivery.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0175.legacy-profiles-absent.no-root-profiles",
+        "scenario": "v2-legacy-profiles-absent.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0175.no-transport-advertisement",
+        "scenario": "v2-no-transport-advertisement.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0176.era-key",
+        "scenario": "v2-era-key.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0176.era-key.discovery",
+        "scenario": "v2-era-key.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0176.fork-a-v1-run.legacy-subject",
+        "scenario": "v2-fork-a-v1-run.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0176.fork-a-v1-run.prefix",
+        "scenario": "v2-fork-a-v1-run.test.ts",
+        "result": "executed-pass",
+        "assertions": 5
+      },
+      {
+        "id": "openwop.requirement.0176.pinned-run-disposition.cancelled",
+        "scenario": "v2-pinned-run-disposition.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0176.pinned-run-disposition.continued",
+        "scenario": "v2-pinned-run-disposition.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0176.unmapped-type-refused",
+        "scenario": "v2-unmapped-type-refused.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0176.unmapped-type-refused.fork",
+        "scenario": "v2-unmapped-type-refused.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0176.v1-events-translated.fork",
+        "scenario": "v2-v1-events-translated.test.ts",
+        "result": "executed-pass",
+        "assertions": 13
+      },
+      {
+        "id": "openwop.requirement.0176.v1-events-translated.poll",
+        "scenario": "v2-v1-events-translated.test.ts",
+        "result": "executed-pass",
+        "assertions": 16
+      },
+      {
+        "id": "openwop.requirement.0176.v1-events-translated.sse",
+        "scenario": "v2-v1-events-translated.test.ts",
+        "result": "executed-pass",
+        "assertions": 16
+      },
+      {
+        "id": "openwop.requirement.0176.v1-signed-webhook-accepted",
+        "scenario": "v2-v1-signed-webhook-accepted.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0176.v1-signed-webhook-accepted.facet",
+        "scenario": "v2-v1-signed-webhook-accepted.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0176.well-known-one-resource",
+        "scenario": "v2-well-known-one-resource.test.ts",
+        "result": "executed-pass",
+        "assertions": 7
+      },
+      {
+        "id": "openwop.requirement.0176.well-known-one-resource.v2-representation",
+        "scenario": "v2-well-known-one-resource.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0177.manifest-ceiling-refused.unbounded",
+        "scenario": "v2-manifest-ceiling-refused.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0177.manifest-ceiling-refused.v1-ceiling",
+        "scenario": "v2-manifest-ceiling-refused.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0177.manifest-ceiling-refused.v2-installs",
+        "scenario": "v2-manifest-ceiling-refused.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0177.manifest-hatch-carried.agents-x-field",
+        "scenario": "v2-manifest-hatch-carried.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0177.manifest-hatch-carried.prompt-template-x-field",
+        "scenario": "v2-manifest-hatch-carried.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0177.peer-dependency-declared.undefined-key",
+        "scenario": "v2-peer-dependency-declared.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
       }
     ]
   },
-  "witnessSha256": "d809ccc3764c6a25ffcde62460786a917556f34d2780802b56f43e2bff0df6e2",
-  "assertionCount": 878,
+  "witnessSha256": "5482704eae3eaa3fa13a98b60eaf9c4f7bc649b9cafba1992f587415b6ed328b",
+  "assertionCount": 1316,
   "detail": {
     "nonPass": [
       {
         "id": "openwop.scenario.v2-chain-pin-exact",
         "result": "inapplicable",
         "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.scenario.v2-coherence-not-in-bundle",
-        "result": "executed-fail",
-        "reason": "one or more assertions in the file failed"
       },
       {
         "id": "openwop.scenario.v2-form-when-reuses-edge-conditions",
@@ -784,11 +1241,6 @@
         "reason": "host advertises neither a2a nor mcp — no refreshedAt to check"
       },
       {
-        "id": "openwop.scenario.v2-relaxation-recorded",
-        "result": "executed-fail",
-        "reason": "one or more assertions in the file failed"
-      },
-      {
         "id": "openwop.scenario.v2-subject-link-record",
         "result": "inapplicable",
         "reason": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
@@ -797,11 +1249,6 @@
         "id": "openwop.floor.any.interrupt-",
         "result": "blocked",
         "reason": "no interrupt-* scenario ran — unclassified return"
-      },
-      {
-        "id": "openwop.it.v2-capability-record-shape.no-advertised-record-carries-an-until-already-in-the-past",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.it.v2-chain-pin-exact.a-chain-reference-carrying-a-range-core-ai-callprompt-1-is-refused-at-register",
@@ -929,11 +1376,6 @@
         "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
-        "id": "openwop.it.v2-pinned-run-disposition.a-pin-naming-a-change-id-the-host-still-implements-continues-under-the-reader-ru",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
         "id": "openwop.it.v2-provider-conflict.the-qualified-form-packname-github-resolves-to-the-named-pack-s-definition",
         "result": "inapplicable",
         "reason": "profile not advertised in the captured discovery set"
@@ -963,7 +1405,7 @@
   "signature": {
     "alg": "ed25519",
     "keyId": "v2-reference-1",
-    "sig": "SploZUXgoV1QWYac9pNiOiWiIOGM6mRvmbIb-d4r1bJgjsEhhbRp63xHzxUFhWi0u8edj8HXUrcKSCpzQrQODA",
+    "sig": "JoYDSpYIKQoYZOF5bc5hFRkJZPnErFDDxSVQnzSHlsbhBoeTnu6sV69eUeEjJh8-aOtm2zRZHZS9WRioYuSuCA",
     "over": [
       "witnessSha256",
       "host.build",
