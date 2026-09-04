@@ -17,11 +17,12 @@ interface AjvLike {
   errorsText(errors: unknown, opts: { separator: string }): string;
 }
 
-/** Known corpus defects the dev validator names instead of failing on (README §Known corpus defects). */
-const KNOWN: ReadonlyArray<{ schema: string; pattern: RegExp; note: string }> = [
-  { schema: 'capabilities', pattern: /\/conformance.*must NOT have additional properties/, note: 'declaration.json metadata `conformance` closes without `seamsProfile`, the key lib/seams.ts (RFC 0168 §C.1 reconciliation) reads' },
-  { schema: 'run-event', pattern: /\/type must match exactly one schema in oneOf/, note: 'run-event.schema.json `type` is a oneOf whose vendor pattern also matches every registered domain.verb type, so no registered type validates' },
-];
+/**
+ * Known corpus defects the dev validator names instead of failing on. Empty:
+ * the six defects this host found at 2.0.0-rc.1 are fixed in the corpus, so
+ * every emitted document is expected to validate.
+ */
+const KNOWN: ReadonlyArray<{ schema: string; pattern: RegExp; note: string }> = [];
 
 export async function createValidator(schemasDir: string, mode: 'off' | 'warn' | 'strict'): Promise<(schemaName: string, doc: unknown, context: string) => void> {
   if (mode === 'off') return () => undefined;

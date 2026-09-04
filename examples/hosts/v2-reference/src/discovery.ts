@@ -32,14 +32,14 @@ export function v2Document(host: Host): Record<string, unknown> {
     fixtures: advertisedFixtures(host),
     testing: { testKeyPrefix: 'ow2k_' },
     extensions: {
-      [`${EXTENSION_ORG}.host`]: { hostId: HOST_ID, build: c.hostBuild, webhookRetryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential', baseMs: c.webhookBackoffBaseMs, deadLetterRetentionDays: c.webhookRetentionDays }, deadLetterRead: '/webhooks/{webhookId}/dead-letters' },
+      [`${EXTENSION_ORG}.host`]: { hostId: HOST_ID, build: c.hostBuild, webhookBackoffBaseMs: c.webhookBackoffBaseMs, deadLetterRetentionDays: c.webhookRetentionDays, deadLetterRead: '/webhooks/{webhookId}/dead-letters' },
     },
     // ── core families ───────────────────────────────────────────────────
     limits: record('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
     eventLog: record('claims-check', { crossEngineOrdering: { orderingModel: 'global-sequencer' } }),
     interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),
     replay: record('witnessable-gated', { modes: ['replay', 'branch'], retention: { days: c.replayRetentionDays }, effectSeamsManifest: '/host/effect-seams' }),
-    webhooks: record('witnessable-gated', { signatureAlgorithms: ['v1'] }),
+    webhooks: record('witnessable-gated', { signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' } }),
     idempotency: record('witnessable-gated', { crossRegion: 'single-region' }),
     compensation: record('seam-gated', { profileVersion: '1', orderingModels: ['reverse-completion'], manualIntervention: false }),
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
@@ -82,7 +82,7 @@ export function v1Document(host: Host): Record<string, unknown> {
     // v1 readers: the surfaces this host serves under /v1/ keys through the overlap.
     interrupt: { supported: true, tokenAlgs: ['hs256'] },
     replay: { supported: true, fork: true, modes: ['replay', 'branch'] },
-    webhooks: { supported: true, durable: true, signatureAlgorithms: ['v1'] },
+    webhooks: { supported: true, durable: true, signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' } },
     idempotency: { supported: true, crossRegion: 'single-region' },
   };
 }

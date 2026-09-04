@@ -58,10 +58,18 @@ export function loadWorkflows(config: HostConfig): Map<string, WorkflowDefinitio
     const gate = approval.nodes[0] as WorkflowDefinition['nodes'][number];
     out.set('conformance-approval-approvers', { ...approval, id: 'conformance-approval-approvers', name: 'Conformance: Approval (listed approvers)', nodes: [{ ...gate, config: { ...gate.config, approversList: ['urn:conformance:listed-approver'] } }] });
   }
+  // The one workflow that reaches the `http.fetch` row of the effect-seam
+  // manifest; the seams profile drives it (fireEffectSeam, forceEffectTransportRetry).
   out.set('conformance-http-effect', {
     id: 'conformance-http-effect', name: 'Reference: http.fetch effect seam', version: '1.0',
-    nodes: [{ id: 'fetch', typeId: 'core.httpFetch', config: { url: 'https://example.invalid/effect', method: 'POST', body: { hello: 'world' }, compensation: { irreversibleEffect: false } }, inputs: {} }],
-    edges: [], variables: [], metadata: { tags: ['reference'] },
+    nodes: [{ id: 'fetch', typeId: 'core.httpFetch', config: { url: 'https://effect-seam.invalid/fire', method: 'POST', body: { hello: 'world' }, compensation: { irreversibleEffect: false } }, inputs: {} }],
+    edges: [],
+    variables: [
+      { name: 'url', defaultValue: 'https://effect-seam.invalid/fire' },
+      { name: 'businessKey' },
+      { name: 'transportRetries', defaultValue: 0 },
+    ],
+    metadata: { tags: ['reference'] },
   });
   return out;
 }

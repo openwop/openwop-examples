@@ -17,7 +17,9 @@ const enc = encodeURIComponent;
 
 interface Res { s: number; h: Headers; b: any }
 async function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Res> {
-  const r = await fetch(`${B}${path}`, { method, headers: { ...H, ...headers }, body: body === undefined ? undefined : typeof body === 'string' || Buffer.isBuffer(body) ? (body as never) : JSON.stringify(body) });
+  const init: RequestInit = { method, headers: { ...H, ...headers } };
+  if (body !== undefined) init.body = typeof body === 'string' || Buffer.isBuffer(body) ? (body as never) : JSON.stringify(body);
+  const r = await fetch(`${B}${path}`, init);
   const t = await r.text();
   let b: unknown;
   try { b = JSON.parse(t); } catch { b = t; }
@@ -61,6 +63,7 @@ describe('discovery + negotiation', () => {
     expect(d2.capabilities).toBeUndefined();
     expect(d2.profiles).toBeUndefined();
     expect(d2.conformance.seamsProfile).toBe('openwop-conformance-seams-v2');
+    expect(d2.webhooks.retryPolicy).toEqual({ maxAttempts: 3, backoff: 'exponential' });
     const etag = v2.headers.get('etag') as string;
     const again = await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0', 'If-None-Match': etag } });
     expect(again.status).toBe(304);
@@ -230,6 +233,37 @@ describe('persistence + replay', () => {
     expect((await call('GET', `/runs/${enc(f.b.runId)}/ancestry`)).b.parent.runId).toBe(c.b.runId);
     const m = await call('GET', '/host/effect-seams');
     expect(m.b.seams.every((s: any) => s.guarded === true)).toBe(true);
+    const bad = await call('POST', `/runs/${enc(c.b.runId)}:fork`, { mode: 'branch', fromSeq: 999 });
+    expect(bad.s).toBe(422); expect(bad.b.error).toBe('fork_point_invalid');
+  });
+
+  it('fires a named effect seam inside a run and suppresses it on the replay fork', async () => {
+    const fired = await call('POST', '/conformance/seams/sample/effect-seams/fire', { seam: 'http.fetch' });
+    expect(fired.s).toBe(201);
+    const parent = await call('GET', `/runs/${enc(fired.b.runId)}/effects`);
+    expect(parent.s).toBe(200);
+    expect(parent.b.effects.length).toBe(1);
+    expect(parent.b.effects[0].keying).toBe('business-identity');
+    expect(parent.b.effects[0].attempt).toBe(1);
+    const forked = await call('POST', `/runs/${enc(fired.b.runId)}:fork`, { mode: 'replay' });
+    expect(forked.s).toBe(201);
+    await waitStatus(forked.b.runId, ['completed', 'failed']);
+    const fork = await call('GET', `/runs/${enc(forked.b.runId)}/effects`);
+    expect(fork.b.effects.length).toBeLessThanOrEqual(parent.b.effects.length);
+    expect(fork.b.effects[0]?.effectId).toBe(parent.b.effects[0].effectId);
+    expect((await call('POST', '/conformance/seams/sample/effect-seams/fire', { seam: 'nope.nope' })).s).toBe(404);
+  });
+
+  it('retries one effect at the transport layer under a single identity', async () => {
+    const r = await call('POST', '/conformance/seams/sample/test/idempotency/effect-retry', { providerUrl: 'http://127.0.0.1:1/' });
+    expect(r.s).toBe(201);
+    expect(typeof r.b.effectId).toBe('string');
+    const ledger = await call('GET', `/runs/${enc(r.b.runId)}/effects`);
+    const attempts = ledger.b.effects.filter((e: any) => e.effectId === r.b.effectId);
+    expect(attempts.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(attempts.map((a: any) => a.providerKey)).size).toBe(1);
+    expect(attempts.every((a: any) => a.keying === 'business-identity')).toBe(true);
+    expect(attempts.map((a: any) => a.attempt).sort()).toEqual([1, 2]);
   });
 });
 
@@ -270,12 +304,22 @@ describe('webhooks + identity + packs + workspace', () => {
     expect((await call('POST', '/conformance/seams/sample/webhooks/receive', { secret: 'k', headers, body })).b.accepted).toBe(true);
     expect((await call('POST', '/conformance/seams/sample/webhooks/receive', { secret: 'k', headers: { ...headers, 'X-openwop-Signature': 'sha256=00' }, body })).b.accepted).toBe(false);
   });
-  it('rejects a private receiver when the egress guard is on', async () => {
-    running.host.config = { ...running.host.config, webhookAllowPrivate: false } as never;
-    const r = await call('POST', '/webhooks', { url: 'http://127.0.0.1:9/', events: ['run.completed'] });
-    expect(r.s).toBe(400); expect(r.b.details.reason).toBe('webhook_url_rejected');
-    expect((await call('POST', '/webhooks', { url: 'https://169.254.169.254/', events: ['run.completed'] })).s).toBe(400);
-    running.host.config = { ...running.host.config, webhookAllowPrivate: true } as never;
+  it('rejects a private receiver with the registered webhook_url_rejected when the egress guard is on', async () => {
+    const guarded = await startHost({ port: 0, dbPath: ':memory:', apiKey: K, devValidate: 'strict', webhookAllowPrivate: false });
+    const post = async (url: string): Promise<{ s: number; b: any }> => {
+      const r = await fetch(`http://127.0.0.1:${guarded.port}/webhooks`, { method: 'POST', headers: H, body: JSON.stringify({ url, events: ['run.completed'] }) });
+      return { s: r.status, b: await r.json() };
+    };
+    try {
+      for (const url of ['http://127.0.0.1:9/', 'https://169.254.169.254/', 'https://localhost/hook', 'http://example.com/hook']) {
+        const r = await post(url);
+        expect(r.s, url).toBe(400);
+        expect(r.b.error, url).toBe('webhook_url_rejected');
+      }
+      expect((await post('https://receiver.example.com/hook')).s).toBe(201);
+    } finally {
+      await guarded.close();
+    }
   });
   it('mints and revokes a next-request credential; resolves workload identity with the key-bound floor', async () => {
     const m = await call('POST', '/conformance/seams/sample/auth/credential/mint', { lane: 'session' });

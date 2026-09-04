@@ -16,11 +16,17 @@ import { err } from './errors.js';
 import { mintCredential, resolveWorkloadIdentity, revokeCredential } from './identity.js';
 import { nowIso, opaque, tenantBound } from './ids.js';
 import { installedPacks, publishTestPack } from './packs.js';
+import { effectSeamManifest } from './effects.js';
+import { scheduleRun } from './executor.js';
+import { EVENT_LOG_SCHEMA_VERSION } from './config.js';
+import { TERMINAL } from './host.js';
 import { route, type Ctx, type Reply, type Route } from './router.js';
 import { verifyInbound } from './webhooks.js';
 import type { Host } from './host.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
+/** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
+const FIXTURE_DESTINATION = 'https://effect-seam.invalid/fire';
 const WS_PATH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$/;
 
 async function seedEra2(ctx: Ctx): Promise<Reply> {
@@ -57,6 +63,71 @@ async function receive(ctx: Ctx): Promise<Reply> {
   const headers = Object.fromEntries(Object.entries(body.headers as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
   const verdict = verifyInbound(body.secret, headers, body.body);
   return { status: 200, body: verdict.reason === undefined ? { accepted: verdict.accepted } : { accepted: verdict.accepted, reason: verdict.reason } };
+}
+
+/**
+ * Start one run of `workflowId` under the caller's tenant with the given
+ * inputs and wait for it to settle; the seams below use it to drive an effect
+ * seam inside a real run whose ledger is the witness.
+ */
+async function driveRun(ctx: Ctx, workflowId: string, inputs: Record<string, unknown>): Promise<string> {
+  const tenant = ctx.subject?.tenant ?? ctx.host.config.tenant;
+  if (!ctx.host.workflows.has(workflowId)) throw err('not_found', `the seam fixture ${workflowId} is not registered on this host`, { workflowId });
+  const runId = tenantBound(tenant);
+  ctx.host.store.insertRun({
+    run_id: runId, tenant, workflow_id: workflowId, status: 'pending', era: EVENT_LOG_SCHEMA_VERSION,
+    owner_json: JSON.stringify({ tenant, subject: ctx.subject }), options_json: '{}', inputs_json: JSON.stringify(inputs),
+    created_at: nowIso(), updated_at: nowIso(), started_at: null, completed_at: null, current_node_id: null, error_json: null,
+    source_run_id: null, fork_mode: null, from_seq: null, compensation_json: null, pause_requested: 0, cancel_requested: 0, pin_checked: 1, scope_id: null,
+  });
+  scheduleRun(ctx.host, runId);
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const r = ctx.host.store.getRun(runId);
+    if (r && TERMINAL.has(r.status)) return runId;
+    if (Date.now() > deadline) return runId;
+    await new Promise((res) => setTimeout(res, 25));
+  }
+}
+
+/**
+ * `fireEffectSeam` (RFC 0173 §C.1 no-re-fire witness) — drive one named row of
+ * GET /host/effect-seams once inside a run. The scenario forks the run in
+ * `replay` mode and asserts the fork's effect ledger does not exceed this run's.
+ */
+async function fireEffectSeamRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ seam?: unknown; receiverUrl?: unknown }>();
+  for (const k of Object.keys(body)) if (k !== 'seam' && k !== 'receiverUrl') throw err('validation_error', `unknown key ${k}`);
+  const seam = String(body.seam ?? '');
+  const rows = (effectSeamManifest(ctx.host)['seams'] as Array<{ seam: string }>).map((r) => r.seam);
+  if (!rows.includes(seam)) throw err('not_found', `${seam} is not a row of GET /host/effect-seams`, { seam, seams: rows });
+  if (seam !== 'http.fetch') throw err('validation_error', `the ${seam} seam is not fired inside a run on this host — only http.fetch reaches the node runtime (webhook.fanout is driven by a run's own events)`, { seam });
+  if (body.receiverUrl !== undefined && typeof body.receiverUrl !== 'string') throw err('validation_error', 'receiverUrl MUST be a URI');
+  const runId = await driveRun(ctx, 'conformance-http-effect', {
+    businessKey: `effect-seam-fire-${opaque()}`,
+    url: typeof body.receiverUrl === 'string' ? body.receiverUrl : FIXTURE_DESTINATION,
+  });
+  return { status: 201, body: { runId } };
+}
+
+/**
+ * `forceEffectTransportRetry` (RFC 0173 §D.2 G4) — one effect, retried at the
+ * transport layer. Every attempt records under the one identity assigned to
+ * the business key, so the ledger shows the same `effectId` and `providerKey`.
+ */
+async function effectRetryRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ providerUrl?: unknown }>();
+  for (const k of Object.keys(body)) if (k !== 'providerUrl') throw err('validation_error', `unknown key ${k}`);
+  if (typeof body.providerUrl !== 'string' || body.providerUrl.length === 0) throw err('validation_error', 'providerUrl is REQUIRED');
+  const runId = await driveRun(ctx, 'conformance-http-effect', {
+    businessKey: `effect-retry-${opaque()}`,
+    url: body.providerUrl,
+    transportRetries: 1,
+  });
+  const rows = ctx.host.store.effectsForRun(runId);
+  const effectId = rows[0]?.effect_id;
+  if (effectId === undefined) throw err('internal_error', 'the seam run recorded no effect — the ledger is the witness this seam exists to produce');
+  return { status: 201, body: { runId, effectId } };
 }
 
 async function mint(ctx: Ctx): Promise<Reply> {
@@ -152,6 +223,8 @@ export function seamRoutes(host: Host): Route[] {
   return [
     route('POST', `${p}/sample/event-log/seed`, true, seedEra2),
     route('POST', `${p}/sample/webhooks/receive`, true, receive),
+    route('POST', `${p}/sample/effect-seams/fire`, true, fireEffectSeamRoute),
+    route('POST', `${p}/sample/test/idempotency/effect-retry`, true, effectRetryRoute),
     route('POST', `${p}/sample/auth/credential/mint`, true, mint),
     route('POST', `${p}/sample/auth/credential/revoke`, true, revoke),
     route('POST', `${p}/sample/test/workload-identity/resolve`, true, workloadResolve),

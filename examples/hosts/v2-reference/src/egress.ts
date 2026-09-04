@@ -54,10 +54,10 @@ export function hostnameDenied(hostname: string): boolean {
 /** Registration-time guard: throws 400 validation_error naming the reason. */
 export function validateEgressUrl(raw: string, allowPrivate: boolean): URL {
   let url: URL;
-  try { url = new URL(raw); } catch { throw err('validation_error', 'url MUST be an absolute https:// URL', { url: raw, reason: 'webhook_url_rejected' }); }
+  try { url = new URL(raw); } catch { throw err('webhook_url_rejected', 'url MUST be an absolute https:// URL', { url: raw }); }
   if (allowPrivate) return url;
-  if (url.protocol !== 'https:') throw err('validation_error', 'url MUST be https:// (webhooks.md §Egress)', { url: raw, reason: 'webhook_url_rejected' });
-  if (hostnameDenied(url.hostname)) throw err('validation_error', 'url names a loopback, private, link-local or metadata host (webhooks.md §Egress)', { url: raw, reason: 'webhook_url_rejected' });
+  if (url.protocol !== 'https:') throw err('webhook_url_rejected', 'url MUST be https:// (webhooks.md §Egress)', { url: raw });
+  if (hostnameDenied(url.hostname)) throw err('webhook_url_rejected', 'url names a loopback, private, link-local or metadata host (webhooks.md §Egress)', { url: raw });
   return url;
 }
 

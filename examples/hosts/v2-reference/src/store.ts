@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries(state, next_at);
 CREATE TABLE IF NOT EXISTS effects (
-  effect_id TEXT PRIMARY KEY,
+  effect_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
   node_id TEXT NOT NULL,
   attempt INTEGER NOT NULL,
@@ -268,9 +268,11 @@ CREATE TABLE IF NOT EXISTS effects (
   provider_key TEXT NULL,
   invocation_id TEXT NULL,
   at TEXT NOT NULL,
-  business_key TEXT NOT NULL UNIQUE,
-  outcome_json TEXT NULL
+  business_key TEXT NOT NULL,
+  outcome_json TEXT NULL,
+  PRIMARY KEY (run_id, effect_id, attempt)
 );
+CREATE INDEX IF NOT EXISTS effects_business ON effects(business_key);
 CREATE INDEX IF NOT EXISTS effects_run ON effects(run_id);
 CREATE TABLE IF NOT EXISTS packs (
   catalog TEXT NOT NULL,
@@ -440,26 +442,39 @@ export class Store {
   }
 
   // ── effects (Layer 2) ─────────────────────────────────────────────────────
-  claimEffect(row: EffectRow): EffectRow {
-    // insert-if-absent: at most one executor wins the claim (idempotency.md §Layer 2 Claim).
+  /** The identity already assigned to this business key, if any (idempotency.md §Layer 2 Keying: assigned once per effect). */
+  effectIdentity(businessKey: string): { effect_id: string; provider_key: string | null } | undefined {
+    return this.db.prepare('SELECT effect_id, provider_key FROM effects WHERE business_key = ? ORDER BY attempt ASC LIMIT 1').get(businessKey) as { effect_id: string; provider_key: string | null } | undefined;
+  }
+  /**
+   * The atomic claim that guards the effect: insert-if-absent on
+   * (effect_id, attempt), so at most one executor performs a given attempt and
+   * a retry of the same logical invocation records under the same identity.
+   */
+  claimEffect(row: EffectRow): { row: EffectRow; won: boolean } {
     try {
       this.db.prepare(`INSERT INTO effects (effect_id, run_id, node_id, attempt, keying, state, provider_key, invocation_id, at, business_key, outcome_json)
         VALUES (@effect_id, @run_id, @node_id, @attempt, @keying, @state, @provider_key, @invocation_id, @at, @business_key, @outcome_json)`).run(row);
-      return row;
+      return { row, won: true };
     } catch {
-      return this.db.prepare('SELECT * FROM effects WHERE business_key = ?').get(row.business_key) as EffectRow;
+      return { row: this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND effect_id = ? AND attempt = ?').get(row.run_id, row.effect_id, row.attempt) as EffectRow, won: false };
     }
   }
-  updateEffect(effectId: string, patch: Partial<EffectRow>): void {
+  updateEffect(runId: string, effectId: string, attempt: number, patch: Partial<EffectRow>): void {
     const keys = Object.keys(patch);
     const sets = keys.map((k) => `${k} = @${k}`).join(', ');
-    this.db.prepare(`UPDATE effects SET ${sets} WHERE effect_id = @effect_id`).run({ ...patch, effect_id: effectId });
+    this.db.prepare(`UPDATE effects SET ${sets} WHERE run_id = @run_id AND effect_id = @effect_id AND attempt = @attempt`).run({ ...patch, run_id: runId, effect_id: effectId, attempt });
+  }
+  /** A completed outcome already recorded for this business identity, in any run. */
+  completedEffect(businessKey: string): EffectRow | undefined {
+    return this.db.prepare(`SELECT * FROM effects WHERE business_key = ? AND state = 'completed' AND outcome_json IS NOT NULL ORDER BY attempt ASC LIMIT 1`).get(businessKey) as EffectRow | undefined;
   }
   effectsForRun(runId: string): EffectRow[] {
-    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? ORDER BY at ASC').all(runId) as EffectRow[];
+    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? ORDER BY at ASC, attempt ASC').all(runId) as EffectRow[];
   }
+  /** The terminal outcome a replay resolves from, keyed (sourceRunId, nodeId, nodeAttempt). */
   effectOutcome(runId: string, nodeId: string, attempt: number): EffectRow | undefined {
-    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND node_id = ? AND attempt = ?').get(runId, nodeId, attempt) as EffectRow | undefined;
+    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND node_id = ? AND outcome_json IS NOT NULL ORDER BY attempt DESC LIMIT 1').get(runId, nodeId) as EffectRow | undefined;
   }
 
   // ── packs ─────────────────────────────────────────────────────────────────

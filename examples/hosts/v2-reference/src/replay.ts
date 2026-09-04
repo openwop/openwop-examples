@@ -30,11 +30,10 @@ export function forkRun(host: Host, source: RunRow, body: ForkRequest): { runId:
   // Through the storage boundary: an era-2 parent with an unmapped row fails here with event_type_unmapped.
   const prefix = readEvents(host, source);
   if (fromSeq > 0 && !prefix.some((e) => e.sequence === fromSeq) && !(fromSeq === host.store.lastSequence(source.run_id) + 1)) {
-    // spec gap: runs.md says 422, but spec/v2/errors.json registers no 422 code for a missing sequence — validation_error (400) is the registered choice.
-    throw err('validation_error', `fromSeq ${fromSeq} is not a sequence in the source log`, { fromSeq, lastSequence: host.store.lastSequence(source.run_id) });
+    throw err('fork_point_invalid', `fromSeq ${fromSeq} is not a sequence in the source log`, { fromSeq, lastSequence: host.store.lastSequence(source.run_id) });
   }
   const retention = host.config.replayRetentionDays * 86_400_000;
-  if (Date.parse(source.created_at) < Date.now() - retention) throw err('validation_error', 'the source log is past the advertised replay retention', { sourceRunId: source.run_id, fromSeq, retentionDays: host.config.replayRetentionDays });
+  if (Date.parse(source.created_at) < Date.now() - retention) throw err('fork_point_invalid', 'the source log is past the advertised replay retention', { sourceRunId: source.run_id, fromSeq, retentionDays: host.config.replayRetentionDays });
   const owner = ownerOf(host, source);
   const options = JSON.parse(source.options_json) as Record<string, unknown>;
   const merged = mode === 'branch' && overlay && typeof overlay === 'object' ? { ...options, ...(overlay as Record<string, unknown>) } : options;
