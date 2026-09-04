@@ -19,7 +19,7 @@ npm start                          # http://127.0.0.1:3838
 | `OPENWOP_DB_PATH` | `data/v2-reference.sqlite` | the durable store (`:memory:` for tests) |
 | `OPENWOP_PREFERRED_VERSION` | `1.11` | the header-less representation of `/.well-known/openwop` (see "Negotiation") |
 | `OPENWOP_SEAMS_PROFILE` | `true` | mount `/conformance/seams/…` and advertise `conformance.seamsProfile` |
-| `OPENWOP_WEBHOOK_ALLOW_PRIVATE` | `false` | **an operator relaxation** of webhooks.md §Egress (loopback/private receivers), recorded as `host.relaxations[]` when a bundle is cut under it |
+| `OPENWOP_WEBHOOK_ALLOW_PRIVATE` | `false` | **an operator relaxation** of webhooks.md §Egress (loopback/private receivers), recorded as `host.relaxations[]` when a bundle is cut under it; with the guard on, such a registration answers `400 webhook_url_rejected` |
 | `OPENWOP_WEBHOOK_MAX_ATTEMPTS` / `_BACKOFF_BASE_MS` / `_RETENTION_DAYS` | `5` / `500` / `7` | the durable-delivery policy (exponential backoff, dead-letter, retention) |
 | `OPENWOP_IMPLEMENTED_CHANGE_IDS` | _(empty)_ | comma list of `version.pinned` change ids this build still implements (persistence.md §Runs pinned to v1) |
 | `OPENWOP_DEV_VALIDATE` | `warn` (`off` in production) | validate every emitted document against `schemas/v2` (`strict` throws; the harness runs strict) |
@@ -40,13 +40,13 @@ npm start                          # http://127.0.0.1:3838
 7. **Errors** — every code from `spec/v2/errors.json` at its registered status; `{ error, message, details? }`; `Retry-After` header only.
 8. **Webhooks** — register/unregister; five `OpenWOP-*` headers + the `X-openwop-*` family dual-emitted; HMAC-SHA256 over `${timestamp}.${rawBody}`; durable delivery (attempts table, exponential backoff, dead-letter after `maxAttempts`, retention; `GET /webhooks/{id}/dead-letters` host extension); SSRF guard at registration and delivery (re-resolve, pin the address, no redirects); inbound verifier seam accepting a v1-signed (`X-openwop-*`-only) delivery.
 9. **Packs** — `PUT /conformance/seams/packs-test/{name}/-/{version}.tgz` (ustar+gzip parsed in-process); engines ceiling (no upper bound ⇒ `<2.0.0` → `pack_engine_unsupported`); peer-dependency keys checked against `declaration.json` + the alias table (`pack_peer_dependency_undefined`); the vendor hatch ignored inside `agents[]` / `prompts[]`; `GET /packs`. The host registers and validates packs; it advertises no `sandbox` and executes no third-party pack code.
-10. **Replay** — `GET /host/effect-seams` (`http.fetch` + `webhook.fanout`, both `guarded: true`); a replay fork resolves `core.httpFetch` from the source run's recorded outcome keyed `(sourceRunId, nodeId, attempt)` or fails closed with `replay_source_missing`; webhook fan-out never fires for a replay fork and fires for a branch only from `fromSeq`; `GET /runs/{id}/effects` (business-identity keyed ledger) and `/compensation` (reverse-completion plan + attempts).
-11. **Seams** — `/conformance/seams/sample/event-log/seed`, `…/sample/webhooks/receive`, `…/sample/auth/credential/{mint,revoke}`, `…/sample/test/workload-identity/resolve`, `…/packs-test/…`, `…/workspace/files…` (minimal RFC 0059).
-12. **Bundle** — `bundle-v3.json`, signed with `keys/host.pem` (Ed25519, key id `v2-reference-1`; public key committed at `keys/host.pub.pem`). See `conformance.md`.
+10. **Replay** — `GET /host/effect-seams` (`http.fetch`, `branchReFires: false`; `webhook.fanout`, `branchReFires: true`; both `guarded: true`); a replay fork resolves `core.httpFetch` from the source run's recorded outcome keyed `(sourceRunId, nodeId, attempt)` or fails closed with `replay_source_missing`; webhook fan-out never fires for a replay fork and fires for a branch only from `fromSeq`; `GET /runs/{id}/effects` — the Layer-2 ledger, **one row per transport attempt** under one identity (`effectId` and `providerKey` assigned once per business key, the provider's idempotency key on every attempt) — and `/compensation` (reverse-completion plan + attempts).
+11. **Seams** — `/conformance/seams/sample/event-log/seed`, `…/sample/webhooks/receive`, `…/sample/effect-seams/fire` (fire one named manifest row inside a run), `…/sample/test/idempotency/effect-retry` (one effect retried at the transport layer under one identity), `…/sample/auth/credential/{mint,revoke}`, `…/sample/test/workload-identity/resolve`, `…/packs-test/…`, `…/workspace/files…` (minimal RFC 0059).
+12. **Bundle** — [`bundle-v3.json`](./bundle-v3.json), signed with `keys/host.pem` (Ed25519, key id `v2-reference-1`; public key committed at `keys/host.pub.pem`): witness `d809ccc3764c…`, 99 requirement rows, 878 assertions, schema-valid, signature verified, zero verifier rejections, certifying nothing because `blocked > 0`. See `conformance.md`.
 
 ## Negotiation through the overlap
 
-`versioning.md` §1.3 says a header-less request on an unversioned path is served `preferredVersion`'s major; `capabilities.md` §1 / RFC 0176 §C.1 say a header-less `GET /.well-known/openwop` is the **v1** document through the overlap. Both hold only while `preferredVersion` names the 1.x member, which is what this host advertises until v1 end-of-support (`OPENWOP_PREFERRED_VERSION=1.11`). A v2 client is unaffected: it selects the highest listed major it implements (§1.5) and names it with `OpenWOP-Version: 2`. Every other unversioned key is the v2 surface (§1.2) and is served as 2.0 whether or not the header is present. Set `OPENWOP_PREFERRED_VERSION=2.0` to serve the closed v2 root header-less instead (the `v2-well-known-one-resource` scenario then records the v1 rendering as absent).
+`versioning.md` §1.1 is explicit: **while `protocolVersions[]` carries any 1.x member, `preferredVersion` MUST be that 1.x.** A header-less request is a v1 client's request, so the header-less representation of `/.well-known/openwop` is the v1 document (`capabilities.md` §1, RFC 0176 §C.1) and the header-less default is `preferredVersion`'s major (§1.3) — the two agree only under that rule. This host advertises `preferredVersion: 1.11` until v1 end-of-support, when `protocolVersions[]` drops the 1.x member and the preferred version becomes a 2.x (the header-less representation then becomes the closed v2 root). A v2 client is unaffected: it selects the highest listed major it implements (§1.5) and names it with `OpenWOP-Version: 2`. Every other unversioned key is the v2 surface (§1.2) and is served as 2.0 whether or not the header is present.
 
 ## Run conformance against this host
 
@@ -62,14 +62,19 @@ The suite's webhook scenarios boot a loopback receiver; a conforming egress guar
 
 `@openwop/spec-artifacts@2.0.0-rc.1` and `@openwop/openwop-conformance@2.0.0-rc.1` are exact-pinned dev dependencies. Until both are on npm, install them from the release tarballs: `npm install --no-save --legacy-peer-deps ./openwop-spec-artifacts-2.0.0-rc.1.tgz ./openwop-openwop-conformance-2.0.0-rc.1.tgz` (npm 10's peer resolver trips over vitest 4's optional peers; `--legacy-peer-deps` is required either way).
 
-## Known corpus defects (found by implementing the prose)
+## Corpus defects this host found — all fixed
 
-1. **`conformance.seamsProfile` is schema-illegal.** The suite (`lib/seams.ts`, the RFC 0168 §C.1 reconciliation) reads the seams profile from the `conformance` metadata key, but `spec/v2/declaration.json` → `schemas/v2/capabilities.schema.json` closes `conformance` to `{ mockAgent, certificationBundleUrl }`. A host must choose between advertising the seams (every seam-gated scenario) and validating against the closed root (`v2-capabilities-root-closed` leg 1, `v2-no-transport-advertisement`). This host advertises the seams; the two schema legs record `executed-fail`. Fix: add `seamsProfile` to the `conformance` metadata schema.
-2. **No registered event validates against `run-event.schema.json`.** `properties.type` is a `oneOf` of the closed enum and the vendor pattern `^(?!openwop\.)[a-z]…\.[a-z]…$`, which every `domain.verb` protocol type also matches, so `run.started` fails "exactly one". `v2-event-type-closed` leg 2 and `v2-id-grammar` leg 2 fail on every host. Fix: `anyOf`, or exclude registered names from the vendor branch.
-3. `runs.md` §Fork says a `fromSeq` absent from the source log is `422`, but `spec/v2/errors.json` registers no 422 code for it; this host answers `400 validation_error` (the registered choice).
-4. `webhooks.md` §Durability advertises `retryPolicy` but the v2 `webhooks` facet carries only `signatureAlgorithms[]`; the suite reads `triggerBridge.retryPolicy` instead. This host publishes its policy under `extensions.openwop-v2-reference.host.webhookRetryPolicy`.
-5. `v2-webhook-durable-delivery.test.ts` keys the loopback-refusal branch on `webhook_url_rejected`, a code absent from `spec/v2/errors.json`; a registered refusal (`validation_error` with `details.reason: webhook_url_rejected`) fails the scenario instead of recording `blocked`.
-6. The header-less discovery contract (`versioning.md` §1.3 vs `capabilities.md` §1) is consistent only for a 1.x `preferredVersion` through the overlap — see "Negotiation".
+Implementing the prose surfaced six defects plus a contradiction; all seven are fixed in the corpus at `v2-phase3-e4` and this host is measured against the fix (`conformance.md` §"What changed"):
+
+1. `conformance.seamsProfile` was schema-illegal — now a key of the closed discovery root, so the seams profile is advertisable.
+2. No registered event validated against `run-event.schema.json` (`type.oneOf` matched both branches) — the vendor branch now excludes every registered first segment, so a registered type matches exactly one and `run.startd` is refused.
+3. `runs.md` §Fork required a `422` no code registered — `fork_point_invalid` (422) is registered and this host answers it.
+4. `webhooks.md` advertised a `retryPolicy` the `webhooks` facet could not carry — it is a facet of the family now, and this host advertises it there.
+5. The loopback refusal had no registered code — `webhook_url_rejected` (400) is registered and this host answers it.
+6. The v3 bundle schema rejected the emitter's own requirement ids — the id pattern now admits the six areas the suite mints.
+7. The header-less discovery contract was ambiguous — `versioning.md` §1.1 now states the 1.x rule this host was already following (see "Negotiation").
+
+Two contradictions **introduced by fixes 3 and 6** remain open and are the only failing rows in the current measurement; both are server-free (the driver never contacts the host). They are stated with file and line in `conformance.md` §"The 4 executed-fail rows".
 
 ## File layout
 
