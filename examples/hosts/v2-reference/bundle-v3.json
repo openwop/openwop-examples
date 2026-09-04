@@ -1,12 +1,12 @@
 {
   "bundleVersion": "3",
-  "generatedAt": "2026-09-04T03:31:58.075Z",
+  "generatedAt": "2026-09-04T11:49:27.530Z",
   "suite": {
     "name": "@openwop/openwop-conformance",
-    "version": "2.0.0-rc.1",
+    "version": "2.0.0-rc.2",
     "targetMajor": 2,
-    "specArtifactsVersion": "2.0.0-rc.1",
-    "stampSha256": "c588b39fdcedb05d753c738cfe8e335093cdd2e9431f789d9d2085df4629e794"
+    "specArtifactsVersion": "2.0.0-rc.2",
+    "stampSha256": "b238d58665762e832fcd76df7149671705ffa588969cc80737358255d29488c9"
   },
   "host": {
     "name": "openwop-host-v2-reference",
@@ -14,7 +14,7 @@
     "vendor": "openwop (reference example)",
     "build": {
       "kind": "commit",
-      "id": "8201d952e27b03b589cd7f6f8c367d165e14e258"
+      "id": "3120f306e24ef8c469238b2d3f3937477de1346b"
     },
     "signingKeyId": "v2-reference-1",
     "relaxations": [
@@ -27,21 +27,40 @@
   },
   "discovery": {
     "url": "http://127.0.0.1:3838/.well-known/openwop",
-    "sha256": "f02c05f1080679623a08aa73cdcbe6c1f18fdec6ea085b3652dc742f979bafb7",
+    "sha256": "0a270c517995a1690900b3441d3fd0fe9f5476e07952001e9fa8a412fbf12231",
     "protocolVersions": [
       "1.11",
       "2.0"
     ],
     "preferredVersion": "1.11"
   },
-  "claimedProfiles": [],
+  "claimedProfiles": [
+    {
+      "id": "openwop-discovery-core",
+      "evidenceTier": "self",
+      "witnessCount": 0,
+      "certified": false
+    },
+    {
+      "id": "openwop-core-standard",
+      "evidenceTier": "self",
+      "witnessCount": 0,
+      "certified": false
+    },
+    {
+      "id": "openwop-conformance-seams-v2",
+      "evidenceTier": "self",
+      "witnessCount": 0,
+      "certified": false
+    }
+  ],
   "results": {
     "totals": {
-      "executedPass": 142,
+      "executedPass": 144,
       "executedFail": 0,
       "skipped": 0,
       "inapplicable": 24,
-      "blocked": 17
+      "blocked": 18
     },
     "requirements": [
       {
@@ -130,6 +149,13 @@
         "scenario": "v2-enum-growth-rule.test.ts",
         "result": "executed-pass",
         "assertions": 6
+      },
+      {
+        "id": "openwop.scenario.v2-era-2-append-vocabulary",
+        "scenario": "v2-era-2-append-vocabulary.test.ts",
+        "result": "executed-pass",
+        "assertions": 1,
+        "detail": "partial-witness: blocked: POST /runs/{runId}:cancel answered 404 on a seeded era-2 run — no canonical mutation drove the host's writer, so the append is unwitnessed"
       },
       {
         "id": "openwop.scenario.v2-era-key",
@@ -462,6 +488,13 @@
         "scenario": "fixtures-valid.test.ts",
         "result": "executed-pass",
         "assertions": 1
+      },
+      {
+        "id": "openwop.it.v2-era-2-append-vocabulary.a-host-append-to-an-open-era-2-run-keeps-the-log-in-v1-vocabulary-so-the-whole-l",
+        "scenario": "v2-era-2-append-vocabulary.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion",
@@ -1022,6 +1055,12 @@
         "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
+        "id": "openwop.requirement.0176.era-2-append-vocabulary",
+        "scenario": "v2-era-2-append-vocabulary.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
         "id": "openwop.requirement.0176.era-key",
         "scenario": "v2-era-key.test.ts",
         "result": "executed-pass",
@@ -1191,8 +1230,8 @@
       }
     ]
   },
-  "witnessSha256": "ae2590a769c0eb2f954f9a9b060209ac6e21ed869dd2de45221097a5610445eb",
-  "assertionCount": 1316,
+  "witnessSha256": "e7ca08db7ee15c16be847d71c2630f9a09d22cc5e77d4ac281e51d8f96db9599",
+  "assertionCount": 1318,
   "detail": {
     "nonPass": [
       {
@@ -1249,6 +1288,11 @@
         "id": "openwop.floor.any.interrupt-",
         "result": "blocked",
         "reason": "no interrupt-* scenario ran — unclassified return"
+      },
+      {
+        "id": "openwop.it.v2-era-2-append-vocabulary.a-host-append-to-an-open-era-2-run-keeps-the-log-in-v1-vocabulary-so-the-whole-l",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion",
@@ -1405,7 +1449,7 @@
   "signature": {
     "alg": "ed25519",
     "keyId": "v2-reference-1",
-    "sig": "VEnqNMwGxGIPHqns0e4KUJLSgcsRwU5maUwv7ViqFnk8A_VG2Il6MBftxLdiJpU4T_WqqBYDJaFY8Ajnh4uGAQ",
+    "sig": "sfj5_43meqTaW2xUOrvGynRnASWS3mRUx3s2JeNxa9-_Zda5Ulg66JZCmlXxK3jzQZyE6X1laT2KMGJK0KTLCg",
     "over": [
       "witnessSha256",
       "host.build",

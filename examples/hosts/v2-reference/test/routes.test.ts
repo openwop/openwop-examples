@@ -209,6 +209,30 @@ describe('persistence + replay', () => {
     expect(fp.b.events[0].payload.owner.subject.issuer).toBe('urn:openwop:legacy');
     expect((await call('GET', `/runs/${enc(f.b.runId)}`)).b.eventLogSchemaVersion).toBe(3);
   });
+  it('the writer rule: an append to an open era-2 run is stored in v1 vocabulary and does not promote the era', async () => {
+    const { toStorageVocabulary } = await import('../src/codemap.js');
+    // The pure mapping, over the three shapes the codemap has.
+    expect(toStorageVocabulary('agent.tool-called', 2)).toBe('agent.toolCalled');   // renamed
+    expect(toStorageVocabulary('run.cancelled', 2)).toBe('run.cancelled');          // identity
+    expect(toStorageVocabulary('agent.tool-called', 3)).toBe('agent.tool-called');  // era 3 stores v2
+    expect(() => toStorageVocabulary('openwop.not-a-type', 2)).toThrow(/refusing to append/);
+
+    // End to end: seed an OPEN era-2 run, let the host's own writer append.
+    const s = await call('POST', '/conformance/seams/sample/event-log/seed', { eventLogSchemaVersion: 2, status: 'running', events: log.slice(0, 2) });
+    expect(s.s).toBe(201);
+    const runId = s.b.runId as string;
+    const before = (await call('GET', `/runs/${enc(runId)}/events/poll?timeout=1`)).b.events.length;
+    expect((await call('POST', `/runs/${enc(runId)}/cancel`, {})).s).toBe(200);
+    const after = await call('GET', `/runs/${enc(runId)}/events/poll?timeout=1`);
+    expect(after.s).toBe(200);
+    expect(after.b.events.length).toBeGreaterThan(before);
+    // The whole log still reads, in v2 names, with a contiguous sequence space.
+    expect(after.b.events.map((e: any) => e.type)).toEqual(['run.started', 'agent.tool-called', 'run.cancelled']);
+    expect(after.b.events.map((e: any) => e.sequence)).toEqual([0, 1, 2]);
+    // The era key is fixed at creation: the append did not promote it to 3.
+    expect((await call('GET', `/runs/${enc(runId)}`)).b.eventLogSchemaVersion).toBe(2);
+  });
+
   it('refuses an unmapped type on every reader and cancels an unsupported pin', async () => {
     const s = await call('POST', '/conformance/seams/sample/event-log/seed', { eventLogSchemaVersion: 2, status: 'completed', events: [log[0], { type: 'foo.bar', sequence: 1, payload: {}, timestamp: ts(1) }] });
     const p = await call('GET', `/runs/${enc(s.b.runId)}/events/poll?timeout=1`);

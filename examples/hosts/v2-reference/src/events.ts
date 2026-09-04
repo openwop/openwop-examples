@@ -6,7 +6,7 @@
  */
 import type { ServerResponse } from 'node:http';
 import { ENGINE_VERSION, EVENT_SCHEMA_VERSION, LEGACY_ISSUER } from './config.js';
-import { eraOf, rowToDoc, type RunEventDoc } from './codemap.js';
+import { eraOf, rowToDoc, toStorageVocabulary, type RunEventDoc } from './codemap.js';
 import { err } from './errors.js';
 import { nowIso, opaque } from './ids.js';
 import { TERMINAL, type AppendedEvent, type Host, type Owner } from './host.js';
@@ -28,11 +28,15 @@ export function appendEvent(host: Host, run: RunRow, type: string, payload: unkn
   const sequence = host.store.lastSequence(run.run_id) + 1;
   const timestamp = opts.timestamp ?? nowIso();
   const eventId = opaque();
+  // persistence.md §The writer rule: the run's era fixes the log's vocabulary
+  // for its lifetime. An append to an era-2 run is STORED under the name the
+  // codemap maps from; the era key itself is never restamped by an append.
+  const storedType = toStorageVocabulary(type, eraOf(run));
   host.store.insertEvent({
     run_id: run.run_id,
     sequence,
     event_id: eventId,
-    type,
+    type: storedType,
     payload_json: JSON.stringify(payload ?? {}),
     timestamp,
     node_id: opts.nodeId ?? null,
