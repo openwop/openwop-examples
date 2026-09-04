@@ -1,12 +1,12 @@
 {
   "bundleVersion": "3",
-  "generatedAt": "2026-09-04T11:49:27.530Z",
+  "generatedAt": "2026-09-04T17:31:53.416Z",
   "suite": {
     "name": "@openwop/openwop-conformance",
-    "version": "2.0.0-rc.2",
+    "version": "2.0.0-rc.16",
     "targetMajor": 2,
-    "specArtifactsVersion": "2.0.0-rc.2",
-    "stampSha256": "b238d58665762e832fcd76df7149671705ffa588969cc80737358255d29488c9"
+    "specArtifactsVersion": "2.0.0-rc.16",
+    "stampSha256": "2387d342ff997e79831bf01ebbfc0e8190136e6108bf06c35ceb403290d6d585"
   },
   "host": {
     "name": "openwop-host-v2-reference",
@@ -14,20 +14,13 @@
     "vendor": "openwop (reference example)",
     "build": {
       "kind": "commit",
-      "id": "3120f306e24ef8c469238b2d3f3937477de1346b"
+      "id": "14b01706a65f9806ed21e95377d89914ab2fe70d"
     },
-    "signingKeyId": "v2-reference-1",
-    "relaxations": [
-      {
-        "obligation": "webhooks.md §Egress — registration-time refusal of loopback, private, link-local and metadata receivers",
-        "durability": "session",
-        "reason": "OPENWOP_WEBHOOK_ALLOW_PRIVATE=true for this measurement: the suite receiver (v2-webhook-durable-delivery) is a loopback listener and no public https tunnel (OPENWOP_WEBHOOK_RECEIVER_URL) was configured"
-      }
-    ]
+    "signingKeyId": "v2-reference-1"
   },
   "discovery": {
     "url": "http://127.0.0.1:3838/.well-known/openwop",
-    "sha256": "0a270c517995a1690900b3441d3fd0fe9f5476e07952001e9fa8a412fbf12231",
+    "sha256": "84fe16ef565fb0f6d7cf23594af9caabc2af7bd33c29ccf5df9f7d9589151240",
     "protocolVersions": [
       "1.11",
       "2.0"
@@ -56,7 +49,7 @@
   ],
   "results": {
     "totals": {
-      "executedPass": 144,
+      "executedPass": 150,
       "executedFail": 0,
       "skipped": 0,
       "inapplicable": 24,
@@ -68,6 +61,12 @@
         "scenario": "fixtures-valid.test.ts",
         "result": "executed-pass",
         "assertions": 294
+      },
+      {
+        "id": "openwop.scenario.v2-advertised-fixtures-exist",
+        "scenario": "v2-advertised-fixtures-exist.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
       },
       {
         "id": "openwop.scenario.v2-approver-enforced",
@@ -155,13 +154,19 @@
         "scenario": "v2-era-2-append-vocabulary.test.ts",
         "result": "executed-pass",
         "assertions": 1,
-        "detail": "partial-witness: blocked: POST /runs/{runId}:cancel answered 404 on a seeded era-2 run — no canonical mutation drove the host's writer, so the append is unwitnessed"
+        "detail": "partial-witness: blocked: seedEra2Log reported success but the log reads back empty (0 events) — the seam's return value is not evidence that a log exists, and without a seeded era-2 log the writer rule is unwitnessed here"
       },
       {
         "id": "openwop.scenario.v2-era-key",
         "scenario": "v2-era-key.test.ts",
         "result": "executed-pass",
         "assertions": 5
+      },
+      {
+        "id": "openwop.scenario.v2-era-stamp-universal",
+        "scenario": "v2-era-stamp-universal.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
       },
       {
         "id": "openwop.scenario.v2-error-registry",
@@ -381,6 +386,12 @@
         "assertions": 4
       },
       {
+        "id": "openwop.scenario.v2-version-header-honored",
+        "scenario": "v2-version-header-honored.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
         "id": "openwop.scenario.v2-webhook-durable-delivery",
         "scenario": "v2-webhook-durable-delivery.test.ts",
         "result": "executed-pass",
@@ -558,6 +569,12 @@
         "result": "inapplicable",
         "assertions": 0,
         "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0168.advertised-fixtures-exist",
+        "scenario": "v2-advertised-fixtures-exist.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
       },
       {
         "id": "openwop.requirement.0168.bundle-v3-signed.independent-self-signed",
@@ -901,6 +918,12 @@
         "assertions": 1
       },
       {
+        "id": "openwop.requirement.0172.version-header-honored",
+        "scenario": "v2-version-header-honored.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
+      },
+      {
         "id": "openwop.requirement.0173.approver-enforced",
         "scenario": "v2-approver-enforced.test.ts",
         "result": "executed-pass",
@@ -1073,6 +1096,12 @@
         "assertions": 3
       },
       {
+        "id": "openwop.requirement.0176.era-stamp-universal",
+        "scenario": "v2-era-stamp-universal.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
         "id": "openwop.requirement.0176.fork-a-v1-run.legacy-subject",
         "scenario": "v2-fork-a-v1-run.test.ts",
         "result": "executed-pass",
@@ -1230,8 +1259,8 @@
       }
     ]
   },
-  "witnessSha256": "e7ca08db7ee15c16be847d71c2630f9a09d22cc5e77d4ac281e51d8f96db9599",
-  "assertionCount": 1318,
+  "witnessSha256": "169b3466d8c9788550f226e9bde19354ca2b7ff144e0581ed56759bda724d351",
+  "assertionCount": 1332,
   "detail": {
     "nonPass": [
       {
@@ -1449,7 +1478,7 @@
   "signature": {
     "alg": "ed25519",
     "keyId": "v2-reference-1",
-    "sig": "sfj5_43meqTaW2xUOrvGynRnASWS3mRUx3s2JeNxa9-_Zda5Ulg66JZCmlXxK3jzQZyE6X1laT2KMGJK0KTLCg",
+    "sig": "kH58-QPUEGd85cGgzNDRQxwzJBrbHOGHYOJlKWJpoLmewyetMWbERUuwNz_v-UUY_55ON9GLZTWZIWJ6elsrCA",
     "over": [
       "witnessSha256",
       "host.build",
