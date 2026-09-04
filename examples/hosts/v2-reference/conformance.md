@@ -1,10 +1,12 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-03, `@openwop/openwop-conformance@2.0.0-rc.1` + `@openwop/spec-artifacts@2.0.0-rc.1` (both packed from `openwop/openwop@56cd5d7b`, `origin/main`), `--target-major 2`, 51 scenario files.** Host `openwop-host-v2-reference@2.0.0-rc.1`, build `commit:8201d952e27b03b589cd7f6f8c367d165e14e258`, local boot, fresh store, one run.
+> **Measurement — 2026-09-04, `@openwop/openwop-conformance@2.0.0-rc.2` + `@openwop/spec-artifacts@2.0.0-rc.2` (both packed from `openwop/openwop@75d572d9`, `origin/main`), `--target-major 2`, **52** scenario files.** Host `openwop-host-v2-reference@2.0.0-rc.1`, build `commit:3120f306e24ef8c469238b2d3f3937477de1346b`, local boot, fresh store, one run.
 >
-> **51 / 51 files and 227 / 227 tests pass. RFC 0148 §A dispositions (`evidence/requirement-ledger.jsonl`, 292 rows): executed-pass 238 · executed-fail 0 · blocked 16 · inapplicable 38 · skipped 0.** Route-level harness 20 / 20. The host emits no `[schema]` warning on any route with the dev validator on.
+> **52 / 52 files and 229 / 229 tests pass. RFC 0148 §A dispositions (`evidence/requirement-ledger.jsonl`, 295 rows): executed-pass 240 · executed-fail 0 · blocked 17 · inapplicable 38 · skipped 0.** Route-level harness 21 / 21. The host emits no `[schema]` warning on any route with the dev validator on.
 >
-> **Signed bundle: [`bundle-v3.json`](./bundle-v3.json)** — `witnessSha256` **`ae2590a769c0eb2f954f9a9b060209ac6e21ed869dd2de45221097a5610445eb`**, 183 requirement rows (**107 explicit `openwop.requirement.*`**, 24 `it`, 51 `scenario`, 1 `floor`), 1316 assertions, totals `executedPass 142 · executedFail 0 · skipped 0 · inapplicable 24 · blocked 17`. Ed25519 under key id `v2-reference-1` (`keys/host.pub.pem`). Independently verified: schema-valid, `signatureVerified: true`, `rejections: []`. It certifies no profile — `blocked > 0`.
+> **Signed bundle: [`bundle-v3.json`](./bundle-v3.json)** — `witnessSha256` **`e7ca08db7ee15c16be847d71c2630f9a09d22cc5e77d4ac281e51d8f96db9599`**, 186 requirement rows, 1318 assertions, totals `executedPass 144 · executedFail 0 · skipped 0 · inapplicable 24 · blocked 18`, `claimedProfiles` = `openwop-discovery-core`, `openwop-core-standard`, `openwop-conformance-seams-v2`. Ed25519 under key id `v2-reference-1` (`keys/host.pub.pem`). Independently verified: schema-valid, `signatureVerified: true`, `rejections: []`. It certifies no profile — `blocked > 0`.
+>
+> **All three §F host cut gates PASS (`exit 0`).**
 
 ## Cut gates (`scripts/check-cut-gates.mjs --host-bundle …`, spec worktree at `56cd5d7b`)
 
@@ -22,30 +24,44 @@ PASS    Coexistence
    ok  …/bundle-v3.json openwop.requirement.0176.v1-signed-webhook-accepted.*  — 2 leg(s): executed-pass=2
    ok  …/bundle-v3.json openwop.requirement.0177.manifest-ceiling-refused.*  — 3 leg(s): executed-pass=3
 
-FAIL    Front door
-   ok  node scripts/check-core-budget.mjs  — === check-core-budget OK — 20,899 / 25,000 words across 20 document(s) ===
-   ok  …/bundle-v3.json results.totals  — executedFail=0 executedPass=142 blocked=17
-   XX  INTEROP-MATRIX.md  — no row names host openwop-host-v2-reference
+PASS    Front door
+   ok  node scripts/check-core-budget.mjs  — === check-core-budget OK — 21,070 / 25,000 words across 20 document(s) ===
+   ok  …/bundle-v3.json results.totals  — executedFail=0 executedPass=144 blocked=18
+   ok  INTEROP-MATRIX.md  — row for openwop-host-v2-reference
    ok  …/bundle-v3.json signature  — signed by v2-reference-1
+
+=== 0 failed, 0 blocked → exit 0
 ```
 
-**Witness and Coexistence pass outright.** Front door is short exactly one row — the INTEROP-MATRIX entry, which lives in the spec repo and is not this repo's to add. `executedFail = 0` and the signature both hold.
+**All three pass.** The INTEROP-MATRIX row landed on the spec side, closing the last Front-door check.
+
+## The writer rule (`persistence.md` §The writer rule, Phase 4)
+
+The era key is fixed at run creation and fixes the log's vocabulary for the run's lifetime: an append to an era-`2` run MUST use v1 vocabulary. **Measured against this host before implementing it, the rule already held — accidentally.** Every one of the 16 event types this host can append is an *identity* row in the codemap (`run.started`, `run.cancelled`, `node.*`, `interrupt.*`, `compensation.requested|started`), so the v1 and v2 spellings coincide and an era-2 append was valid v1 vocabulary by luck; the era column was never restamped either. But `appendEvent()` had **no era awareness at all** — had the host emitted any of the 36 renamed types, or a v2-only name, it would have corrupted the log exactly as the rule describes.
+
+That is now structural rather than coincidental:
+
+- `toStorageVocabulary(type, era)` (`src/codemap.ts`) maps a v2 name to the spelling the codemap maps *from* when the run is era `< 3`, and **refuses the append** when no v1 preimage exists — a host must not write a name its own reader would fail on.
+- `appendEvent()` (`src/events.ts`) stores that spelling and never restamps the era; the document on the wire keeps its v2 name, so readers are unaffected.
+- The reader's tolerant fallback is gone: `translateType()` no longer accepts a registered *v2* name found in an era-2 log. `persistence.md` §The reader rule says a type the codemap does not name on its v1 side fails the read, and tolerating it would hide precisely this defect.
+
+Witnessed end to end by the harness (`test/routes.test.ts`): a seeded open era-2 run, cancelled through the canonical `POST /runs/{runId}/cancel`, stores `run.cancelled`, reads back as `['run.started','agent.tool-called','run.cancelled']` with sequences `[0,1,2]`, and still reports `eventLogSchemaVersion: 2`. The pure mapping is asserted over all three shapes (`agent.tool-called` → `agent.toolCalled`, identity, era-3 passthrough, and the refusal).
 
 ## What changed since the previous measurement
 
-| | two rounds ago | last round | now |
-|---|---|---|---|
-| explicit `openwop.requirement.*` rows | 0 of 84 | 86 | **107** (a leg that soft-skips before its first assertion now records under its own id) |
-| `it` rows standing in for unnamed legs | — | 45 | **24** |
-| Witness gate | FAIL (35 ids) | FAIL (35 ids) | **PASS (108 ids each carry a row)** |
-| Coexistence gate | PASS | PASS | **PASS** |
-| executed-fail | 4 | 0 | **0** |
-| blocked | 18 | 16 | **16** |
+| | last round (rc.1 / 51 files) | now (rc.2 / 52 files) |
+|---|---|---|
+| scenario files | 51 | **52** (`v2-era-2-append-vocabulary`) |
+| executed-pass / blocked | 238 / 16 | **240 / 17** |
+| `claimedProfiles` | `[]` (resolver missed the hoisted peer) | **the three registry predicates the root satisfies** |
+| Witness / Coexistence / Front door | PASS / PASS / FAIL (matrix row) | **PASS / PASS / PASS** |
+| executed-fail | 0 | **0** |
 
-## The 16 blocked rows, each with the suite's own reason
+## The 17 blocked rows, each with the suite's own reason
 
 | Leg(s) | Reason |
 |---|---|
+| `v2-era-2-append-vocabulary` · the append leg | the scenario drives `POST /runs/{runId}:cancel`; the canonical path is `/cancel` (see Deviations 2) |
 | `v2-negotiation-authenticated` ×2, `v2-negotiation-decided-emitted` ×2, `v2-minimum-version-refused` ×2, `v2-mrtr-rounds-ceiling` ×2, `v2-refresh-sla`, `v2-legacy-profiles-absent` | the host advertises neither `a2a` nor `mcp` — REST is the wire, no embedded protocol is composed |
 | `v2-subject-link-record` ×2 | neither `saml` nor `scim` lane is advertised (no IdP integration) |
 | `v2-error-registry` · 429 carries `Retry-After` | no 429 was observed during the run (the bucket is 1200/min) |
@@ -59,17 +75,19 @@ FAIL    Front door
 
 ## Deviations and open observations
 
-1. **`claimedProfiles` is still emitted as `[]` — a suite path-resolution gap, not a host one.** `claimedProfilesForV2` (`conformance/src/cli.ts:322–331`) now evaluates the v2 registry, but probes three paths relative to `conformanceRoot` (`cli.ts:443`, the installed package directory), and **none exists in a published flat install**: `<conf>/spec/v2/profiles.json` (the suite tarball ships no `spec/`), `<conf>/../spec/v2/profiles.json` (that resolves to the `node_modules/@openwop/` scope directory, not a package), and `<conf>/node_modules/@openwop/spec-artifacts/…` (only when npm *nests* the peer; a hoisted install puts it one level up). The run says so on stderr — `spec/v2/profiles.json not found in this layout; claimedProfiles is empty (RFC 0169 §C.1)`. The path that exists here is `<conf>/../spec-artifacts/spec/v2/profiles.json`; the robust fix is the resolver `src/lib/paths.ts` already uses — `createRequire(join(PKG_ROOT, 'package.json')).resolve('@openwop/spec-artifacts/package.json')`. A repo checkout satisfies candidate #2, which is presumably where it was exercised.
+1. **`claimedProfiles` is populated, and matches the hand derivation exactly** — `openwop-discovery-core`, `openwop-core-standard`, `openwop-conformance-seams-v2`, each `evidenceTier: self`, `witnessCount: 0`, `certified: false`. The rc.1 resolver gap is closed. None certifies: `blocked > 0`.
 
-   Running the CLI's own predicate against the registry at its real path, this host's v2 root satisfies all three profiles: **`openwop-discovery-core`** (metadata `protocolVersions`, `preferredVersion`), **`openwop-core-standard`** (families `interrupt`, `replay`, `webhooks`, `idempotency`, `eventLog`, each a record) and **`openwop-conformance-seams-v2`**. None would certify from this run in any case: `blocked > 0`.
-2. **The relaxation.** The run used `OPENWOP_WEBHOOK_ALLOW_PRIVATE=true` — the suite's webhook receiver is a loopback listener a conforming egress guard refuses. Recorded in the bundle as `host.relaxations[0]` (`webhooks.md §Egress`, `durability: session`). No other relaxation was in force. With the guard on (exercised by `npm test`) such a registration answers `400 webhook_url_rejected`.
-3. **Unverified.** The CI workflow skips until the rc peers are on npm. The SSRF guard's DNS re-resolution path is exercised only against loopback. `core.httpFetch` replay suppression and the `session` lane are covered by the harness and the two effect seams, not by an independent host.
+   `--certify` still exits 3, now for a different reason. With `openwop-core-standard` claimed, the CLI checks it against `PROFILE_FLOOR_SCENARIOS['openwop-core-standard']` (`conformance/src/lib/profiles.ts:526–536`, read at `cli.ts:626`) — a hard-coded **v1** floor of `runs-lifecycle.test.ts`, `discovery.test.ts`, `auth.test.ts`, `eventOrdering.test.ts`, `failure-path.test.ts`, `idempotency.test.ts`, `idempotency-key-determinism.test.ts`, `webhook-negative.test.ts`, every one of which `scenario-majors.json` assigns to major **1** and a `--target-major 2` run therefore never executes. The v2 registry's own `floorScenarios` for that profile is `[]` (`spec/v2/profiles.json`, "the floor is minted with the 2.0.0 scenarios (planned)"), so the check reads a v1 table for a v2 claim. It does not change the outcome — `blocked > 0` already prevents certification — but it is why the exit code is 3 rather than 0.
+
+2. **The new `v2-era-2-append-vocabulary` scenario records `blocked` on its first leg, for a path bug in the scenario.** It drives the mutation with `POST /runs/{runId}:cancel` (`conformance/src/scenarios/v2-era-2-append-vocabulary.test.ts:68` and `:128`), but the canonical operation is `POST /runs/{runId}/cancel` — `api/v2/openapi.yaml:536` and `runs.md:23`, and every other scenario in the suite uses the slash form. A conforming host answers `404`, so the leg soft-skips with *"POST /runs/{runId}:cancel answered 404 on a seeded era-2 run — no canonical mutation drove the host's writer, so the append is unwitnessed"*. Leg 2 (the era is not promoted) executes and passes. Driving the identical flow at the canonical path — which the host's own harness now does — the leg's assertions all hold. The host was not changed to serve `:cancel`.
+3. **The relaxation.** The run used `OPENWOP_WEBHOOK_ALLOW_PRIVATE=true` — the suite's webhook receiver is a loopback listener a conforming egress guard refuses. Recorded in the bundle as `host.relaxations[0]` (`webhooks.md §Egress`, `durability: session`). No other relaxation was in force. With the guard on (exercised by `npm test`) such a registration answers `400 webhook_url_rejected`.
+4. **Unverified.** The CI workflow skips until the rc peers are on npm. The SSRF guard's DNS re-resolution path is exercised only against loopback. `core.httpFetch` replay suppression and the `session` lane are covered by the harness and the two effect seams, not by an independent host.
 
 ## INTEROP-MATRIX row (for the spec repo to add)
 
 | Host | Implemented from | Suite / artifacts | Target | Advertised profiles | Discovery | pass / fail / blocked / inapplicable / skipped | Bundle | Evidence tier | Certified |
 |---|---|---|---|---|---|---|---|---|---|
-| `openwop-host-v2-reference@2.0.0-rc.1` (`openwop/openwop-examples`, `examples/hosts/v2-reference`, build `commit:8201d952`) | `spec/v2/core/` prose + generated v2 documents (never from a v1 host) | `@openwop/openwop-conformance@2.0.0-rc.1` / `@openwop/spec-artifacts@2.0.0-rc.1` | 2 | `openwop-discovery-core`, `openwop-core-standard`, `openwop-conformance-seams-v2` (the registry predicates the root satisfies; the bundle emits `[]` — see Deviations 1) | `["1.11","2.0"]`, preferred `1.11`, sha256 `f02c05f1080679623a08aa73cdcbe6c1f18fdec6ea085b3652dc742f979bafb7` | 238 / 0 / 16 / 38 / 0 (292 ledger rows) | `examples/hosts/v2-reference/bundle-v3.json`, witness `ae2590a769c0…`, signed `v2-reference-1` | `self` | none (`blocked > 0`) |
+| `openwop-host-v2-reference@2.0.0-rc.1` (`openwop/openwop-examples`, `examples/hosts/v2-reference`, build `commit:3120f306`) | `spec/v2/core/` prose + generated v2 documents (never from a v1 host) | `@openwop/openwop-conformance@2.0.0-rc.2` / `@openwop/spec-artifacts@2.0.0-rc.2` | 2 | `openwop-discovery-core`, `openwop-core-standard`, `openwop-conformance-seams-v2` — as the bundle now emits them | `["1.11","2.0"]`, preferred `1.11`, sha256 `0a270c517995a1690900b3441d3fd0fe9f5476e07952001e9fa8a412fbf12231` | 240 / 0 / 17 / 38 / 0 (295 ledger rows) | `examples/hosts/v2-reference/bundle-v3.json`, witness `e7ca08db7ee1…`, signed `v2-reference-1` | `self` | none (`blocked > 0`) |
 
 ## Reproduce
 

@@ -21,6 +21,8 @@ export interface SpecArtifacts {
   readonly vendorCodePattern: RegExp;
   /** v1 → v2 event type name (identity rows included). */
   readonly codemap: ReadonlyMap<string, string>;
+  /** v2 → v1: the spelling an era-2 log stores (persistence.md §The writer rule). */
+  readonly codemapV2toV1: ReadonlyMap<string, string>;
   /** Every registered v2 event type. */
   readonly v2EventTypes: ReadonlySet<string>;
   readonly vendorEventPattern: RegExp;
@@ -61,7 +63,13 @@ export function loadArtifacts(): SpecArtifacts {
   const errors = new Map<string, ErrorRow>();
   for (const r of errorsDoc.rows) errors.set(r.code, r);
   const codemap = new Map<string, string>();
-  for (const r of codemapDoc.rows) codemap.set(r.v1, r.v2);
+  const codemapV2toV1 = new Map<string, string>();
+  for (const r of codemapDoc.rows) {
+    codemap.set(r.v1, r.v2);
+    // Several v1 names fold onto one v2 name (lease.*); the first row wins, and
+    // an identity row always maps to itself.
+    if (!codemapV2toV1.has(r.v2) || r.v1 === r.v2) codemapV2toV1.set(r.v2, r.v1);
+  }
   const v2EventTypes = new Set<string>(runEvent.properties.type.oneOf.flatMap((b) => b.enum ?? []));
   const vendorPattern = runEvent.properties.type.oneOf.find((b) => b.pattern !== undefined)?.pattern
     ?? '^(?!openwop\\.)[a-z][a-z0-9]*(-[a-z0-9]+)*\\.[a-z][a-z0-9]*(-[a-z0-9]+)*(\\.[a-z][a-z0-9]*(-[a-z0-9]+)*)?$';
@@ -77,6 +85,7 @@ export function loadArtifacts(): SpecArtifacts {
     errors,
     vendorCodePattern: new RegExp(errorsDoc.vendorCodePattern),
     codemap,
+    codemapV2toV1,
     v2EventTypes,
     vendorEventPattern: new RegExp(vendorPattern),
     familyKeys,
