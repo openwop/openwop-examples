@@ -1,0 +1,291 @@
+{"requirementId":"openwop.requirement.0171.event-type-closed.type","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0168.bundle-v3-signed.schema-closed-root","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0168.bundle-v3-signed.witness-digest","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0171.event-type-closed.envelope","disposition":"executed-fail","detail":"the test executed and failed: [openwop-host-v2-reference@2.0.0-rc.1] spec/v2/core/events.md §The envelope: every event MUST validate against schemas/v2/run-event.schema.json — eventId, runId, type, payload, timestamp, sequence, schemaVersion REQUIRED; closed (data/type must match exactly one schema in oneOf): expected false to b","assertionCount":1}
+{"requirementId":"openwop.scenario.v2-event-type-closed","disposition":"executed-fail","detail":"one or more assertions in the file failed","assertionCount":5}
+{"requirementId":"openwop.requirement.0168.bundle-v3-signed.independent-self-signed","disposition":"executed-fail","detail":"the test executed and failed: [openwop-host-v2-reference@2.0.0-rc.1] conformance.md §\"Bundle v3\" (RFC 0168 §E): a refused independent claim MUST NOT certify: expected [ 'openwop-core-v2' ] to not include 'openwop-core-v2'","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-bundle-v3-signed","disposition":"executed-fail","detail":"one or more assertions in the file failed","assertionCount":8}
+{"requirementId":"openwop.requirement.0170.id-grammar.snapshot","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0171.payload-registry-closed","disposition":"executed-pass","assertionCount":8}
+{"requirementId":"openwop.scenario.v2-payload-registry-closed","disposition":"executed-pass","assertionCount":8}
+{"requirementId":"openwop.requirement.0170.id-grammar.events","disposition":"executed-fail","detail":"the test executed and failed: [openwop-host-v2-reference@2.0.0-rc.1] spec/v2/core/identity.md §5: every RunEventDoc id (eventId, runId, nodeId, causationId) MUST match its kind — event 4Cab8E1f6CGEeBtcno2e3tOW (data/type must match exactly one schema in oneOf): expected false to be true // Object.is equality","assertionCount":1}
+{"requirementId":"openwop.requirement.0170.id-grammar.tenant-binding","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.scenario.v2-id-grammar","disposition":"executed-fail","detail":"one or more assertions in the file failed","assertionCount":6}
+{"requirementId":"openwop.requirement.0175.no-transport-advertisement","disposition":"executed-fail","detail":"the test executed and failed: [openwop-host-v2-reference@2.0.0-rc.1] capabilities.schema.json (closed root): the v2 discovery document MUST validate against the closed root — a transport list or a grpc block fails it: data/conformance must NOT have additional properties: expected false to be true // Object.is equality","assertionCount":3}
+{"requirementId":"openwop.scenario.v2-no-transport-advertisement","disposition":"executed-fail","detail":"one or more assertions in the file failed","assertionCount":3}
+{"requirementId":"openwop.requirement.0169.capabilities-root-closed.valid","disposition":"executed-fail","detail":"the test executed and failed: [openwop-host-v2-reference@2.0.0-rc.1] spec/v2/core/capabilities.md §3: the v2 discovery document MUST validate against schemas/v2/capabilities.schema.json (data/conformance must NOT have additional properties): expected false to be true // Object.is equality","assertionCount":1}
+{"requirementId":"openwop.requirement.0169.capabilities-root-closed.unknown-root-key","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0169.capabilities-root-closed.dotted-key","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0169.capabilities-root-closed.wrapper","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0169.capabilities-root-closed.profiles","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.scenario.v2-capabilities-root-closed","disposition":"executed-fail","detail":"one or more assertions in the file failed","assertionCount":5}
+{"requirementId":"openwop.it.v2-coherence-not-in-bundle.every-corpus-ledger-id-has-a-scenario-in-src-coherence-and-none-in-src-scenarios","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.requirement.0173.relaxation-recorded","disposition":"executed-pass","assertionCount":7}
+{"requirementId":"openwop.requirement.0171.configurable-closed.schema","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0171.configurable-closed.dotted-key","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0171.configurable-closed.unknown-key","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-configurable-closed","disposition":"executed-pass","assertionCount":8}
+{"requirementId":"openwop.requirement.0168.coherence-not-in-bundle.schema-forbids-coherence-ids","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-coherence-not-in-bundle","disposition":"executed-pass","detail":"partial-witness: blocked: evidence/corpus-ledger.json is absent from this layout — the corpus id set cannot be read","assertionCount":2}
+{"requirementId":"openwop.requirement.0173.relaxation-recorded.durability-closed","disposition":"executed-pass","assertionCount":9}
+{"requirementId":"openwop.scenario.v2-relaxation-recorded","disposition":"executed-pass","assertionCount":16}
+{"requirementId":"openwop.requirement.0170.owner-subject-required.subject","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0170.owner-subject-required.no-principal","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.scenario.v2-owner-subject-required","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.requirement.0173.effect-identity-business-key","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0173.compensation-read-projection","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.it.v2-effect-identity-business-key.the-same-provider-key-is-presented-across-two-transport-retries","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.requirement.0173.compensation-read-projection.not-found","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-effect-identity-business-key","disposition":"executed-pass","detail":"partial-witness: blocked: [inapplicable] the noop fixture issued no external effect — the per-row keying leg had no rows (an effect-issuing fixture would exercise it); [blocked] no seam drives an effect through the suite fixture provider with a forced transport retry — /conformance/seams/sample/test/idempotency/effect-retry answered 404 (the §25 concurrent-claim seam exercises Layer 1, not the provider key)","assertionCount":4}
+{"requirementId":"openwop.scenario.v2-compensation-read-projection","disposition":"executed-pass","assertionCount":8}
+{"requirementId":"openwop.requirement.0171.error-registry.envelope","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0171.error-registry.no-retry-details","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.v2-error-registry.a-429-rate-limited-response-carries-retry-after","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-error-registry","disposition":"executed-pass","detail":"partial-witness: inapplicable: no 429 rate_limited response was observed during the suite's probes — the Retry-After leg is gated on a rate-limited response","assertionCount":3}
+{"requirementId":"openwop.requirement.0172.min-client-version","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.scenario.v2-min-client-version","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0173.effect-seam-manifest","disposition":"executed-pass","assertionCount":13}
+{"requirementId":"openwop.requirement.0173.effect-seam-manifest.facet","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.v2-effect-seam-manifest.driving-one-seam-of-each-kind-observes-no-re-fire-on-replay","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-effect-seam-manifest","disposition":"executed-pass","detail":"partial-witness: blocked: no seam fires a manifest row inside a run — /conformance/seams/sample/effect-seams/fire answered 404; the no-re-fire leg cannot be driven","assertionCount":14}
+{"requirementId":"openwop.requirement.0171.poll-cursor-v2.shape","disposition":"executed-pass","assertionCount":8}
+{"requirementId":"openwop.requirement.0171.poll-cursor-v2.from-first","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0171.enum-growth-rule.unknown-member-accepted","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0171.enum-growth-rule.reserved-rejected","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.scenario.v2-enum-growth-rule","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.requirement.0171.poll-cursor-v2.after-sequence","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0171.poll-cursor-v2.past-end","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-poll-cursor-v2","disposition":"executed-pass","assertionCount":14}
+{"requirementId":"openwop.requirement.0176.v1-events-translated.poll","disposition":"executed-pass","assertionCount":16}
+{"requirementId":"openwop.requirement.0176.fork-a-v1-run.prefix","disposition":"executed-pass","assertionCount":5}
+{"requirementId":"openwop.requirement.0176.v1-events-translated.sse","disposition":"executed-pass","assertionCount":16}
+{"requirementId":"openwop.requirement.0176.v1-events-translated.fork","disposition":"executed-pass","assertionCount":13}
+{"requirementId":"openwop.requirement.0176.fork-a-v1-run.legacy-subject","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.scenario.v2-fork-a-v1-run","disposition":"executed-pass","assertionCount":9}
+{"requirementId":"openwop.scenario.v2-v1-events-translated","disposition":"executed-pass","assertionCount":45}
+{"requirementId":"openwop.requirement.0170.revocation-honored","disposition":"executed-pass","assertionCount":10}
+{"requirementId":"openwop.scenario.v2-revocation-honored","disposition":"executed-pass","assertionCount":10}
+{"requirementId":"openwop.it.fixtures-valid.finds-at-least-one-fixture-file","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0176.era-key","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0176.era-key.discovery","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.scenario.v2-era-key","disposition":"executed-pass","assertionCount":5}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.validates-against-workflow-definition-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.every-fixture-id-matches-its-filename","disposition":"executed-pass","assertionCount":86}
+{"requirementId":"openwop.it.fixtures-valid.every-fixture-has-a-manual-trigger-so-the-conformance-driver-can-start-it","disposition":"executed-pass","assertionCount":86}
+{"requirementId":"openwop.it.fixtures-valid.finds-at-least-one-pack-manifest-fixture-private-scope-coverage","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.pack-manifests-validates-against-its-kind-s-manifest-schema","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.pack-manifests-validates-against-its-kind-s-manifest-schema","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.the-private-scope-fixture-exercises-the-v1-0-private-pack-pattern","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.finds-at-least-one-connection-pack-fixture-rfc-0095-coverage","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.connection-packs-validates-against-connection-pack-manifest-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.connection-packs-validates-against-connection-pack-manifest-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.finds-at-least-one-trigger-event-fixture-rfc-0099-coverage","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.trigger-events-validates-against-its-schema","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.trigger-events-validates-against-its-schema","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.trigger-events-validates-against-its-schema","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.trigger-events-validates-against-its-schema","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.finds-at-least-one-prompt-template-fixture","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.prompt-templates-validates-against-prompt-template-schema-json","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.it.fixtures-valid.every-fixture-templateid-matches-its-filename","disposition":"executed-pass","assertionCount":14}
+{"requirementId":"openwop.it.fixtures-valid.every-secret-source-variable-lives-in-a-fixture-tagged-for-the-secret-redaction","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.scenario.fixtures-valid","disposition":"executed-pass","assertionCount":294}
+{"requirementId":"openwop.requirement.0173.approver-enforced","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.scenario.v2-approver-enforced","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.requirement.0172.dual-stack-negotiation.cross-major-read","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0172.dual-stack-negotiation.unlisted-major","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0176.pinned-run-disposition.cancelled","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.requirement.0172.dual-stack-negotiation.v1-path-mismatch","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.it.v2-pinned-run-disposition.a-pin-naming-a-change-id-the-host-still-implements-continues-under-the-reader-ru","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-pinned-run-disposition","disposition":"executed-pass","detail":"partial-witness: skipped: opt-in not supplied: no normative surface lists the change ids a host implements, so the continue leg needs OPENWOP_TEST_IMPLEMENTED_CHANGE_ID naming one","assertionCount":6}
+{"requirementId":"openwop.requirement.0172.dual-stack-negotiation.response-header","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.scenario.v2-dual-stack-negotiation","disposition":"executed-pass","assertionCount":15}
+{"requirementId":"openwop.requirement.0171.header-scheme.no-legacy-headers","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0171.header-scheme.version-on-every-response","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.scenario.v2-header-scheme","disposition":"executed-pass","assertionCount":9}
+{"requirementId":"openwop.requirement.0177.manifest-ceiling-refused.unbounded","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0177.manifest-ceiling-refused.v1-ceiling","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0177.manifest-ceiling-refused.v2-installs","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.scenario.v2-manifest-ceiling-refused","disposition":"executed-pass","assertionCount":5}
+{"requirementId":"openwop.requirement.0177.manifest-hatch-carried.agents-x-field","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0176.unmapped-type-refused","disposition":"executed-pass","assertionCount":3}
+{"requirementId":"openwop.requirement.0177.manifest-hatch-carried.prompt-template-x-field","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.scenario.v2-manifest-hatch-carried","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0176.unmapped-type-refused.fork","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-unmapped-type-refused","disposition":"executed-pass","assertionCount":5}
+{"requirementId":"openwop.requirement.0176.v1-signed-webhook-accepted.facet","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0176.v1-signed-webhook-accepted","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-v1-signed-webhook-accepted","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0170.interrupt-token-scheme.unprefixed-refused","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0170.interrupt-token-scheme.unheld-kid-refused","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-interrupt-token-scheme","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0173.webhook-durable-delivery","disposition":"executed-pass","assertionCount":7}
+{"requirementId":"openwop.requirement.0176.well-known-one-resource","disposition":"executed-pass","assertionCount":7}
+{"requirementId":"openwop.requirement.0176.well-known-one-resource.v2-representation","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.scenario.v2-well-known-one-resource","disposition":"executed-pass","assertionCount":11}
+{"requirementId":"openwop.requirement.0170.idempotency-key-grammar.valid-accepted","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0170.idempotency-key-grammar.invalid-refused","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-idempotency-key-grammar","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.requirement.0177.peer-dependency-declared.undefined-key","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.it.v2-peer-dependency-declared.an-alias-table-row-host-fs-fs-resolves-through-the-overlap-and-the-pack-installs","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-peer-dependency-declared","disposition":"executed-pass","detail":"partial-witness: inapplicable: no facet-less alias row names a family this host advertises — the overlap alias cannot be exercised","assertionCount":2}
+{"requirementId":"openwop.requirement.0169.capability-record-shape.required-fields","disposition":"executed-pass","assertionCount":48}
+{"requirementId":"openwop.requirement.0169.capability-record-shape.until-iff-not-stable","disposition":"executed-pass","assertionCount":12}
+{"requirementId":"openwop.it.v2-capability-record-shape.no-advertised-record-carries-an-until-already-in-the-past","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-capability-record-shape","disposition":"executed-pass","detail":"partial-witness: inapplicable: no advertised family record carries an `until` (every record is stable, or none is advertised)","assertionCount":60}
+{"requirementId":"openwop.requirement.0170.assurance-downgrade-audited.refused","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0170.assurance-downgrade-audited.audited","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.scenario.v2-assurance-downgrade-audited","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.sandbox-isolationmodel-names-a-real-mechanism-never-node-vm","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-fs-gated-a-host-filesystem-read-is-refused","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-fs-gated-a-host-filesystem-write-is-refused","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-no-env-the-host-environment-does-not-leak","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-network-gated-ungated-network-egress-is-refused","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-no-process-host-process-access-is-refused","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-timeout-exceeding-wallclocklimitms-fails-with-sandbox-timeout","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-memory-cap-exceeding-memorylimitbytes-fails-with-sandbox-memor","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.sandbox","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-pack-isolation.node-pack-sandbox-isolated-context-a-pack-cannot-mutate-state-another-invocation","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-pack-isolation","disposition":"inapplicable","detail":"every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.it.v2-negotiation-authenticated.an-unauthenticated-mcp-exchange-cannot-lower-the-revision-below-preferredversion","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-negotiation-authenticated","disposition":"inapplicable","detail":"[inapplicable] a2a facet not advertised — no negotiation to authenticate; [inapplicable] mcp facet not advertised — no negotiation to authenticate","assertionCount":0}
+{"requirementId":"openwop.profile.connections.packsSupported","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-provider-conflict.two-definitions-of-one-bare-provider-id-fail-closed-the-later-registration-is-re","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.connections.packsSupported","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-provider-conflict.the-qualified-form-packname-github-resolves-to-the-named-pack-s-definition","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-provider-conflict","disposition":"inapplicable","detail":"every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.requirement.0172.preferred-version-default.member","disposition":"executed-pass","assertionCount":2}
+{"requirementId":"openwop.requirement.0172.preferred-version-default.headerless","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.scenario.v2-preferred-version-default","disposition":"executed-pass","assertionCount":6}
+{"requirementId":"openwop.it.v2-subject-link-record.the-link-formed-across-scim-and-saml-is-a-closed-subjectlink-record","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.it.v2-subject-link-record.deactivation-sets-deniedat-and-the-saml-decision-path-consults-it","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-subject-link-record","disposition":"inapplicable","detail":"the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)","assertionCount":0}
+{"requirementId":"openwop.requirement.0170.lane-issuer-advertised.members","disposition":"executed-pass","assertionCount":13}
+{"requirementId":"openwop.profile.family.forms","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-form-when-reuses-edge-conditions.a-field-when-is-the-edge-condition-grammar-type-left-right-and-no-other-expressi","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-form-when-reuses-edge-conditions","disposition":"inapplicable","detail":"every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.it.v2-negotiation-decided-emitted.an-a2a-exchange-leaves-negotiation-decided-on-the-host-log","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.it.v2-negotiation-decided-emitted.an-mcp-exchange-leaves-negotiation-decided-on-the-host-log","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-negotiation-decided-emitted","disposition":"inapplicable","detail":"[inapplicable] a2a facet not advertised — no negotiation to audit; [inapplicable] mcp facet not advertised — no negotiation to audit","assertionCount":0}
+{"requirementId":"openwop.it.v2-lane-issuer-advertised.a-windowed-revocation-rule-advertises-revocationwindowseconds","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-lane-issuer-advertised","disposition":"executed-pass","detail":"partial-witness: inapplicable: no advertised lane uses a windowed revocation rule (exp-and-recheck | short-lived | rebind)","assertionCount":13}
+{"requirementId":"openwop.it.v2-refresh-sla.refreshedat-on-each-embedded-protocol-facet-is-within-90-days-of-now","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-refresh-sla","disposition":"inapplicable","detail":"host advertises neither a2a nor mcp — no refreshedAt to check","assertionCount":0}
+{"requirementId":"openwop.requirement.0169.profiles-derived-only.no-root-profiles","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.requirement.0169.profiles-derived-only.derivable","disposition":"executed-pass","assertionCount":10}
+{"requirementId":"openwop.scenario.v2-profiles-derived-only","disposition":"executed-pass","assertionCount":11}
+{"requirementId":"openwop.it.v2-legacy-profiles-absent.no-legacy-id-appears-in-a2a-profiles-or-mcp-profiles-and-each-id-matches-its-fac","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.requirement.0175.legacy-profiles-absent.no-root-profiles","disposition":"executed-pass","assertionCount":1}
+{"requirementId":"openwop.scenario.v2-legacy-profiles-absent","disposition":"executed-pass","detail":"partial-witness: inapplicable: host advertises neither a2a nor mcp — no profiles[] to check for a -legacy id","assertionCount":1}
+{"requirementId":"openwop.profile.family.workflowChainPacks","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-chain-pin-exact.a-chain-reference-carrying-a-range-core-ai-callprompt-1-is-refused-at-register","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.profile.family.workflowChainPacks","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set"}
+{"requirementId":"openwop.it.v2-chain-pin-exact.a-chain-reference-pinning-an-exact-version-core-ai-callprompt-1-0-0-registers","disposition":"inapplicable","detail":"profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-chain-pin-exact","disposition":"inapplicable","detail":"every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set","assertionCount":0}
+{"requirementId":"openwop.it.v2-minimum-version-refused.an-a2a-peer-offering-only-a-version-below-minimumversion-is-refused","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.it.v2-minimum-version-refused.an-mcp-server-offering-only-a-revision-below-minimumrevision-is-refused","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.it.v2-mrtr-rounds-ceiling.mcp-mrtr-maxrounds-is-an-integer-ceiling-in-1-16","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.it.v2-mrtr-rounds-ceiling.round-maxrounds-1-is-refused-with-mcp-mrtr-rounds-exceeded","disposition":"blocked","detail":"unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-minimum-version-refused","disposition":"inapplicable","detail":"[inapplicable] a2a facet not advertised — no floor to enforce; [inapplicable] mcp facet not advertised — no floor to enforce","assertionCount":0}
+{"requirementId":"openwop.scenario.v2-mrtr-rounds-ceiling","disposition":"inapplicable","detail":"mcp facet not advertised — no MRTR ceiling","assertionCount":0}
+{"requirementId":"openwop.requirement.0173.webhook-durable-delivery.dead-letter","disposition":"executed-pass","assertionCount":4}
+{"requirementId":"openwop.scenario.v2-webhook-durable-delivery","disposition":"executed-pass","detail":"partial-witness: blocked: [inapplicable] no advertised retryPolicy.backoff other than none — the spacing leg is not asserted; [blocked] no normative dead-letter read surface for webhook deliveries in api/v2/openapi.yaml (a GET /webhooks/{webhookId}/dead-letters projection is needed) — exhaustion was observed, routing to the sink was not","assertionCount":11}
