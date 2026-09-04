@@ -1,6 +1,6 @@
 {
   "bundleVersion": "3",
-  "generatedAt": "2026-09-04T03:10:56.281Z",
+  "generatedAt": "2026-09-04T03:31:58.075Z",
   "suite": {
     "name": "@openwop/openwop-conformance",
     "version": "2.0.0-rc.1",
@@ -14,7 +14,7 @@
     "vendor": "openwop (reference example)",
     "build": {
       "kind": "commit",
-      "id": "50814360c24f7b246fcc8b08f8f44d88af23a462"
+      "id": "8201d952e27b03b589cd7f6f8c367d165e14e258"
     },
     "signingKeyId": "v2-reference-1",
     "relaxations": [
@@ -27,7 +27,7 @@
   },
   "discovery": {
     "url": "http://127.0.0.1:3838/.well-known/openwop",
-    "sha256": "7780f4d1fe717d229941d1b33fba5a1ad0db6cd2b4a722b5cf31103e2eb154ae",
+    "sha256": "f02c05f1080679623a08aa73cdcbe6c1f18fdec6ea085b3652dc742f979bafb7",
     "protocolVersions": [
       "1.11",
       "2.0"
@@ -464,83 +464,6 @@
         "assertions": 1
       },
       {
-        "id": "openwop.it.v2-chain-pin-exact.a-chain-reference-carrying-a-range-core-ai-callprompt-1-is-refused-at-register",
-        "scenario": "v2-chain-pin-exact.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-chain-pin-exact.a-chain-reference-pinning-an-exact-version-core-ai-callprompt-1-0-0-registers",
-        "scenario": "v2-chain-pin-exact.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-coherence-not-in-bundle.every-corpus-ledger-id-has-a-scenario-in-src-coherence-and-none-in-src-scenarios",
-        "scenario": "v2-coherence-not-in-bundle.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-error-registry.a-429-rate-limited-response-carries-retry-after",
-        "scenario": "v2-error-registry.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-form-when-reuses-edge-conditions.a-field-when-is-the-edge-condition-grammar-type-left-right-and-no-other-expressi",
-        "scenario": "v2-form-when-reuses-edge-conditions.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-lane-issuer-advertised.a-windowed-revocation-rule-advertises-revocationwindowseconds",
-        "scenario": "v2-lane-issuer-advertised.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-legacy-profiles-absent.no-legacy-id-appears-in-a2a-profiles-or-mcp-profiles-and-each-id-matches-its-fac",
-        "scenario": "v2-legacy-profiles-absent.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-minimum-version-refused.an-a2a-peer-offering-only-a-version-below-minimumversion-is-refused",
-        "scenario": "v2-minimum-version-refused.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-minimum-version-refused.an-mcp-server-offering-only-a-revision-below-minimumrevision-is-refused",
-        "scenario": "v2-minimum-version-refused.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-mrtr-rounds-ceiling.mcp-mrtr-maxrounds-is-an-integer-ceiling-in-1-16",
-        "scenario": "v2-mrtr-rounds-ceiling.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-mrtr-rounds-ceiling.round-maxrounds-1-is-refused-with-mcp-mrtr-rounds-exceeded",
-        "scenario": "v2-mrtr-rounds-ceiling.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion",
         "scenario": "v2-negotiation-authenticated.test.ts",
         "result": "blocked",
@@ -583,20 +506,6 @@
         "detail": "profile not advertised in the captured discovery set"
       },
       {
-        "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-isolated-context-a-pack-cannot-mutate-state-another-invocation",
-        "scenario": "v2-pack-isolation.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-memory-cap-exceeding-memorylimitbytes-fails-with-sandbox-memor",
-        "scenario": "v2-pack-isolation.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
         "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-network-gated-ungated-network-egress-is-refused",
         "scenario": "v2-pack-isolation.test.ts",
         "result": "inapplicable",
@@ -618,62 +527,6 @@
         "detail": "profile not advertised in the captured discovery set"
       },
       {
-        "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-timeout-exceeding-wallclocklimitms-fails-with-sandbox-timeout",
-        "scenario": "v2-pack-isolation.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-pack-isolation.sandbox-isolationmodel-names-a-real-mechanism-never-node-vm",
-        "scenario": "v2-pack-isolation.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-peer-dependency-declared.an-alias-table-row-host-fs-fs-resolves-through-the-overlap-and-the-pack-installs",
-        "scenario": "v2-peer-dependency-declared.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-provider-conflict.the-qualified-form-packname-github-resolves-to-the-named-pack-s-definition",
-        "scenario": "v2-provider-conflict.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-provider-conflict.two-definitions-of-one-bare-provider-id-fail-closed-the-later-registration-is-re",
-        "scenario": "v2-provider-conflict.test.ts",
-        "result": "inapplicable",
-        "assertions": 0,
-        "detail": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-refresh-sla.refreshedat-on-each-embedded-protocol-facet-is-within-90-days-of-now",
-        "scenario": "v2-refresh-sla.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-subject-link-record.deactivation-sets-deniedat-and-the-saml-decision-path-consults-it",
-        "scenario": "v2-subject-link-record.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-subject-link-record.the-link-formed-across-scim-and-saml-is-a-closed-subjectlink-record",
-        "scenario": "v2-subject-link-record.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
         "id": "openwop.requirement.0168.bundle-v3-signed.independent-self-signed",
         "scenario": "v2-bundle-v3-signed.test.ts",
         "result": "executed-pass",
@@ -690,6 +543,13 @@
         "scenario": "v2-bundle-v3-signed.test.ts",
         "result": "executed-pass",
         "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0168.coherence-not-in-bundle.disjoint-by-construction",
+        "scenario": "v2-coherence-not-in-bundle.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.requirement.0168.coherence-not-in-bundle.schema-forbids-coherence-ids",
@@ -818,6 +678,13 @@
         "assertions": 13
       },
       {
+        "id": "openwop.requirement.0170.lane-issuer-advertised.window",
+        "scenario": "v2-lane-issuer-advertised.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
         "id": "openwop.requirement.0170.owner-subject-required.no-principal",
         "scenario": "v2-owner-subject-required.test.ts",
         "result": "executed-pass",
@@ -834,6 +701,20 @@
         "scenario": "v2-revocation-honored.test.ts",
         "result": "executed-pass",
         "assertions": 10
+      },
+      {
+        "id": "openwop.requirement.0170.subject-link-record.denied-at",
+        "scenario": "v2-subject-link-record.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0170.subject-link-record.shape",
+        "scenario": "v2-subject-link-record.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.requirement.0171.configurable-closed.dotted-key",
@@ -876,6 +757,13 @@
         "scenario": "v2-error-registry.test.ts",
         "result": "executed-pass",
         "assertions": 1
+      },
+      {
+        "id": "openwop.requirement.0171.error-registry.retry-after",
+        "scenario": "v2-error-registry.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.requirement.0171.event-type-closed.envelope",
@@ -1028,6 +916,34 @@
         "assertions": 1
       },
       {
+        "id": "openwop.requirement.0173.pack-isolation",
+        "scenario": "v2-pack-isolation.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0173.pack-isolation.isolated-context",
+        "scenario": "v2-pack-isolation.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0173.pack-isolation.memory-cap",
+        "scenario": "v2-pack-isolation.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0173.pack-isolation.timeout",
+        "scenario": "v2-pack-isolation.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
         "id": "openwop.requirement.0173.relaxation-recorded",
         "scenario": "v2-relaxation-recorded.test.ts",
         "result": "executed-pass",
@@ -1052,16 +968,58 @@
         "assertions": 4
       },
       {
+        "id": "openwop.requirement.0175.legacy-profiles-absent",
+        "scenario": "v2-legacy-profiles-absent.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
         "id": "openwop.requirement.0175.legacy-profiles-absent.no-root-profiles",
         "scenario": "v2-legacy-profiles-absent.test.ts",
         "result": "executed-pass",
         "assertions": 1
       },
       {
+        "id": "openwop.requirement.0175.minimum-version-refused",
+        "scenario": "v2-minimum-version-refused.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0175.minimum-version-refused.mcp",
+        "scenario": "v2-minimum-version-refused.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0175.mrtr-rounds-ceiling",
+        "scenario": "v2-mrtr-rounds-ceiling.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0175.mrtr-rounds-ceiling.refused",
+        "scenario": "v2-mrtr-rounds-ceiling.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
         "id": "openwop.requirement.0175.no-transport-advertisement",
         "scenario": "v2-no-transport-advertisement.test.ts",
         "result": "executed-pass",
         "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0175.refresh-sla",
+        "scenario": "v2-refresh-sla.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
         "id": "openwop.requirement.0176.era-key",
@@ -1154,6 +1112,27 @@
         "assertions": 4
       },
       {
+        "id": "openwop.requirement.0177.chain-pin-exact.exact-accepted",
+        "scenario": "v2-chain-pin-exact.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.chain-pin-exact.range-refused",
+        "scenario": "v2-chain-pin-exact.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.form-when-reuses-edge-conditions",
+        "scenario": "v2-form-when-reuses-edge-conditions.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
         "id": "openwop.requirement.0177.manifest-ceiling-refused.unbounded",
         "scenario": "v2-manifest-ceiling-refused.test.ts",
         "result": "executed-pass",
@@ -1184,14 +1163,35 @@
         "assertions": 1
       },
       {
+        "id": "openwop.requirement.0177.peer-dependency-declared.alias-overlap",
+        "scenario": "v2-peer-dependency-declared.test.ts",
+        "result": "blocked",
+        "assertions": 0,
+        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
         "id": "openwop.requirement.0177.peer-dependency-declared.undefined-key",
         "scenario": "v2-peer-dependency-declared.test.ts",
         "result": "executed-pass",
         "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0177.provider-conflict.fail-closed",
+        "scenario": "v2-provider-conflict.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.provider-conflict.qualified-form",
+        "scenario": "v2-provider-conflict.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "profile not advertised in the captured discovery set"
       }
     ]
   },
-  "witnessSha256": "5482704eae3eaa3fa13a98b60eaf9c4f7bc649b9cafba1992f587415b6ed328b",
+  "witnessSha256": "ae2590a769c0eb2f954f9a9b060209ac6e21ed869dd2de45221097a5610445eb",
   "assertionCount": 1316,
   "detail": {
     "nonPass": [
@@ -1251,61 +1251,6 @@
         "reason": "no interrupt-* scenario ran — unclassified return"
       },
       {
-        "id": "openwop.it.v2-chain-pin-exact.a-chain-reference-carrying-a-range-core-ai-callprompt-1-is-refused-at-register",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-chain-pin-exact.a-chain-reference-pinning-an-exact-version-core-ai-callprompt-1-0-0-registers",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-coherence-not-in-bundle.every-corpus-ledger-id-has-a-scenario-in-src-coherence-and-none-in-src-scenarios",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-error-registry.a-429-rate-limited-response-carries-retry-after",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-form-when-reuses-edge-conditions.a-field-when-is-the-edge-condition-grammar-type-left-right-and-no-other-expressi",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-lane-issuer-advertised.a-windowed-revocation-rule-advertises-revocationwindowseconds",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-legacy-profiles-absent.no-legacy-id-appears-in-a2a-profiles-or-mcp-profiles-and-each-id-matches-its-fac",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-minimum-version-refused.an-a2a-peer-offering-only-a-version-below-minimumversion-is-refused",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-minimum-version-refused.an-mcp-server-offering-only-a-revision-below-minimumrevision-is-refused",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-mrtr-rounds-ceiling.mcp-mrtr-maxrounds-is-an-integer-ceiling-in-1-16",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
-        "id": "openwop.it.v2-mrtr-rounds-ceiling.round-maxrounds-1-is-refused-with-mcp-mrtr-rounds-exceeded",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion",
         "result": "blocked",
         "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
@@ -1336,16 +1281,6 @@
         "reason": "profile not advertised in the captured discovery set"
       },
       {
-        "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-isolated-context-a-pack-cannot-mutate-state-another-invocation",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-memory-cap-exceeding-memorylimitbytes-fails-with-sandbox-memor",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
         "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-network-gated-ungated-network-egress-is-refused",
         "result": "inapplicable",
         "reason": "profile not advertised in the captured discovery set"
@@ -1361,51 +1296,116 @@
         "reason": "profile not advertised in the captured discovery set"
       },
       {
-        "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-timeout-exceeding-wallclocklimitms-fails-with-sandbox-timeout",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-pack-isolation.sandbox-isolationmodel-names-a-real-mechanism-never-node-vm",
-        "result": "inapplicable",
-        "reason": "profile not advertised in the captured discovery set"
-      },
-      {
-        "id": "openwop.it.v2-peer-dependency-declared.an-alias-table-row-host-fs-fs-resolves-through-the-overlap-and-the-pack-installs",
+        "id": "openwop.requirement.0168.coherence-not-in-bundle.disjoint-by-construction",
         "result": "blocked",
         "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
-        "id": "openwop.it.v2-provider-conflict.the-qualified-form-packname-github-resolves-to-the-named-pack-s-definition",
+        "id": "openwop.requirement.0170.lane-issuer-advertised.window",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0170.subject-link-record.denied-at",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0170.subject-link-record.shape",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0171.error-registry.retry-after",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0173.pack-isolation",
         "result": "inapplicable",
         "reason": "profile not advertised in the captured discovery set"
       },
       {
-        "id": "openwop.it.v2-provider-conflict.two-definitions-of-one-bare-provider-id-fail-closed-the-later-registration-is-re",
+        "id": "openwop.requirement.0173.pack-isolation.isolated-context",
         "result": "inapplicable",
         "reason": "profile not advertised in the captured discovery set"
       },
       {
-        "id": "openwop.it.v2-refresh-sla.refreshedat-on-each-embedded-protocol-facet-is-within-90-days-of-now",
+        "id": "openwop.requirement.0173.pack-isolation.memory-cap",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0173.pack-isolation.timeout",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0175.legacy-profiles-absent",
         "result": "blocked",
         "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
-        "id": "openwop.it.v2-subject-link-record.deactivation-sets-deniedat-and-the-saml-decision-path-consults-it",
+        "id": "openwop.requirement.0175.minimum-version-refused",
         "result": "blocked",
         "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
       },
       {
-        "id": "openwop.it.v2-subject-link-record.the-link-formed-across-scim-and-saml-is-a-closed-subjectlink-record",
+        "id": "openwop.requirement.0175.minimum-version-refused.mcp",
         "result": "blocked",
         "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0175.mrtr-rounds-ceiling",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0175.mrtr-rounds-ceiling.refused",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0175.refresh-sla",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0177.chain-pin-exact.exact-accepted",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.chain-pin-exact.range-refused",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.form-when-reuses-edge-conditions",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.peer-dependency-declared.alias-overlap",
+        "result": "blocked",
+        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+      },
+      {
+        "id": "openwop.requirement.0177.provider-conflict.fail-closed",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.requirement.0177.provider-conflict.qualified-form",
+        "result": "inapplicable",
+        "reason": "profile not advertised in the captured discovery set"
       }
     ]
   },
   "signature": {
     "alg": "ed25519",
     "keyId": "v2-reference-1",
-    "sig": "JoYDSpYIKQoYZOF5bc5hFRkJZPnErFDDxSVQnzSHlsbhBoeTnu6sV69eUeEjJh8-aOtm2zRZHZS9WRioYuSuCA",
+    "sig": "VEnqNMwGxGIPHqns0e4KUJLSgcsRwU5maUwv7ViqFnk8A_VG2Il6MBftxLdiJpU4T_WqqBYDJaFY8Ajnh4uGAQ",
     "over": [
       "witnessSha256",
       "host.build",
