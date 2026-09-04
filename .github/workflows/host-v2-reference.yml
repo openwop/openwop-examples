@@ -1,0 +1,63 @@
+name: Host v2-reference
+
+# The charter §F witness host: typecheck, the route-level harness, and the
+# 2.0.0 suite at --target-major 2. The two 2.0.0-rc peers are exact-pinned;
+# until both are on npm the job records a notice and exits 0 instead of
+# installing a version the registry does not serve.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/hosts/v2-reference/**'
+      - '.github/workflows/host-v2-reference.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'examples/hosts/v2-reference/**'
+      - '.github/workflows/host-v2-reference.yml'
+
+jobs:
+  v2-reference:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/hosts/v2-reference
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Resolve the 2.0.0-rc peers
+        id: peers
+        run: |
+          SUITE=$(node -p "require('./package.json').devDependencies['@openwop/openwop-conformance']")
+          if npm view "@openwop/openwop-conformance@${SUITE}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::@openwop/openwop-conformance@${SUITE} is not on npm yet — skipping the v2-reference job (install it from the release tarballs locally)."
+          fi
+      - name: Install
+        if: steps.peers.outputs.published == 'true'
+        run: npm install --no-package-lock --no-audit --no-fund --legacy-peer-deps
+      - name: Typecheck
+        if: steps.peers.outputs.published == 'true'
+        run: npm run typecheck
+      - name: Route-level harness
+        if: steps.peers.outputs.published == 'true'
+        run: npm test
+      - name: Start the host
+        if: steps.peers.outputs.published == 'true'
+        env:
+          OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'   # the suite's receiver is a loopback listener (recorded relaxation)
+        run: |
+          npm start > /tmp/v2-reference.log 2>&1 &
+          for i in {1..30}; do curl -sf http://127.0.0.1:3838/.well-known/openwop >/dev/null && exit 0; sleep 1; done
+          cat /tmp/v2-reference.log; exit 1
+      - name: Conformance (target major 2)
+        if: steps.peers.outputs.published == 'true'
+        run: npx openwop-conformance --base-url http://127.0.0.1:3838 --api-key openwop-v2-dev-key --target-major 2 --require-behavior --max-workers 4
+      - name: Host log on failure
+        if: failure()
+        run: cat /tmp/v2-reference.log || true
