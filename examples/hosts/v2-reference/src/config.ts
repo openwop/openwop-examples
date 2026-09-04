@@ -55,6 +55,20 @@ export const API_KEY_ISSUER = `urn:${HOST_NAME}:api-key`;
 export const SESSION_ISSUER = `urn:${HOST_NAME}:session`;
 export const DEFAULT_TENANT = 'openwop-reference-tenant';
 
+/**
+ * RFC 0168 §E.2 — the bundle-signing key this host publishes.
+ *
+ * `keys/host.pem` signs; `keys/host.pub.pem` is what discovery advertises. The
+ * id here MUST be the same string the bundle's `signature.keyId` carries, or a
+ * verifier resolves nothing: the whole point of publishing is that someone else
+ * can look the id up and check the attestation. It is deliberately a constant
+ * in the same file as the rest of the host's identity, next to HOST_ID, rather
+ * than a value the certify command passes in — a signer and a publisher that
+ * take the id from different places will eventually disagree.
+ */
+export const BUNDLE_SIGNING_KEY_ID = 'v2-reference-1';
+export const KEYS_DIR = new URL('../keys/', import.meta.url).pathname;
+
 export interface HostConfig {
   readonly host: string;
   readonly port: number;

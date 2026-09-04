@@ -8,8 +8,10 @@
  *                mirror, no profiles[], no supportedTransports, no grpc.
  * Both carry a standard ETag and honour If-None-Match with 304.
  */
-import { createHash } from 'node:crypto';
-import { ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, EXTENSION_ORG, HOST_ID, HOST_NAME, HOST_VENDOR, HOST_VERSION, MIN_CLIENT_VERSION, PROTOCOL_VERSIONS, SEAMS_PROFILE_ID, SESSION_ISSUER, API_KEY_ISSUER, V1_VERSION } from './config.js';
+import { createHash, createPublicKey } from 'node:crypto';
+import { ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, EXTENSION_ORG, HOST_ID, HOST_NAME, HOST_VENDOR, HOST_VERSION, MIN_CLIENT_VERSION, PROTOCOL_VERSIONS, SEAMS_PROFILE_ID, BUNDLE_SIGNING_KEY_ID, KEYS_DIR, SESSION_ISSUER, API_KEY_ISSUER, V1_VERSION } from './config.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Host } from './host.js';
 
 const SINCE = '2.0';
@@ -27,6 +29,31 @@ export function advertisedFixtures(host: Host): string[] {
   return [...host.workflows.keys()].sort();
 }
 
+
+/**
+ * RFC 0168 §E.2 — the public half of the key this host signs bundles with,
+ * derived from `keys/host.pub.pem` at startup rather than pasted in.
+ *
+ * Deriving it matters. A hand-copied constant can drift from the key that
+ * actually signs, and the failure is invisible until a verifier tries to check
+ * a bundle and cannot — which is the worst place to discover it. Reading the
+ * same file the signer reads makes the published value wrong only if the key
+ * itself is wrong.
+ *
+ * The wire form is raw base64url, unpadded (43 chars) — NOT PEM. That is the
+ * last 32 bytes of the SPKI DER, which is the Ed25519 point itself.
+ */
+function signingPublicKeyB64u(): string {
+  const pem = readFileSync(join(KEYS_DIR, 'host.pub.pem'), 'utf8');
+  const der = createPublicKey(pem).export({ type: 'spki', format: 'der' }) as Buffer;
+  return der.subarray(der.length - 32).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** The `signingKeys[]` record, identical on both roots — a bundle is v3 regardless of major. */
+export function signingKeys(): ReadonlyArray<Record<string, unknown>> {
+  return [{ keyId: BUNDLE_SIGNING_KEY_ID, alg: 'ed25519', publicKey: signingPublicKeyB64u(), use: 'certification-bundle' }];
+}
+
 /** The closed v2 root (schemas/v2/capabilities.schema.json). */
 export function v2Document(host: Host): Record<string, unknown> {
   const c = host.config;
@@ -39,6 +66,7 @@ export function v2Document(host: Host): Record<string, unknown> {
     implementation: { name: HOST_NAME, version: HOST_VERSION, vendor: HOST_VENDOR },
     engineVersion: ENGINE_VERSION,
     eventLogSchemaVersion: EVENT_LOG_SCHEMA_VERSION,
+    signingKeys: signingKeys(),
     fixtures: advertisedFixtures(host),
     testing: { testKeyPrefix: 'ow2k_' },
     extensions: {
@@ -85,6 +113,10 @@ export function v1Document(host: Host): Record<string, unknown> {
     implementation: { name: HOST_NAME, version: HOST_VERSION, vendor: HOST_VENDOR },
     engineVersion: ENGINE_VERSION,
     eventLogSchemaVersion: EVENT_LOG_SCHEMA_VERSION,
+    // Present on the v1 root too: a certification bundle is v3 regardless of
+    // major, so a verifier resolving signature.keyId may only have this
+    // document to resolve it against (RFC 0168 §E.2, v1.x additive half).
+    signingKeys: signingKeys(),
     supportedEnvelopes: [],
     schemaVersions: {},
     limits: { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000 },
