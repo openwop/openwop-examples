@@ -16,8 +16,8 @@
     "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
-    "@openwop/openwop-conformance": "2.0.0-rc.57",
-    "@openwop/spec-artifacts": "2.0.0-rc.57",
+    "@openwop/openwop-conformance": "2.0.0-rc.58",
+    "@openwop/spec-artifacts": "2.0.0-rc.58",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "ajv": "^8.17.0",
