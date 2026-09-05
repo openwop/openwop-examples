@@ -1,5 +1,26 @@
 # Conformance Result: openwop v2 reference host
 
+> **Measurement — 2026-09-05, `@openwop/openwop-conformance@2.0.0-rc.57` + `@openwop/spec-artifacts@2.0.0-rc.57` (npm, corpus stamp `cc3f5bc494e6` VERIFIED), `--target-major 2 --max-workers 4`, **71** scenario files.** Host `openwop-host-v2-reference@2.0.0-rc.1`, build `commit:3f8bff3dd61dbe91efe27b6d968932574e737e22`, local boot on port 3839, fresh store, one run. Route-level harness 21 / 21.
+>
+> **RFC 0148 §A dispositions (222 rows, 1511 assertions): executed-pass 169 · executed-fail 10 · blocked 1 · inapplicable 42 · skipped 0.** `claimedProfiles` = `openwop-discovery-core` (witnessCount 3), `openwop-core-standard` (witnessCount 8), `openwop-conformance-seams-v2` (witnessCount 4) — the first NON-VACUOUS bundle this host has produced (the rc.16 bundle predates `witnessCount`, so it never anchored the v1 end-of-support clock; this one does). It certifies no profile — `executedFail > 0`, `blocked > 0`.
+>
+> **Signed bundle: [`bundle-v3.json`](./bundle-v3.json)** — `witnessSha256` **`5fedc4fe8ac2…`**, Ed25519 under the ROTATED key id `v2-reference-2` (`keys/host.pub.pem`; `v2-reference-1`'s public half is in git history and still verifies the rc.16 bundle). `check-cut-gates.mjs --host-bundle --host-discovery --network`: Identity, Registers, Closure, Deprecation, Paths, Codemods, Waiver, **Witness PASS**; attestation verifies under the host's published key; **Coexistence FAIL** (`0172.dual-stack-negotiation.cross-major-read`); **Front door FAIL** (`executedFail = 10`).
+>
+> **The 10 executed-fail rows are the corpus moving past its own reference example.** Every one is a rule the prose changed between rc.16 and rc.57 (the runs.md and errors.md retrospectives, rc.40–rc.53) that this host, written against rc.1–rc.16, never caught up with — 4 requirement rows and the 6 scenario-file rows they roll up into. Host fixes follow in a separate PR; this bundle is checked in first because it anchors the clock (runbook §5.2: `certified` does not matter for the anchor, `witnessCount ≥ 1` does).
+>
+> | requirement row | the rule (prose) | what this host does today |
+> |---|---|---|
+> | `0170.run-cancel` (rolls up `v2-run-cancel`, `v2-run-bulk-cancel`) | `runs.md` §Cancel: cancel on a terminal run MUST be `409 run_terminal`; the 200 grammar is only `{ runId, status: cancelling \| cancelled }` | answers `200` echoing `completed` |
+> | `0172.dual-stack-negotiation.cross-major-read` (rolls up `v2-dual-stack-negotiation`) | `versioning.md` §5: a run minted under major 1 MUST be named by its tenant-bound projection `<tenantId>/<v1 id>` when read under major 2 | names it by the bare v1 id |
+> | `0172.malformed-body-envelope` (rolls up `v2-malformed-body-envelope`) | `errors.md`: a malformed JSON body MUST be refused `400 validation_error` | `500` from the default handler |
+> | `0176.pinned-run-disposition.continued` (rolls up `v2-pinned-run-disposition`, `v2-run-pause-resume`'s 409 legs share the §Cancel/§Pause vocabulary) | `persistence.md` §Runs pinned to v1: a run whose every pinned change id is still implemented MUST continue under the adapter | cancels it |
+>
+> **The 1 blocked row:** `v2-era-2-append-vocabulary` · the append leg — `seedEra2Log` reports success but the seeded log reads back empty (0 events); the seam's return value is not evidence, so the leg is `blocked` with that reason. Seam defect, this host's, same follow-up PR.
+>
+> **The 42 inapplicable rows:** 25 profile-not-advertised (`a2a`, `mcp`, `saml`, `scim`, packs — families this host does not implement, recorded by `behaviorGate`/`softSkip` with the reason), 2 `subject-link` (neither identity lane), 2 MRTR ceiling (`mcp`), 2 negotiation-authenticated (`a2a`/`mcp`), and the corpus-ledger row — `inapplicable` since rc.57, previously mis-labelled `blocked`.
+>
+> The sections below record the earlier measurement and are kept as history until the host-fix PR re-cuts.
+
 > **Measurement — 2026-09-04, `@openwop/openwop-conformance@2.0.0-rc.2` + `@openwop/spec-artifacts@2.0.0-rc.2` (both packed from `openwop/openwop@75d572d9`, `origin/main`), `--target-major 2`, **52** scenario files.** Host `openwop-host-v2-reference@2.0.0-rc.1`, build `commit:3120f306e24ef8c469238b2d3f3937477de1346b`, local boot, fresh store, one run.
 >
 > **52 / 52 files and 229 / 229 tests pass. RFC 0148 §A dispositions (`evidence/requirement-ledger.jsonl`, 295 rows): executed-pass 240 · executed-fail 0 · blocked 17 · inapplicable 38 · skipped 0.** Route-level harness 21 / 21. The host emits no `[schema]` warning on any route with the dev validator on.

@@ -66,7 +66,10 @@ export const DEFAULT_TENANT = 'openwop-reference-tenant';
  * than a value the certify command passes in — a signer and a publisher that
  * take the id from different places will eventually disagree.
  */
-export const BUNDLE_SIGNING_KEY_ID = 'v2-reference-1';
+// Rotated 2026-09-05 (`v2-reference-1` → `v2-reference-2`): the rc.16 bundle's
+// private half was never on this machine, so the rc.57 re-cut signs under a
+// fresh pair; the old public key stays verifiable from git history.
+export const BUNDLE_SIGNING_KEY_ID = 'v2-reference-2';
 export const KEYS_DIR = new URL('../keys/', import.meta.url).pathname;
 
 export interface HostConfig {
