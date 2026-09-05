@@ -60,7 +60,7 @@ The suite's webhook scenarios boot a loopback receiver; a conforming egress guar
 
 ## Installing the 2.0.0-rc peers
 
-`@openwop/spec-artifacts@2.0.0-rc.58` and `@openwop/openwop-conformance@2.0.0-rc.58` are exact-pinned dev dependencies, published on npm under the `next` dist-tag. Install **both, at the same explicit version** — `npm install --legacy-peer-deps` on the suite alone does not pull the exact-pinned peer (a host measured `corpus stamp MISMATCH — missing @openwop/spec-artifacts` on 2026-09-05), and npm 10's peer resolver trips over vitest 4's optional peers, so `--legacy-peer-deps` is required either way; npm 10.9 also fails to install any 2.x rc into an empty directory (arborist `edgesOut` crash) — use a current npm (`npx -y npm@latest install …`).
+`@openwop/spec-artifacts@2.0.0-rc.59` and `@openwop/openwop-conformance@2.0.0-rc.59` are exact-pinned dev dependencies, published on npm under the `next` dist-tag. Install **both, at the same explicit version** — `npm install --legacy-peer-deps` on the suite alone does not pull the exact-pinned peer (a host measured `corpus stamp MISMATCH — missing @openwop/spec-artifacts` on 2026-09-05), and npm 10's peer resolver trips over vitest 4's optional peers, so `--legacy-peer-deps` is required either way; npm 10.9 also fails to install any 2.x rc into an empty directory (arborist `edgesOut` crash) — use a current npm (`npx -y npm@latest install …`).
 
 ## Corpus defects this host found — all fixed
 
