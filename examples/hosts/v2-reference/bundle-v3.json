@@ -1,6 +1,6 @@
 {
   "bundleVersion": "3",
-  "generatedAt": "2026-09-05T15:08:32.507Z",
+  "generatedAt": "2026-09-05T15:12:39.586Z",
   "suite": {
     "name": "@openwop/openwop-conformance",
     "version": "2.0.0-rc.58",
@@ -14,13 +14,13 @@
     "vendor": "openwop (reference example)",
     "build": {
       "kind": "commit",
-      "id": "48e26b72a0e96987786c1e7a54d49bedff6634e9"
+      "id": "763e4e3f29b5518cdb8d8862bd23bcbfba3dba3f"
     },
     "signingKeyId": "v2-reference-2"
   },
   "discovery": {
     "url": "http://127.0.0.1:3839/.well-known/openwop",
-    "sha256": "364ad3fbf22a89070529515be1b6c78b01a486cfd8fa32d9e6348252535a81f1",
+    "sha256": "e4f0ddc1e855465f3df27c5b5f56830449d71273b177facbf1bcdf3e12dc6b5f",
     "protocolVersions": [
       "1.11",
       "2.0"
@@ -1652,7 +1652,7 @@
   "signature": {
     "alg": "ed25519",
     "keyId": "v2-reference-2",
-    "sig": "vxsU0Ie3ZRwO7jC_h7GWKxOwCr-rttbGb7wmRy0RgMji5KI78pxr7ykPpp6U92vQ3FaY8_IJsUffg4X0swKiBQ",
+    "sig": "WKCIL8bA4TOTC1zOeF4sZaq_gqvn3OgswTa8uF0JjOrr-eBnPiYgjAOiWF5fWh6-T-yiBH_AClr6ByNQ0mWIBA",
     "over": [
       "witnessSha256",
       "host.build",
