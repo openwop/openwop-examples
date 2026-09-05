@@ -75,10 +75,43 @@ export function snapshot(host: Host, run: RunRow): Record<string, unknown> {
 }
 
 /** Resolve a run the caller may see; 403 id_tenant_mismatch never discloses existence. */
+/**
+ * errors.md (rc.40): a malformed JSON body is refused 400 validation_error by
+ * the host's own negotiation layer — never a framework 500. The router's
+ * `ctx.json()` already does this; the create and fork handlers read the raw
+ * text (the idempotency digest is over the bytes) and parse it here.
+ */
+function parseJsonBody(text: string): Record<string, unknown> {
+  if (text.trim() === '') return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * versioning.md §5 (rc.44): a run is ONE row named by its tenant-bound id
+ * `<tenantId>/<opaque>`; the v1 surface names the same run by the bare opaque
+ * id (v1 ids carry no tenant segment), and major 2 names it by the projection
+ * `<tenantId>/<the v1 id>` — so a bare id on a /v1/ path resolves under the
+ * caller's tenant, and a v1 reply strips the segment it never had.
+ */
+function wireRunId(ctx: Ctx, runId: string): string {
+  if (ctx.major !== 1) return runId;
+  const slash = runId.indexOf('/');
+  return slash > 0 ? runId.slice(slash + 1) : runId;
+}
+
 export function loadRun(ctx: Ctx, runId: string): RunRow {
   const tenant = ctx.subject?.tenant ?? ctx.host.config.tenant;
-  checkTenantBound(runId, tenant, 'runId');
-  const run = ctx.host.store.getRun(runId);
+  // A bare id (no tenant segment) is the v1 spelling of a run this tenant owns:
+  // on a /v1/ path it is the only spelling, and under major 2 it is how a
+  // client that holds a v1-minted id reaches the same run through the overlap
+  // (versioning.md §5) — resolved under the CALLER's tenant, never another's,
+  // so identity.md §5's 403 check has nothing to read and nothing to protect.
+  const id = runId.includes('/') ? runId : `${tenant}/${runId}`;
+  checkTenantBound(id, tenant, 'runId');
+  const run = ctx.host.store.getRun(id);
   if (!run || run.tenant !== tenant) throw err('not_found', 'run not found');
   return applyPinDisposition(ctx.host, run);
 }
@@ -86,7 +119,7 @@ export function loadRun(ctx: Ctx, runId: string): RunRow {
 async function createRun(ctx: Ctx): Promise<Reply> {
   const text = await ctx.text();
   return withIdempotency(ctx, 'createRun', text, async () => {
-    const body = (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>;
+    const body = parseJsonBody(text);
     if (body === null || typeof body !== 'object' || Array.isArray(body)) throw err('validation_error', 'the create body MUST be an object');
     for (const k of Object.keys(body)) if (!CREATE_KEYS.has(k)) throw err('validation_error', `unknown key ${k} — the createRun body is closed`, { key: k });
     const subject = ctx.subject;
@@ -132,14 +165,15 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     ctx.host.store.insertRun(run);
     scheduleRun(ctx.host, run.run_id);
     const prefix = ctx.major === 1 ? '/v1' : '';
-    const id = encodeURIComponent(run.run_id);
-    return { status: 201, body: { runId: run.run_id, status: 'pending', eventsUrl: `${ctx.baseUrl}${prefix}/runs/${id}/events`, statusUrl: `${ctx.baseUrl}${prefix}/runs/${id}` } };
+    const wire = wireRunId(ctx, run.run_id);
+    const id = encodeURIComponent(wire);
+    return { status: 201, body: { runId: wire, status: 'pending', eventsUrl: `${ctx.baseUrl}${prefix}/runs/${id}/events`, statusUrl: `${ctx.baseUrl}${prefix}/runs/${id}` } };
   });
 }
 
 async function getRun(ctx: Ctx): Promise<Reply> {
   const run = loadRun(ctx, ctx.params['runId'] as string);
-  const body = snapshot(ctx.host, run);
+  const body = { ...snapshot(ctx.host, run), runId: wireRunId(ctx, run.run_id) };
   const etag = `"seq-${ctx.host.store.lastSequence(run.run_id)}-${run.status}"`;
   if (ctx.header('if-none-match') === etag) return { status: 304, headers: { ETag: etag } };
   return { status: 200, body, headers: { ETag: etag } };
@@ -186,7 +220,7 @@ async function cancel(ctx: Ctx): Promise<Reply> {
   const body = await ctx.json<{ reason?: unknown }>();
   return withIdempotency(ctx, 'cancelRun', JSON.stringify(body), async () => {
     const r = requestCancel(ctx.host, run, typeof body.reason === 'string' ? body.reason : undefined);
-    return { status: 200, body: { runId: run.run_id, status: r.status } };
+    return { status: 200, body: { runId: wireRunId(ctx, run.run_id), status: r.status } };
   });
 }
 
@@ -214,17 +248,33 @@ async function pause(ctx: Ctx): Promise<Reply> {
   for (const k of Object.keys(body)) if (k !== 'reason' && k !== 'drainPolicy') throw err('validation_error', `unknown key ${k}`);
   const drain = body.drainPolicy === undefined ? 'drain-current-node' : String(body.drainPolicy);
   if (drain !== 'immediate' && drain !== 'drain-current-node') throw err('validation_error', 'drainPolicy is immediate | drain-current-node');
-  if (run.status === 'paused') throw err('run_terminal', 'the run is already paused');
-  if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be paused`);
-  if (run.status.startsWith('waiting-') || run.status === 'cancelling') throw err('run_terminal', `a run in status ${run.status} cannot be paused`);
+  // runs.md §Pause and resume (rc.49/rc.52): a terminal run is 409 run_terminal;
+  // any other status that refuses the transition — already paused, waiting on
+  // an interrupt, cancelling — is 409 run_state_conflict with
+  // details.runStatus naming the status that refused it.
+  if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be paused`, { runStatus: run.status });
+  // A pause the host has ACCEPTED (202 { status: 'paused' }) but whose loop has
+  // not yet observed `pause_requested` is a paused run to the caller — the
+  // second pause is refused as such, not accepted twice.
+  if (run.status === 'paused' || run.pause_requested === 1) throw err('run_state_conflict', 'the run is already paused', { runStatus: 'paused' });
+  if (run.status.startsWith('waiting-') || run.status === 'cancelling') throw err('run_state_conflict', `a run in status ${run.status} cannot be paused`, { runStatus: run.status });
   const r = requestPause(ctx.host, run, typeof body.reason === 'string' ? body.reason : undefined, drain);
-  return { status: 202, body: { runId: run.run_id, status: 'paused', ...(r.pausedAt ? { pausedAt: r.pausedAt } : {}) } };
+  // The 202 says `paused`. Under `immediate` the loop cuts the attempt within
+  // one tick (≤ 50 ms), so wait for that tick rather than answer ahead of it —
+  // a caller that resumes on the next round trip must find run.paused already
+  // on the log. `drain-current-node` may legitimately take as long as the node.
+  if (drain === 'immediate' && !r.pausedAt) {
+    const until = Date.now() + 500;
+    while (Date.now() < until && ctx.host.store.getRun(run.run_id)?.status !== 'paused') await new Promise((res) => setTimeout(res, 10));
+  }
+  return { status: 202, body: { runId: wireRunId(ctx, run.run_id), status: 'paused', ...(r.pausedAt ? { pausedAt: r.pausedAt } : {}) } };
 }
 
 async function resume(ctx: Ctx): Promise<Reply> {
   const run = loadRun(ctx, ctx.params['runId'] as string);
   const body = await ctx.json<{ reason?: unknown }>();
-  if (run.status !== 'paused') throw err('run_terminal', 'the run is not paused');
+  if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be resumed`, { runStatus: run.status });
+  if (run.status !== 'paused') throw err('run_state_conflict', 'the run is not paused', { runStatus: run.status });
   const r = requestResume(ctx.host, run, typeof body.reason === 'string' ? body.reason : undefined);
   return { status: 202, body: { runId: run.run_id, status: 'running', resumedAt: r.resumedAt } };
 }
@@ -233,9 +283,11 @@ async function fork(ctx: Ctx): Promise<Reply> {
   const run = loadRun(ctx, ctx.params['runId'] as string);
   const text = await ctx.text();
   return withIdempotency(ctx, 'forkRun', `${run.run_id}|${text}`, async () => {
-    const body = (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>;
+    const body = parseJsonBody(text);
     const r = forkRun(ctx.host, run, body);
-    return { status: 201, body: { ...r, eventsUrl: `${ctx.baseUrl}/runs/${encodeURIComponent(r.runId)}/events` } };
+    const wire = wireRunId(ctx, r.runId);
+    const prefix = ctx.major === 1 ? '/v1' : '';
+    return { status: 201, body: { ...r, runId: wire, eventsUrl: `${ctx.baseUrl}${prefix}/runs/${encodeURIComponent(wire)}/events` } };
   });
 }
 
@@ -304,7 +356,7 @@ async function resolveByRun(ctx: Ctx): Promise<Reply> {
   const nodeId = ctx.params['nodeId'] as string;
   const text = await ctx.text();
   return withIdempotency(ctx, 'resolveInterruptByRun', `${run.run_id}|${nodeId}|${text}`, async () => {
-    const body = (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>;
+    const body = parseJsonBody(text);
     for (const k of Object.keys(body)) if (k !== 'resumeValue') throw err('validation_error', 'the resolve body is { resumeValue } (closed)');
     if (!('resumeValue' in body)) throw err('validation_error', 'resumeValue is REQUIRED');
     const row = ctx.host.store.pendingInterruptForNode(run.run_id, nodeId);
@@ -336,7 +388,7 @@ async function inspectByToken(ctx: Ctx): Promise<Reply> {
 async function resolveByToken(ctx: Ctx): Promise<Reply> {
   const { run, row } = tokenRow(ctx, ctx.params['token'] as string);
   const text = await ctx.text();
-  const body = (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>;
+  const body = parseJsonBody(text);
   for (const k of Object.keys(body)) if (k !== 'resumeValue') throw err('validation_error', 'the resolve body is { resumeValue } (closed)');
   if (!('resumeValue' in body)) throw err('validation_error', 'resumeValue is REQUIRED');
   const r = resolveAndResume(ctx.host, run, row, body['resumeValue'], null);

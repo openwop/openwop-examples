@@ -70,7 +70,10 @@ async function sleepUnlessCancelled(host: Host, runId: string, ms: number): Prom
   while (Date.now() < deadline) {
     const fresh = host.store.getRun(runId);
     if (!fresh || fresh.cancel_requested === 1 || TERMINAL.has(fresh.status)) return 'cancelled';
-    if (fresh.pause_requested === 1) return 'paused';
+    // runs.md §Pause and resume: only `immediate` cuts the running attempt;
+    // `drain-current-node` lets this node reach its terminal and the loop
+    // pauses between nodes.
+    if (fresh.pause_requested === 1 && pausePolicy.get(runId) === 'immediate') return 'paused';
     await new Promise((r) => setTimeout(r, Math.min(50, deadline - Date.now())));
   }
   return 'done';
@@ -221,7 +224,11 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     run = host.store.getRun(runId) as RunRow;
     if (run.cancel_requested === 1) { terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
     if (run.pause_requested === 1) {
-      appendEvent(host, run, 'run.paused', { reason: 'operator', drainPolicy: 'drain' });
+      // Between nodes: the requested policy is echoed verbatim (runs.md §Pause
+      // and resume); under `drain-current-node` this is where a drained node's
+      // run pauses, under `immediate` only when the request landed between attempts.
+      appendEvent(host, run, 'run.paused', { reason: 'operator', drainPolicy: pausePolicy.get(runId) ?? 'drain-current-node' });
+      pausePolicy.delete(runId);
       setStatus(host, run, 'paused', { pause_requested: 0 });
       return;
     }
@@ -246,8 +253,14 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     }
     if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
     if (result === 'paused') {
+      // `immediate` cut the attempt between events: no terminal node event is
+      // recorded for it (runs.md §Pause and resume); the payload names the
+      // interrupted node and attempt (1-based, run-event-payloads.schema.json)
+      // so a reader can tell the cut from a drained pause; the resumed
+      // `node.started` is a fresh attempt.
       run = host.store.getRun(runId) as RunRow;
-      appendEvent(host, run, 'run.paused', { reason: 'operator', drainPolicy: 'interrupt' });
+      appendEvent(host, run, 'run.paused', { reason: 'operator', drainPolicy: 'immediate', interruptedNodeId: node.id, interruptedAttempt: attempt + 1 });
+      pausePolicy.delete(runId);
       setStatus(host, run, 'paused', { pause_requested: 0 });
       return;
     }
@@ -271,7 +284,12 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
 
 /** runs.md §Cancel — accepted immediately; the cascade completes in the loop when a node is executing. */
 export function requestCancel(host: Host, run: RunRow, reason: string | undefined): { status: string } {
-  if (TERMINAL.has(run.status)) return { status: run.status };
+  // runs.md §Cancel (rc.48): a cancel on a terminal run is refused 409
+  // run_terminal — the 200 grammar is only { runId, status: cancelling |
+  // cancelled }, so echoing `completed` was outside it. Both the single and
+  // the bulk endpoint route through here; the bulk entry becomes
+  // { ok: false, error: <envelope> } from the throw.
+  if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be cancelled`, { runStatus: run.status });
   const state = fold(host, run);
   if (run.status === 'pending' || run.status === 'paused' || run.status.startsWith('waiting-') || !active.has(run.run_id)) {
     if (state.suspended !== null) appendEvent(host, run, 'node.cancelled', { nodeId: state.suspended, reason: 'run-cancelled' }, { nodeId: state.suspended });
@@ -282,13 +300,27 @@ export function requestCancel(host: Host, run: RunRow, reason: string | undefine
   return { status: 'cancelling' };
 }
 
+/**
+ * runs.md §Pause and resume (rc.52): the `run.paused` payload echoes the
+ * request's `drainPolicy` literally — `immediate` | `drain-current-node` —
+ * and the two mean different things to the executor: `immediate` cuts the
+ * running attempt between events (no terminal node event is recorded; the
+ * resumed `node.started` is a fresh attempt), `drain-current-node` lets the
+ * executing node reach a terminal first. The requested policy lives here, in
+ * memory, next to the executor that consumes it: `pause_requested` is
+ * consumed by the loop that is running, so it never needs to survive a restart.
+ */
+const pausePolicy = new Map<string, 'immediate' | 'drain-current-node'>();
+
 export function requestPause(host: Host, run: RunRow, reason: string | undefined, drainPolicy: string): { pausedAt?: string } {
-  if (run.status !== 'running' && run.status !== 'pending') throw err('run_terminal', `a run in status ${run.status} cannot be paused`);
+  if (run.status !== 'running' && run.status !== 'pending') throw err('run_state_conflict', `a run in status ${run.status} cannot be paused`, { runStatus: run.status });
+  const policy: 'immediate' | 'drain-current-node' = drainPolicy === 'immediate' ? 'immediate' : 'drain-current-node';
   if (!active.has(run.run_id) || run.status === 'pending') {
-    appendEvent(host, run, 'run.paused', { reason: reason ?? 'operator', drainPolicy: drainPolicy === 'immediate' ? 'interrupt' : 'drain' });
+    appendEvent(host, run, 'run.paused', { reason: reason ?? 'operator', drainPolicy: policy });
     setStatus(host, run, 'paused');
     return { pausedAt: nowIso() };
   }
+  pausePolicy.set(run.run_id, policy);
   host.store.updateRun(run.run_id, { pause_requested: 1 });
   return {};
 }

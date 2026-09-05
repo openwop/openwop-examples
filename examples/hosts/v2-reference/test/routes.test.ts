@@ -121,9 +121,13 @@ describe('runs', () => {
   it('cancels a delay mid-flight and pauses/resumes', async () => {
     const c = await call('POST', '/runs', { workflowId: 'conformance-cancellable', inputs: { delayMs: 20000 } });
     await new Promise((r) => setTimeout(r, 150));
-    const p = await call('POST', `/runs/${enc(c.b.runId)}:pause`, {}); expect(p.s).toBe(202);
+    // runs.md §Pause and resume: the default `drain-current-node` lets the 20 s
+    // delay node finish first; `immediate` is the policy that pauses NOW.
+    const p = await call('POST', `/runs/${enc(c.b.runId)}:pause`, { drainPolicy: 'immediate' }); expect(p.s).toBe(202);
     await new Promise((r) => setTimeout(r, 150));
     expect((await call('GET', `/runs/${enc(c.b.runId)}`)).b.status).toBe('paused');
+    const pausedEv = (await call('GET', `/runs/${enc(c.b.runId)}/events/poll?timeout=1&streamMode=debug`)).b.events.find((e: any) => e.type === 'run.paused');
+    expect(pausedEv?.payload?.drainPolicy).toBe('immediate');
     expect((await call('POST', `/runs/${enc(c.b.runId)}:pause`, {})).s).toBe(409);
     expect((await call('POST', `/runs/${enc(c.b.runId)}:resume`, {})).s).toBe(202);
     await new Promise((r) => setTimeout(r, 150));

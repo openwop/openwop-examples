@@ -95,7 +95,13 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     route('GET', '/packs', true, async (ctx) => ({ status: 200, body: installedPacks(ctx.host, 'prod') })),
     route('POST', '/webhooks', true, async (ctx) => {
       const text = await ctx.text();
-      return withIdempotency(ctx, 'registerWebhook', text, async () => ({ status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>) }));
+      return withIdempotency(ctx, 'registerWebhook', text, async () => {
+        // errors.md (rc.40): a malformed body is 400 validation_error from the host, never a parser 500.
+        let parsed: unknown = {};
+        if (text.trim() !== '') { try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); } }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
+        return { status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>) };
+      });
     }),
     route('DELETE', '/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }),
     route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string) })),

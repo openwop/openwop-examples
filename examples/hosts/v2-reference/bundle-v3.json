@@ -1,12 +1,12 @@
 {
   "bundleVersion": "3",
-  "generatedAt": "2026-09-04T17:31:53.416Z",
+  "generatedAt": "2026-09-05T15:08:32.507Z",
   "suite": {
     "name": "@openwop/openwop-conformance",
-    "version": "2.0.0-rc.16",
+    "version": "2.0.0-rc.58",
     "targetMajor": 2,
-    "specArtifactsVersion": "2.0.0-rc.16",
-    "stampSha256": "2387d342ff997e79831bf01ebbfc0e8190136e6108bf06c35ceb403290d6d585"
+    "specArtifactsVersion": "2.0.0-rc.58",
+    "stampSha256": "513ff26b156e8810cd0a5176d93894ae2c2883fc1325738fc7c13a2e55601bb5"
   },
   "host": {
     "name": "openwop-host-v2-reference",
@@ -14,13 +14,13 @@
     "vendor": "openwop (reference example)",
     "build": {
       "kind": "commit",
-      "id": "14b01706a65f9806ed21e95377d89914ab2fe70d"
+      "id": "48e26b72a0e96987786c1e7a54d49bedff6634e9"
     },
-    "signingKeyId": "v2-reference-1"
+    "signingKeyId": "v2-reference-2"
   },
   "discovery": {
-    "url": "http://127.0.0.1:3838/.well-known/openwop",
-    "sha256": "84fe16ef565fb0f6d7cf23594af9caabc2af7bd33c29ccf5df9f7d9589151240",
+    "url": "http://127.0.0.1:3839/.well-known/openwop",
+    "sha256": "364ad3fbf22a89070529515be1b6c78b01a486cfd8fa32d9e6348252535a81f1",
     "protocolVersions": [
       "1.11",
       "2.0"
@@ -31,29 +31,29 @@
     {
       "id": "openwop-discovery-core",
       "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
+      "witnessCount": 3,
+      "certified": true
     },
     {
       "id": "openwop-core-standard",
       "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
+      "witnessCount": 8,
+      "certified": true
     },
     {
       "id": "openwop-conformance-seams-v2",
       "evidenceTier": "self",
-      "witnessCount": 0,
-      "certified": false
+      "witnessCount": 4,
+      "certified": true
     }
   ],
   "results": {
     "totals": {
-      "executedPass": 150,
+      "executedPass": 179,
       "executedFail": 0,
       "skipped": 0,
-      "inapplicable": 24,
-      "blocked": 18
+      "inapplicable": 42,
+      "blocked": 0
     },
     "requirements": [
       {
@@ -67,6 +67,12 @@
         "scenario": "v2-advertised-fixtures-exist.test.ts",
         "result": "executed-pass",
         "assertions": 1
+      },
+      {
+        "id": "openwop.scenario.v2-advertised-path-space-served",
+        "scenario": "v2-advertised-path-space-served.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
       },
       {
         "id": "openwop.scenario.v2-approver-enforced",
@@ -87,7 +93,7 @@
         "assertions": 10
       },
       {
-        "id": "openwop.scenario.v2-capabilities-root-closed",
+        "id": "openwop.floor.v2-capabilities-root-closed",
         "scenario": "v2-capabilities-root-closed.test.ts",
         "result": "executed-pass",
         "assertions": 5
@@ -110,7 +116,7 @@
         "scenario": "v2-coherence-not-in-bundle.test.ts",
         "result": "executed-pass",
         "assertions": 2,
-        "detail": "partial-witness: blocked: evidence/corpus-ledger.json is absent from this layout — the corpus id set cannot be read"
+        "detail": "partial-witness: inapplicable: inapplicable to any host: evidence/corpus-ledger.json is absent from this layout — the subject of this scenario is the corpus, which the published tarball does not ship; it runs in a spec checkout (scripts/check-spec-coherence.mjs) and needs no host"
       },
       {
         "id": "openwop.scenario.v2-compensation-read-projection",
@@ -125,23 +131,35 @@
         "assertions": 8
       },
       {
+        "id": "openwop.scenario.v2-created-run-readable",
+        "scenario": "v2-created-run-readable.test.ts",
+        "result": "executed-pass",
+        "assertions": 5
+      },
+      {
         "id": "openwop.scenario.v2-dual-stack-negotiation",
         "scenario": "v2-dual-stack-negotiation.test.ts",
         "result": "executed-pass",
         "assertions": 15
       },
       {
-        "id": "openwop.scenario.v2-effect-identity-business-key",
+        "id": "openwop.floor.v2-effect-identity-business-key",
         "scenario": "v2-effect-identity-business-key.test.ts",
         "result": "executed-pass",
         "assertions": 7,
         "detail": "partial-witness: inapplicable: the noop fixture issued no external effect — the per-row keying leg had no rows (an effect-issuing fixture would exercise it)"
       },
       {
-        "id": "openwop.scenario.v2-effect-seam-manifest",
+        "id": "openwop.floor.v2-effect-seam-manifest",
         "scenario": "v2-effect-seam-manifest.test.ts",
         "result": "executed-pass",
-        "assertions": 14
+        "assertions": 13
+      },
+      {
+        "id": "openwop.floor.v2-effect-seam-no-refire",
+        "scenario": "v2-effect-seam-no-refire.test.ts",
+        "result": "executed-pass",
+        "assertions": 1
       },
       {
         "id": "openwop.scenario.v2-enum-growth-rule",
@@ -153,17 +171,16 @@
         "id": "openwop.scenario.v2-era-2-append-vocabulary",
         "scenario": "v2-era-2-append-vocabulary.test.ts",
         "result": "executed-pass",
-        "assertions": 1,
-        "detail": "partial-witness: blocked: seedEra2Log reported success but the log reads back empty (0 events) — the seam's return value is not evidence that a log exists, and without a seeded era-2 log the writer rule is unwitnessed here"
+        "assertions": 6
       },
       {
-        "id": "openwop.scenario.v2-era-key",
+        "id": "openwop.floor.v2-era-key",
         "scenario": "v2-era-key.test.ts",
         "result": "executed-pass",
         "assertions": 5
       },
       {
-        "id": "openwop.scenario.v2-era-stamp-universal",
+        "id": "openwop.floor.v2-era-stamp-universal",
         "scenario": "v2-era-stamp-universal.test.ts",
         "result": "executed-pass",
         "assertions": 4
@@ -176,13 +193,13 @@
         "detail": "partial-witness: inapplicable: no 429 rate_limited response was observed during the suite's probes — the Retry-After leg is gated on a rate-limited response"
       },
       {
-        "id": "openwop.scenario.v2-event-type-closed",
+        "id": "openwop.floor.v2-event-type-closed",
         "scenario": "v2-event-type-closed.test.ts",
         "result": "executed-pass",
         "assertions": 12
       },
       {
-        "id": "openwop.scenario.v2-fork-a-v1-run",
+        "id": "openwop.floor.v2-fork-a-v1-run",
         "scenario": "v2-fork-a-v1-run.test.ts",
         "result": "executed-pass",
         "assertions": 9
@@ -207,13 +224,13 @@
         "assertions": 13
       },
       {
-        "id": "openwop.scenario.v2-idempotency-key-grammar",
+        "id": "openwop.floor.v2-idempotency-key-grammar",
         "scenario": "v2-idempotency-key-grammar.test.ts",
         "result": "executed-pass",
         "assertions": 4
       },
       {
-        "id": "openwop.scenario.v2-interrupt-token-scheme",
+        "id": "openwop.floor.v2-interrupt-token-scheme",
         "scenario": "v2-interrupt-token-scheme.test.ts",
         "result": "executed-pass",
         "assertions": 4
@@ -231,6 +248,12 @@
         "result": "executed-pass",
         "assertions": 1,
         "detail": "partial-witness: inapplicable: host advertises neither a2a nor mcp — no profiles[] to check for a -legacy id"
+      },
+      {
+        "id": "openwop.scenario.v2-malformed-body-envelope",
+        "scenario": "v2-malformed-body-envelope.test.ts",
+        "result": "executed-pass",
+        "assertions": 10
       },
       {
         "id": "openwop.scenario.v2-manifest-ceiling-refused",
@@ -255,28 +278,28 @@
         "scenario": "v2-minimum-version-refused.test.ts",
         "result": "inapplicable",
         "assertions": 0,
-        "detail": "[inapplicable] a2a facet not advertised — no floor to enforce; [inapplicable] mcp facet not advertised — no floor to enforce"
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-mrtr-rounds-ceiling",
         "scenario": "v2-mrtr-rounds-ceiling.test.ts",
         "result": "inapplicable",
         "assertions": 0,
-        "detail": "mcp facet not advertised — no MRTR ceiling"
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-negotiation-authenticated",
         "scenario": "v2-negotiation-authenticated.test.ts",
         "result": "inapplicable",
         "assertions": 0,
-        "detail": "[inapplicable] a2a facet not advertised — no negotiation to authenticate; [inapplicable] mcp facet not advertised — no negotiation to authenticate"
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-negotiation-decided-emitted",
         "scenario": "v2-negotiation-decided-emitted.test.ts",
         "result": "inapplicable",
         "assertions": 0,
-        "detail": "[inapplicable] a2a facet not advertised — no negotiation to audit; [inapplicable] mcp facet not advertised — no negotiation to audit"
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-no-transport-advertisement",
@@ -317,13 +340,13 @@
         "assertions": 9
       },
       {
-        "id": "openwop.scenario.v2-poll-cursor-v2",
+        "id": "openwop.floor.v2-poll-cursor-v2",
         "scenario": "v2-poll-cursor-v2.test.ts",
         "result": "executed-pass",
         "assertions": 14
       },
       {
-        "id": "openwop.scenario.v2-preferred-version-default",
+        "id": "openwop.floor.v2-preferred-version-default",
         "scenario": "v2-preferred-version-default.test.ts",
         "result": "executed-pass",
         "assertions": 7
@@ -346,7 +369,7 @@
         "scenario": "v2-refresh-sla.test.ts",
         "result": "inapplicable",
         "assertions": 0,
-        "detail": "host advertises neither a2a nor mcp — no refreshedAt to check"
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-relaxation-recorded",
@@ -361,11 +384,84 @@
         "assertions": 10
       },
       {
+        "id": "openwop.scenario.v2-run-annotation-not-event",
+        "scenario": "v2-run-annotation-not-event.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.scenario.v2-run-bulk-cancel",
+        "scenario": "v2-run-bulk-cancel.test.ts",
+        "result": "executed-pass",
+        "assertions": 11
+      },
+      {
+        "id": "openwop.scenario.v2-run-cancel",
+        "scenario": "v2-run-cancel.test.ts",
+        "result": "executed-pass",
+        "assertions": 7
+      },
+      {
+        "id": "openwop.scenario.v2-run-completed-outputs",
+        "scenario": "v2-run-completed-outputs.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.scenario.v2-run-diff-identical",
+        "scenario": "v2-run-diff-identical.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.scenario.v2-run-fork-refusals",
+        "scenario": "v2-run-fork-refusals.test.ts",
+        "result": "executed-pass",
+        "assertions": 8
+      },
+      {
+        "id": "openwop.scenario.v2-run-options-limits",
+        "scenario": "v2-run-options-limits.test.ts",
+        "result": "executed-pass",
+        "assertions": 9
+      },
+      {
+        "id": "openwop.scenario.v2-run-pause-resume",
+        "scenario": "v2-run-pause-resume.test.ts",
+        "result": "executed-pass",
+        "assertions": 15
+      },
+      {
+        "id": "openwop.scenario.v2-run-snapshot-etag",
+        "scenario": "v2-run-snapshot-etag.test.ts",
+        "result": "executed-pass",
+        "assertions": 5
+      },
+      {
+        "id": "openwop.scenario.v2-sse-last-event-id",
+        "scenario": "v2-sse-last-event-id.test.ts",
+        "result": "executed-pass",
+        "assertions": 13
+      },
+      {
+        "id": "openwop.scenario.v2-stream-mode-refusal",
+        "scenario": "v2-stream-mode-refusal.test.ts",
+        "result": "executed-pass",
+        "assertions": 15
+      },
+      {
+        "id": "openwop.scenario.v2-stream-sse-projection",
+        "scenario": "v2-stream-sse-projection.test.ts",
+        "result": "executed-pass",
+        "assertions": 13
+      },
+      {
         "id": "openwop.scenario.v2-subject-link-record",
         "scenario": "v2-subject-link-record.test.ts",
         "result": "inapplicable",
         "assertions": 0,
-        "detail": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
+        "detail": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-unmapped-type-refused",
@@ -380,19 +476,19 @@
         "assertions": 45
       },
       {
-        "id": "openwop.scenario.v2-v1-signed-webhook-accepted",
+        "id": "openwop.floor.v2-v1-signed-webhook-accepted",
         "scenario": "v2-v1-signed-webhook-accepted.test.ts",
         "result": "executed-pass",
         "assertions": 4
       },
       {
-        "id": "openwop.scenario.v2-version-header-honored",
+        "id": "openwop.floor.v2-version-header-honored",
         "scenario": "v2-version-header-honored.test.ts",
         "result": "executed-pass",
         "assertions": 4
       },
       {
-        "id": "openwop.scenario.v2-webhook-durable-delivery",
+        "id": "openwop.floor.v2-webhook-durable-delivery",
         "scenario": "v2-webhook-durable-delivery.test.ts",
         "result": "executed-pass",
         "assertions": 11,
@@ -403,12 +499,6 @@
         "scenario": "v2-well-known-one-resource.test.ts",
         "result": "executed-pass",
         "assertions": 11
-      },
-      {
-        "id": "openwop.floor.any.interrupt-",
-        "scenario": "interrupt-*",
-        "result": "blocked",
-        "detail": "no interrupt-* scenario ran — unclassified return"
       },
       {
         "id": "openwop.it.fixtures-valid.connection-packs-validates-against-connection-pack-manifest-schema-json",
@@ -501,39 +591,32 @@
         "assertions": 1
       },
       {
-        "id": "openwop.it.v2-era-2-append-vocabulary.a-host-append-to-an-open-era-2-run-keeps-the-log-in-v1-vocabulary-so-the-whole-l",
-        "scenario": "v2-era-2-append-vocabulary.test.ts",
-        "result": "blocked",
-        "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
-      },
-      {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion",
         "scenario": "v2-negotiation-authenticated.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "a2a facet not advertised — no negotiation to authenticate"
       },
       {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-mcp-exchange-cannot-lower-the-revision-below-preferredversion",
         "scenario": "v2-negotiation-authenticated.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "mcp facet not advertised — no negotiation to authenticate"
       },
       {
         "id": "openwop.it.v2-negotiation-decided-emitted.an-a2a-exchange-leaves-negotiation-decided-on-the-host-log",
         "scenario": "v2-negotiation-decided-emitted.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "a2a facet not advertised — no negotiation to audit"
       },
       {
         "id": "openwop.it.v2-negotiation-decided-emitted.an-mcp-exchange-leaves-negotiation-decided-on-the-host-log",
         "scenario": "v2-negotiation-decided-emitted.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "mcp facet not advertised — no negotiation to audit"
       },
       {
         "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-fs-gated-a-host-filesystem-read-is-refused",
@@ -571,6 +654,13 @@
         "detail": "profile not advertised in the captured discovery set"
       },
       {
+        "id": "openwop.it.v2-run-diff-identical.two-identical-logs-diff-to-divergedatseq-null-and-empty-eventdiffs-in-a-response",
+        "scenario": "v2-run-diff-identical.test.ts",
+        "result": "inapplicable",
+        "assertions": 0,
+        "detail": "diffRun is OPTIONAL and answered 404 (runs.md §Surface)"
+      },
+      {
         "id": "openwop.requirement.0168.advertised-fixtures-exist",
         "scenario": "v2-advertised-fixtures-exist.test.ts",
         "result": "executed-pass",
@@ -597,9 +687,9 @@
       {
         "id": "openwop.requirement.0168.coherence-not-in-bundle.disjoint-by-construction",
         "scenario": "v2-coherence-not-in-bundle.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "inapplicable to any host: evidence/corpus-ledger.json is absent from this layout — the subject of this scenario is the corpus, which the published tarball does not ship; it runs in a spec checkout (scripts/check-spec-coherence.mjs) and needs no host"
       },
       {
         "id": "openwop.requirement.0168.coherence-not-in-bundle.schema-forbids-coherence-ids",
@@ -730,9 +820,9 @@
       {
         "id": "openwop.requirement.0170.lane-issuer-advertised.window",
         "scenario": "v2-lane-issuer-advertised.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "no advertised lane uses a windowed revocation rule (exp-and-recheck | short-lived | rebind)"
       },
       {
         "id": "openwop.requirement.0170.owner-subject-required.no-principal",
@@ -753,18 +843,54 @@
         "assertions": 10
       },
       {
+        "id": "openwop.requirement.0170.run-annotation-not-event",
+        "scenario": "v2-run-annotation-not-event.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0170.run-bulk-cancel",
+        "scenario": "v2-run-bulk-cancel.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0170.run-cancel",
+        "scenario": "v2-run-cancel.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0170.run-fork-refusals",
+        "scenario": "v2-run-fork-refusals.test.ts",
+        "result": "executed-pass",
+        "assertions": 8
+      },
+      {
+        "id": "openwop.requirement.0170.run-pause-resume",
+        "scenario": "v2-run-pause-resume.test.ts",
+        "result": "executed-pass",
+        "assertions": 4
+      },
+      {
+        "id": "openwop.requirement.0170.run-snapshot-etag",
+        "scenario": "v2-run-snapshot-etag.test.ts",
+        "result": "executed-pass",
+        "assertions": 5
+      },
+      {
         "id": "openwop.requirement.0170.subject-link-record.denied-at",
         "scenario": "v2-subject-link-record.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
       },
       {
         "id": "openwop.requirement.0170.subject-link-record.shape",
         "scenario": "v2-subject-link-record.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
       },
       {
         "id": "openwop.requirement.0171.configurable-closed.dotted-key",
@@ -811,9 +937,9 @@
       {
         "id": "openwop.requirement.0171.error-registry.retry-after",
         "scenario": "v2-error-registry.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "no 429 rate_limited response was observed during the suite's probes — the Retry-After leg is gated on a rate-limited response"
       },
       {
         "id": "openwop.requirement.0171.event-type-closed.envelope",
@@ -870,6 +996,48 @@
         "assertions": 8
       },
       {
+        "id": "openwop.requirement.0171.run-completed-outputs",
+        "scenario": "v2-run-completed-outputs.test.ts",
+        "result": "executed-pass",
+        "assertions": 3
+      },
+      {
+        "id": "openwop.requirement.0171.run-options-limits",
+        "scenario": "v2-run-options-limits.test.ts",
+        "result": "executed-pass",
+        "assertions": 6
+      },
+      {
+        "id": "openwop.requirement.0171.sse-last-event-id",
+        "scenario": "v2-sse-last-event-id.test.ts",
+        "result": "executed-pass",
+        "assertions": 13
+      },
+      {
+        "id": "openwop.requirement.0171.stream-mode-refusal",
+        "scenario": "v2-stream-mode-refusal.test.ts",
+        "result": "executed-pass",
+        "assertions": 7
+      },
+      {
+        "id": "openwop.requirement.0171.stream-sse-projection",
+        "scenario": "v2-stream-sse-projection.test.ts",
+        "result": "executed-pass",
+        "assertions": 13
+      },
+      {
+        "id": "openwop.requirement.0172.advertised-path-space-served",
+        "scenario": "v2-advertised-path-space-served.test.ts",
+        "result": "executed-pass",
+        "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0172.created-run-readable",
+        "scenario": "v2-created-run-readable.test.ts",
+        "result": "executed-pass",
+        "assertions": 5
+      },
+      {
         "id": "openwop.requirement.0172.dual-stack-negotiation.cross-major-read",
         "scenario": "v2-dual-stack-negotiation.test.ts",
         "result": "executed-pass",
@@ -892,6 +1060,12 @@
         "scenario": "v2-dual-stack-negotiation.test.ts",
         "result": "executed-pass",
         "assertions": 2
+      },
+      {
+        "id": "openwop.requirement.0172.malformed-body-envelope",
+        "scenario": "v2-malformed-body-envelope.test.ts",
+        "result": "executed-pass",
+        "assertions": 5
       },
       {
         "id": "openwop.requirement.0172.min-client-version",
@@ -966,8 +1140,8 @@
         "assertions": 1
       },
       {
-        "id": "openwop.requirement.0173.effect-seam-manifest.no-re-fire",
-        "scenario": "v2-effect-seam-manifest.test.ts",
+        "id": "openwop.requirement.0173.effect-seam-no-refire",
+        "scenario": "v2-effect-seam-no-refire.test.ts",
         "result": "executed-pass",
         "assertions": 1
       },
@@ -1026,9 +1200,9 @@
       {
         "id": "openwop.requirement.0175.legacy-profiles-absent",
         "scenario": "v2-legacy-profiles-absent.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "host advertises neither a2a nor mcp — no profiles[] to check for a -legacy id"
       },
       {
         "id": "openwop.requirement.0175.legacy-profiles-absent.no-root-profiles",
@@ -1039,30 +1213,30 @@
       {
         "id": "openwop.requirement.0175.minimum-version-refused",
         "scenario": "v2-minimum-version-refused.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "a2a facet not advertised — no floor to enforce"
       },
       {
         "id": "openwop.requirement.0175.minimum-version-refused.mcp",
         "scenario": "v2-minimum-version-refused.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "mcp facet not advertised — no floor to enforce"
       },
       {
         "id": "openwop.requirement.0175.mrtr-rounds-ceiling",
         "scenario": "v2-mrtr-rounds-ceiling.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "mcp facet not advertised — no MRTR ceiling"
       },
       {
         "id": "openwop.requirement.0175.mrtr-rounds-ceiling.refused",
         "scenario": "v2-mrtr-rounds-ceiling.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "mcp facet not advertised — no MRTR ceiling"
       },
       {
         "id": "openwop.requirement.0175.no-transport-advertisement",
@@ -1073,15 +1247,15 @@
       {
         "id": "openwop.requirement.0175.refresh-sla",
         "scenario": "v2-refresh-sla.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "host advertises neither a2a nor mcp — no refreshedAt to check"
       },
       {
         "id": "openwop.requirement.0176.era-2-append-vocabulary",
         "scenario": "v2-era-2-append-vocabulary.test.ts",
         "result": "executed-pass",
-        "assertions": 1
+        "assertions": 5
       },
       {
         "id": "openwop.requirement.0176.era-key",
@@ -1233,9 +1407,9 @@
       {
         "id": "openwop.requirement.0177.peer-dependency-declared.alias-overlap",
         "scenario": "v2-peer-dependency-declared.test.ts",
-        "result": "blocked",
+        "result": "inapplicable",
         "assertions": 0,
-        "detail": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "detail": "no facet-less alias row names a family this host advertises — the overlap alias cannot be exercised"
       },
       {
         "id": "openwop.requirement.0177.peer-dependency-declared.undefined-key",
@@ -1259,8 +1433,8 @@
       }
     ]
   },
-  "witnessSha256": "169b3466d8c9788550f226e9bde19354ca2b7ff144e0581ed56759bda724d351",
-  "assertionCount": 1332,
+  "witnessSha256": "933dc8ea048f964e97cc793c2af59c12ce0faedb70777c4968c0e9741d25a103",
+  "assertionCount": 1545,
   "detail": {
     "nonPass": [
       {
@@ -1276,22 +1450,22 @@
       {
         "id": "openwop.scenario.v2-minimum-version-refused",
         "result": "inapplicable",
-        "reason": "[inapplicable] a2a facet not advertised — no floor to enforce; [inapplicable] mcp facet not advertised — no floor to enforce"
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-mrtr-rounds-ceiling",
         "result": "inapplicable",
-        "reason": "mcp facet not advertised — no MRTR ceiling"
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-negotiation-authenticated",
         "result": "inapplicable",
-        "reason": "[inapplicable] a2a facet not advertised — no negotiation to authenticate; [inapplicable] mcp facet not advertised — no negotiation to authenticate"
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-negotiation-decided-emitted",
         "result": "inapplicable",
-        "reason": "[inapplicable] a2a facet not advertised — no negotiation to audit; [inapplicable] mcp facet not advertised — no negotiation to audit"
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-pack-isolation",
@@ -1306,42 +1480,37 @@
       {
         "id": "openwop.scenario.v2-refresh-sla",
         "result": "inapplicable",
-        "reason": "host advertises neither a2a nor mcp — no refreshedAt to check"
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
+      },
+      {
+        "id": "openwop.scenario.v2-run-diff-identical",
+        "result": "inapplicable",
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.scenario.v2-subject-link-record",
         "result": "inapplicable",
-        "reason": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
-      },
-      {
-        "id": "openwop.floor.any.interrupt-",
-        "result": "blocked",
-        "reason": "no interrupt-* scenario ran — unclassified return"
-      },
-      {
-        "id": "openwop.it.v2-era-2-append-vocabulary.a-host-append-to-an-open-era-2-run-keeps-the-log-in-v1-vocabulary-so-the-whole-l",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "reason": "every test returned early through behaviorGate with zero assertions: profile not advertised in the captured discovery set"
       },
       {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-a2a-exchange-cannot-lower-the-version-below-preferredversion",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "a2a facet not advertised — no negotiation to authenticate"
       },
       {
         "id": "openwop.it.v2-negotiation-authenticated.an-unauthenticated-mcp-exchange-cannot-lower-the-revision-below-preferredversion",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "mcp facet not advertised — no negotiation to authenticate"
       },
       {
         "id": "openwop.it.v2-negotiation-decided-emitted.an-a2a-exchange-leaves-negotiation-decided-on-the-host-log",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "a2a facet not advertised — no negotiation to audit"
       },
       {
         "id": "openwop.it.v2-negotiation-decided-emitted.an-mcp-exchange-leaves-negotiation-decided-on-the-host-log",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "mcp facet not advertised — no negotiation to audit"
       },
       {
         "id": "openwop.it.v2-pack-isolation.node-pack-sandbox-fs-gated-a-host-filesystem-read-is-refused",
@@ -1369,29 +1538,34 @@
         "reason": "profile not advertised in the captured discovery set"
       },
       {
+        "id": "openwop.it.v2-run-diff-identical.two-identical-logs-diff-to-divergedatseq-null-and-empty-eventdiffs-in-a-response",
+        "result": "inapplicable",
+        "reason": "diffRun is OPTIONAL and answered 404 (runs.md §Surface)"
+      },
+      {
         "id": "openwop.requirement.0168.coherence-not-in-bundle.disjoint-by-construction",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "inapplicable to any host: evidence/corpus-ledger.json is absent from this layout — the subject of this scenario is the corpus, which the published tarball does not ship; it runs in a spec checkout (scripts/check-spec-coherence.mjs) and needs no host"
       },
       {
         "id": "openwop.requirement.0170.lane-issuer-advertised.window",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "no advertised lane uses a windowed revocation rule (exp-and-recheck | short-lived | rebind)"
       },
       {
         "id": "openwop.requirement.0170.subject-link-record.denied-at",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
       },
       {
         "id": "openwop.requirement.0170.subject-link-record.shape",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "the host does not advertise both the saml and scim lanes — advertising both is what implies the linking contract (row C2.5)"
       },
       {
         "id": "openwop.requirement.0171.error-registry.retry-after",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "no 429 rate_limited response was observed during the suite's probes — the Retry-After leg is gated on a rate-limited response"
       },
       {
         "id": "openwop.requirement.0173.pack-isolation",
@@ -1415,33 +1589,33 @@
       },
       {
         "id": "openwop.requirement.0175.legacy-profiles-absent",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "host advertises neither a2a nor mcp — no profiles[] to check for a -legacy id"
       },
       {
         "id": "openwop.requirement.0175.minimum-version-refused",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "a2a facet not advertised — no floor to enforce"
       },
       {
         "id": "openwop.requirement.0175.minimum-version-refused.mcp",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "mcp facet not advertised — no floor to enforce"
       },
       {
         "id": "openwop.requirement.0175.mrtr-rounds-ceiling",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "mcp facet not advertised — no MRTR ceiling"
       },
       {
         "id": "openwop.requirement.0175.mrtr-rounds-ceiling.refused",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "mcp facet not advertised — no MRTR ceiling"
       },
       {
         "id": "openwop.requirement.0175.refresh-sla",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "host advertises neither a2a nor mcp — no refreshedAt to check"
       },
       {
         "id": "openwop.requirement.0177.chain-pin-exact.exact-accepted",
@@ -1460,8 +1634,8 @@
       },
       {
         "id": "openwop.requirement.0177.peer-dependency-declared.alias-overlap",
-        "result": "blocked",
-        "reason": "unclassified return: the test passed with zero assertions and recorded no reason — RFC 0148 §A resolves it to blocked, never to a pass"
+        "result": "inapplicable",
+        "reason": "no facet-less alias row names a family this host advertises — the overlap alias cannot be exercised"
       },
       {
         "id": "openwop.requirement.0177.provider-conflict.fail-closed",
@@ -1477,8 +1651,8 @@
   },
   "signature": {
     "alg": "ed25519",
-    "keyId": "v2-reference-1",
-    "sig": "kH58-QPUEGd85cGgzNDRQxwzJBrbHOGHYOJlKWJpoLmewyetMWbERUuwNz_v-UUY_55ON9GLZTWZIWJ6elsrCA",
+    "keyId": "v2-reference-2",
+    "sig": "vxsU0Ie3ZRwO7jC_h7GWKxOwCr-rttbGb7wmRy0RgMji5KI78pxr7ykPpp6U92vQ3FaY8_IJsUffg4X0swKiBQ",
     "over": [
       "witnessSha256",
       "host.build",
