@@ -104,11 +104,17 @@ function wireRunId(ctx: Ctx, runId: string): string {
 
 export function loadRun(ctx: Ctx, runId: string): RunRow {
   const tenant = ctx.subject?.tenant ?? ctx.host.config.tenant;
-  // A bare id (no tenant segment) is the v1 spelling of a run this tenant owns:
-  // on a /v1/ path it is the only spelling, and under major 2 it is how a
-  // client that holds a v1-minted id reaches the same run through the overlap
-  // (versioning.md §5) — resolved under the CALLER's tenant, never another's,
-  // so identity.md §5's 403 check has nothing to read and nothing to protect.
+  // A bare id (no tenant segment) is the v1 spelling of a run this tenant owns.
+  // On a /v1/ path it is the only spelling and resolves under the CALLER's
+  // tenant (versioning.md §5). Under major 2 it is refused: the parameter
+  // `$ref`s the tenant-bound grammar (identity.md §5, corpus 2.0.10) and the
+  // grammar MUST NOT acquire a legacy branch — a bare id has no tenant segment
+  // for the cross-tenant check to read. Until 2.0.10 this host admitted it
+  // under major 2 with the comment that the 403 had "nothing to protect";
+  // suite 2.0.10's v2-id-grammar bare-id leg is what made that a red row.
+  if (!runId.includes('/') && ctx.major === 2) {
+    throw err('validation_error', `runId MUST be tenant-bound <tenantId>/<opaque> under major 2 (identity.md §5 — ^[A-Za-z0-9._~-]{1,128}/[A-Za-z0-9._~-]{16,128}$); a bare id is the /v1/ spelling`, { field: 'runId' });
+  }
   const id = runId.includes('/') ? runId : `${tenant}/${runId}`;
   checkTenantBound(id, tenant, 'runId');
   const run = ctx.host.store.getRun(id);

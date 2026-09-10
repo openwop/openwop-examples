@@ -101,7 +101,14 @@ describe('runs', () => {
     const e = await call('GET', `/runs/${enc(c.b.runId)}/effects`); expect(e.s).toBe(200); expect(e.b.effects).toEqual([]);
     const comp = await call('GET', `/runs/${enc(c.b.runId)}/compensation`); expect(comp.b.status).toBe('none');
     const anc = await call('GET', `/runs/${enc(c.b.runId)}/ancestry`); expect(anc.b.parent).toBeNull();
-    expect((await call('GET', '/runs/does-not-exist')).s).toBe(404);
+    // identity.md §5 (corpus 2.0.10): under major 2 the parameter is the tenant-bound
+    // grammar — a bare id is refused 400 validation_error, never looked up. A
+    // well-formed bound id that names nothing is the 404. The same bare id on a
+    // /v1/ path is the v1 spelling and still resolves under the caller's tenant.
+    const bare = await call('GET', '/runs/does-not-exist');
+    expect(bare.s).toBe(400); expect(bare.b.error).toBe('validation_error');
+    expect((await call('GET', `/runs/${enc(`${c.b.runId.split('/')[0]}/doesnotexist0123456789ab`)}`)).s).toBe(404);
+    expect((await call('GET', '/v1/runs/does-not-exist', undefined, { 'OpenWOP-Version': '1.0' })).s).toBe(404);
   });
   it('refuses a closed-body violation, a dotted configurable key and a bad Idempotency-Key; replays an idempotent create', async () => {
     expect((await call('POST', '/runs', { workflowId: 'conformance-noop', bogus: 1 })).b.error).toBe('validation_error');
@@ -352,7 +359,8 @@ describe('webhooks + identity + packs + workspace', () => {
   it('mints and revokes a next-request credential; resolves workload identity with the key-bound floor', async () => {
     const m = await call('POST', '/conformance/seams/sample/auth/credential/mint', { lane: 'session' });
     expect(m.s).toBe(201);
-    expect((await call('GET', '/runs/does-not-exist', undefined, { Authorization: `Bearer ${m.b.credential}` })).s).toBe(404);
+    expect((await call('GET', `/runs/${enc('openwop-reference-tenant/doesnotexist0123456789ab')}`, undefined, { Authorization: `Bearer ${m.b.credential}` })).s).toBe(404);
+    expect((await call('GET', '/runs/does-not-exist', undefined, { Authorization: `Bearer ${m.b.credential}` })).s).toBe(400);
     expect((await call('POST', '/conformance/seams/sample/auth/credential/revoke', { lane: 'session', credential: m.b.credential })).s).toBe(200);
     const after = await call('GET', '/runs/does-not-exist', undefined, { Authorization: `Bearer ${m.b.credential}` });
     expect(after.s).toBe(401); expect(after.b.error).toBe('credential_revoked');
