@@ -34,15 +34,24 @@ export function eraOf(run: RunRow): number {
   return run.era ?? 2;
 }
 
-/** Orgs whose vendor events read under their own name (events.md §Types). */
-const VENDOR_ORGS = new Set<string>([EXTENSION_ORG]);
+/**
+ * Orgs whose vendor events read under their own name (events.md §Types): this
+ * host's own org plus every org registered in the declaration's `extensions`
+ * (persistence.md §The codemap is data — the registry is data, not this set).
+ * Until suite 2.0.11 this was `[EXTENSION_ORG]` alone, and the registered
+ * control type `example.thing-happened` was refused 500 event_type_unmapped —
+ * the v2-unmapped-type-refused positive leg, red on the rc.61 → 2.0.11 re-pin.
+ */
+function vendorOrgs(): ReadonlySet<string> {
+  return new Set<string>([EXTENSION_ORG, ...loadArtifacts().registeredOrgs]);
+}
 
 export function translateType(v1Type: string): string {
   const art = loadArtifacts();
   const mapped = art.codemap.get(v1Type);
   if (mapped !== undefined) return mapped;
   const org = v1Type.split('.')[0] ?? '';
-  if (art.vendorEventPattern.test(v1Type) && VENDOR_ORGS.has(org)) return v1Type;
+  if (art.vendorEventPattern.test(v1Type) && vendorOrgs().has(org)) return v1Type;
   // persistence.md §The reader rule: a type the codemap does not name on its v1
   // side and that carries no reserved vendor prefix fails the read. There is no
   // tolerant branch for a v2 name found in an era-2 log — writing one there is
@@ -66,7 +75,7 @@ export function toStorageVocabulary(type: string, era: number): string {
   const v1 = art.codemapV2toV1.get(type);
   if (v1 !== undefined) return v1;
   const org = type.split('.')[0] ?? '';
-  if (art.vendorEventPattern.test(type) && VENDOR_ORGS.has(org)) return type;
+  if (art.vendorEventPattern.test(type) && vendorOrgs().has(org)) return type;
   throw new Error(`refusing to append ${type} to an era-${era} log: the codemap carries no v1 spelling for it, and persistence.md §The writer rule fixes the log's vocabulary at run creation`);
 }
 

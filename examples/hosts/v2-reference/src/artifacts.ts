@@ -29,6 +29,13 @@ export interface SpecArtifacts {
   /** Every family key the declaration file names (peer-dependency identifiers). */
   readonly familyKeys: ReadonlySet<string>;
   readonly metadataKeys: ReadonlySet<string>;
+  /**
+   * Orgs registered in `spec/v2/declaration.json` `extensions` — a vendor-prefixed
+   * event type under one of these reads under its own name unchanged
+   * (persistence.md §The codemap is data). `example` is reserved by the protocol
+   * and owned by nobody; the suite drives it as the positive control.
+   */
+  readonly registeredOrgs: ReadonlySet<string>;
   readonly peerAliases: ReadonlyMap<string, AliasRow>;
 }
 
@@ -55,7 +62,7 @@ export function loadArtifacts(): SpecArtifacts {
   const pkg = readJson<{ version: string }>(join(root, 'package.json'));
   const errorsDoc = readJson<{ vendorCodePattern: string; rows: ErrorRow[] }>(join(root, 'spec', 'v2', 'errors.json'));
   const codemapDoc = readJson<{ rows: CodemapRow[] }>(join(root, 'spec', 'v2', 'event-codemap.json'));
-  const declaration = readJson<{ metadata: Array<{ key: string; disposition?: string }>; families: Array<{ key: string; anchor: string }> }>(join(root, 'spec', 'v2', 'declaration.json'));
+  const declaration = readJson<{ metadata: Array<{ key: string; disposition?: string }>; families: Array<{ key: string; anchor: string }>; extensions?: Record<string, unknown> }>(join(root, 'spec', 'v2', 'declaration.json'));
   const runEvent = readJson<{ properties: { type: { oneOf: Array<{ enum?: string[]; pattern?: string }> } } }>(join(root, 'schemas', 'v2', 'run-event.schema.json'));
   const aliasPath = join(root, 'spec', 'v2', 'peer-dependency-aliases.json');
   const aliases = existsSync(aliasPath) ? readJson<{ rows: AliasRow[] }>(aliasPath).rows : [];
@@ -90,6 +97,7 @@ export function loadArtifacts(): SpecArtifacts {
     vendorEventPattern: new RegExp(vendorPattern),
     familyKeys,
     metadataKeys,
+    registeredOrgs: new Set<string>(Object.keys(declaration.extensions ?? {})),
     peerAliases,
   };
   return cached;
