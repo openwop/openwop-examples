@@ -118,6 +118,36 @@ describe('runs', () => {
     const r = await call('GET', `/runs/${enc('other-tenant/foreignopaque0123456789abcdef')}`);
     expect(r.s).toBe(403); expect(r.b.error).toBe('id_tenant_mismatch');
   });
+
+  it('lists the caller\'s runs newest first, bound ids, keyset cursor, exact filters; refuses a foreign cursor (RFC 0182)', async () => {
+    const a = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+    const b = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+    expect(a.s).toBe(201); expect(b.s).toBe(201);
+    // page of 1: newest first, a cursor to the next page, every id bound
+    const p1 = await call('GET', '/runs?limit=1');
+    expect(p1.s).toBe(200); expect(p1.b.runs).toHaveLength(1); expect(typeof p1.b.nextCursor).toBe('string');
+    expect(p1.b.runs[0].runId).toBe(b.b.runId);
+    const p2 = await call('GET', `/runs?limit=1&cursor=${enc(p1.b.nextCursor)}`);
+    expect(p2.s).toBe(200); expect(p2.b.runs[0].runId).toBe(a.b.runId);
+    for (const r of [...p1.b.runs, ...p2.b.runs]) expect(r.runId.startsWith('openwop-reference-tenant/')).toBe(true);
+    // the unfiltered walk contains both; the cap holds
+    const all = await call('GET', '/runs?limit=100');
+    expect(all.s).toBe(200); expect(all.b.runs.length).toBeLessThanOrEqual(100);
+    const ids = all.b.runs.map((r: { runId: string }) => r.runId);
+    expect(ids).toContain(a.b.runId); expect(ids).toContain(b.b.runId);
+    // exact filters
+    const wf = await call('GET', '/runs?workflowId=conformance-noop&limit=100');
+    expect(wf.b.runs.every((r: { workflowId: string }) => r.workflowId === 'conformance-noop')).toBe(true);
+    expect((await call('GET', '/runs?workflowId=no-such-workflow-xyz')).b.runs).toEqual([]);
+    expect((await call('GET', '/runs?status=bogus')).s).toBe(400);
+    // a cursor this host did not mint, and a tampered one, are refused — never interpreted
+    const bad = await call('GET', '/runs?cursor=not-a-cursor');
+    expect(bad.s).toBe(400); expect(bad.b.error).toBe('validation_error');
+    const tampered = Buffer.from(Buffer.from(p1.b.nextCursor, 'base64url').toString('utf8').replace(/\|[^|]*$/, '|AAAA')).toString('base64url');
+    expect((await call('GET', `/runs?cursor=${enc(tampered)}`)).s).toBe(400);
+    // major 2 only: there was never a v1 list
+    expect((await call('GET', '/v1/runs', undefined, { 'OpenWOP-Version': '1.0' })).s).toBe(404);
+  });
   it('cancels a delay mid-flight and pauses/resumes', async () => {
     const c = await call('POST', '/runs', { workflowId: 'conformance-cancellable', inputs: { delayMs: 20000 } });
     await new Promise((r) => setTimeout(r, 150));

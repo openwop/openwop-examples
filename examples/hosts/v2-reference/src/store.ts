@@ -327,6 +327,20 @@ export class Store {
   getRun(runId: string): RunRow | undefined {
     return this.db.prepare('SELECT * FROM runs WHERE run_id = ?').get(runId) as RunRow | undefined;
   }
+  /**
+   * RFC 0182 §A.2–§A.4 — the caller's runs, newest first, keyset-paginated.
+   * `after` is the (created_at, run_id) of the last row of the previous page;
+   * the cursor that carries it is minted and checked in runs.ts, never here.
+   * Tenant is a WHERE clause, not a post-filter: the list is scoped by construction.
+   */
+  listRuns(tenant: string, opts: { limit: number; after?: { createdAt: string; runId: string }; workflowId?: string; status?: string }): RunRow[] {
+    const where = ['tenant = @tenant'];
+    const params: Record<string, unknown> = { tenant, limit: opts.limit };
+    if (opts.workflowId !== undefined) { where.push('workflow_id = @workflow_id'); params['workflow_id'] = opts.workflowId; }
+    if (opts.status !== undefined) { where.push('status = @status'); params['status'] = opts.status; }
+    if (opts.after) { where.push('(created_at < @after_created OR (created_at = @after_created AND run_id < @after_run))'); params['after_created'] = opts.after.createdAt; params['after_run'] = opts.after.runId; }
+    return this.db.prepare(`SELECT * FROM runs WHERE ${where.join(' AND ')} ORDER BY created_at DESC, run_id DESC LIMIT @limit`).all(params) as RunRow[];
+  }
   updateRun(runId: string, patch: Partial<RunRow>): void {
     const keys = Object.keys(patch);
     if (keys.length === 0) return;

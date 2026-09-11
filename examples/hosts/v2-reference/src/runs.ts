@@ -5,6 +5,7 @@
  */
 import { EVENT_LOG_SCHEMA_VERSION, ENGINE_VERSION, HOST_ID } from './config.js';
 import { compensationProjection, compensationStatusOf, effectsProjection, effectSeamManifest } from './effects.js';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { err } from './errors.js';
 import { applyPinDisposition, requestCancel, requestPause, requestResume, resolveAndResume, scheduleRun } from './executor.js';
 import { ownerOf, parseStreamModes, pollResponse, readEvents, streamRun } from './events.js';
@@ -169,6 +170,56 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     const id = encodeURIComponent(wire);
     return { status: 201, body: { runId: wire, status: 'pending', eventsUrl: `${ctx.baseUrl}${prefix}/runs/${id}/events`, statusUrl: `${ctx.baseUrl}${prefix}/runs/${id}` } };
   });
+}
+
+/**
+ * RFC 0182 — `listRuns`: the caller's runs, newest first, keyset-paginated.
+ * Advertised as the `runList` family (discovery.ts): maxPageSize 100, filters
+ * workflowId + status. The cursor is `<created_at>|<run_id>|<hmac>` base64url,
+ * signed with a per-process key so a cursor this process did not mint is
+ * refused 400 validation_error (§A.3) rather than interpreted. Major 2 only —
+ * the operation never existed in v1 (RFC 0181 §Unresolved-1, corrected), so
+ * there is no /v1/ twin to keep through the overlap.
+ */
+const RUN_LIST_MAX_PAGE = 100;
+const RUN_LIST_STATUSES = new Set(['pending', 'running', 'paused', 'waiting-approval', 'waiting-input', 'waiting-external', 'completed', 'failed', 'cancelling', 'cancelled']);
+const CURSOR_KEY = randomBytes(32);
+function mintCursor(row: RunRow): string {
+  const payload = `${row.created_at}|${row.run_id}`;
+  const mac = createHmac('sha256', CURSOR_KEY).update(payload).digest('base64url');
+  return Buffer.from(`${payload}|${mac}`).toString('base64url');
+}
+function readCursor(raw: string): { createdAt: string; runId: string } {
+  let decoded = '';
+  try { decoded = Buffer.from(raw, 'base64url').toString('utf8'); } catch { /* fall through */ }
+  const parts = decoded.split('|');
+  if (parts.length !== 3) throw err('validation_error', 'cursor is not one this host minted', { field: 'cursor' });
+  const [createdAt, runId, mac] = parts as [string, string, string];
+  const expect = createHmac('sha256', CURSOR_KEY).update(`${createdAt}|${runId}`).digest('base64url');
+  if (mac.length !== expect.length || !timingSafeEqual(Buffer.from(mac), Buffer.from(expect))) throw err('validation_error', 'cursor is not one this host minted', { field: 'cursor' });
+  return { createdAt, runId };
+}
+async function listRuns(ctx: Ctx): Promise<Reply> {
+  const tenant = ctx.subject?.tenant ?? ctx.host.config.tenant;
+  const q = ctx.url.searchParams;
+  const limitRaw = q.get('limit');
+  let limit = RUN_LIST_MAX_PAGE;
+  if (limitRaw !== null) {
+    if (!/^[1-9]\d*$/.test(limitRaw)) throw err('validation_error', 'limit MUST be an integer >= 1', { field: 'limit' });
+    limit = Math.min(Number(limitRaw), RUN_LIST_MAX_PAGE);
+  }
+  const workflowId = q.get('workflowId') ?? undefined;
+  if (workflowId !== undefined && !WORKFLOW_ID.test(workflowId)) throw err('validation_error', 'workflowId does not match the workflowId grammar', { field: 'workflowId' });
+  const status = q.get('status') ?? undefined;
+  if (status !== undefined && !RUN_LIST_STATUSES.has(status)) throw err('validation_error', 'status is not a RunSnapshot status', { field: 'status' });
+  const cursorRaw = q.get('cursor');
+  const after = cursorRaw !== null ? readCursor(cursorRaw) : undefined;
+  // Fetch one extra row to learn whether a next page exists without a second query.
+  const rows = ctx.host.store.listRuns(tenant, { limit: limit + 1, ...(after ? { after } : {}), ...(workflowId !== undefined ? { workflowId } : {}), ...(status !== undefined ? { status } : {}) });
+  const page = rows.slice(0, limit);
+  const body: Record<string, unknown> = { runs: page.map((run) => ({ ...snapshot(ctx.host, applyPinDisposition(ctx.host, run)), runId: run.run_id })) };
+  if (rows.length > limit && page.length > 0) body['nextCursor'] = mintCursor(page[page.length - 1] as RunRow);
+  return { status: 200, body };
 }
 
 async function getRun(ctx: Ctx): Promise<Reply> {
@@ -418,6 +469,7 @@ export function runRoutes(): Route[] {
   return [
     route('GET', '/workflows/{workflowId}', true, getWorkflow),
     route('POST', '/runs', true, createRun),
+    route('GET', '/runs', true, listRuns, 2),
     route('POST', '/runs:bulk-cancel', true, bulkCancel),
     route('GET', '/runs/{runId}', true, getRun),
     route('GET', '/runs/{runId}/events', true, stream),
