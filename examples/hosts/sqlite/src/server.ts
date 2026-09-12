@@ -255,6 +255,34 @@ db.exec(`
   );
 `);
 
+/**
+ * The two run-document version axes (`spec/v1/version-negotiation.md` §Stamping).
+ *
+ * *"Every persisted run document MUST carry an `engineVersion: number` field set
+ * to the writer engine's `CURRENT_ENGINE_VERSION` constant at write time"* and
+ * *"Every persisted run document MUST carry an `eventLogSchemaVersion: number`
+ * field. The current v1 value is `2`."*
+ *
+ * This host stamped NEITHER, on any run it ever served, and the Conformance Soak
+ * was red on every push from 2026-09-04 to 2026-09-12 saying so. Nothing else
+ * could see it: `run-snapshot.schema.json` requires only `runId`, `workflowId`
+ * and `status`, so an unstamped snapshot validates cleanly, and before
+ * `era-key-stamped-v1` landed the sole occurrence of the identifier
+ * `eventLogSchemaVersion` across 444 v1 scenario files was a docstring
+ * describing a check that did not exist.
+ *
+ * Stamped at WRITE time into the row, not synthesised in the response. A host
+ * that computed these on read would pass the scenario while persisting nothing
+ * — a green step that never asked the thing it reported on, inside the fix for
+ * one. `engineVersion` is `number` per `run-snapshot.schema.json` (type
+ * corrected 2026-09-04; the `string` in §"The engineVersion axis is split" is
+ * stale prose) and `eventLogSchemaVersion` is `integer, minimum 0` — `0` is
+ * deliberate, because §Legacy detection defines a legacy run as one whose value
+ * is "undefined or < 2".
+ */
+const CURRENT_ENGINE_VERSION = 1;
+const CURRENT_EVENT_LOG_SCHEMA_VERSION = 2;
+
 // Idempotent migration: older DBs may lack newer columns on `runs`.
 const runColumns = db
   .prepare("PRAGMA table_info('runs')")
@@ -269,6 +297,42 @@ if (!runColNames.has('parent_run_id')) {
 if (!runColNames.has('parent_node_id')) {
   db.exec("ALTER TABLE runs ADD COLUMN parent_node_id TEXT");
 }
+if (!runColNames.has('engine_version')) {
+  // Deliberately nullable with no back-fill: a row written before this column
+  // existed IS a legacy run, and §Stamping's "Servers MAY omit this field on
+  // legacy runs that predate the contract" is exactly that case. Back-filling
+  // today's constant onto runs an older engine wrote would be a lie that reads
+  // as compliance.
+  db.exec('ALTER TABLE runs ADD COLUMN engine_version INTEGER');
+}
+if (!runColNames.has('event_log_schema_version')) {
+  // Same: absent (or < 2) is how §Legacy detection identifies a legacy run, so
+  // pre-existing rows stay NULL and are projected as absent.
+  db.exec('ALTER TABLE runs ADD COLUMN event_log_schema_version INTEGER');
+}
+// §Stamping: *"Host implementations SHOULD define a single
+// `CURRENT_ENGINE_VERSION` constant and stamp every write through the run
+// persistence layer."* A trigger IS the persistence layer, and it is why this
+// is not three edits at three `INSERT INTO runs` sites: a stamp applied at the
+// call sites someone enumerated has the same shape as a guard that covers the
+// paths where a bug was found rather than every path that writes. The next
+// INSERT anyone adds is stamped without knowing this rule exists.
+//
+// `WHERE ... IS NULL` so an explicit value always wins, and the trigger never
+// touches a row it did not just create — pre-existing rows stay NULL and stay
+// legacy.
+db.exec(`
+  DROP TRIGGER IF EXISTS runs_stamp_versions;
+  CREATE TRIGGER runs_stamp_versions AFTER INSERT ON runs
+  BEGIN
+    UPDATE runs
+       SET engine_version = COALESCE(NEW.engine_version, ${CURRENT_ENGINE_VERSION}),
+           event_log_schema_version = COALESCE(NEW.event_log_schema_version, ${CURRENT_EVENT_LOG_SCHEMA_VERSION})
+     WHERE run_id = NEW.run_id
+       AND (engine_version IS NULL OR event_log_schema_version IS NULL);
+  END;
+`);
+
 if (!runColNames.has('configurable_json')) {
   // run-options.md §"configurable" overlay. Persisting it lets the
   // executor honor caps like `recursionLimit` (cap-breach scenario)
@@ -449,6 +513,8 @@ interface RunRow {
   parent_node_id: string | null;
   configurable_json: string | null;
   variables_json: string | null;
+  engine_version: number | null;
+  event_log_schema_version: number | null;
 }
 
 /**
@@ -2440,6 +2506,17 @@ function handleGetRun(req: IncomingMessage, res: ServerResponse, runId: string):
     variables: row.variables_json ? JSON.parse(row.variables_json) : {},
     startedAt: row.started_at,
     endedAt: row.ended_at,
+    // version-negotiation.md §Stamping — both axes, projected from the row the
+    // trigger stamped at write time. Omitted (not defaulted) when NULL: that is
+    // a legacy run, and §Legacy detection identifies one by `eventLogSchemaVersion`
+    // being "undefined or < 2", so inventing a value here would erase the very
+    // signal the reader needs.
+    ...(row.engine_version !== null && row.engine_version !== undefined
+      ? { engineVersion: row.engine_version }
+      : {}),
+    ...(row.event_log_schema_version !== null && row.event_log_schema_version !== undefined
+      ? { eventLogSchemaVersion: row.event_log_schema_version }
+      : {}),
     ...(row.error_json ? { error: JSON.parse(row.error_json) } : {}),
     ...(currentNodeId ? { currentNodeId } : {}),
     ...(interrupt ? { interrupt } : {}),
