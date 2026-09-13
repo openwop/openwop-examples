@@ -98,10 +98,36 @@ interface RunEvent {
   readonly timestamp: string;
 }
 
+/**
+ * The two run-document version axes (`spec/v1/version-negotiation.md`
+ * §Stamping): *"Every persisted run document MUST carry an `engineVersion:
+ * number` field set to the writer engine's `CURRENT_ENGINE_VERSION` constant at
+ * write time"* and *"Every persisted run document MUST carry an
+ * `eventLogSchemaVersion: number` field. The current v1 value is `2`."*
+ *
+ * This host stamped NEITHER, and unlike the SQLite host nothing ever said so:
+ * the Conformance Soak runs `era-key-stamped-v1` against SQLite only, and this
+ * host's job in that workflow is the RFC 0013 expansion drift guard. So the
+ * defect here was not a red anybody was ignoring — it was a red that did not
+ * exist, on a reference host, for a v1 MUST. Named as a coverage gap when the
+ * SQLite host was fixed on 2026-09-13 and closed here rather than left as one.
+ *
+ * Stamped into the run record at creation, not computed in the response: a host
+ * that synthesises these on read passes the scenario while persisting nothing.
+ * `engineVersion` is `number` per `run-snapshot.schema.json` (type corrected
+ * 2026-09-04) and `eventLogSchemaVersion` is `integer, minimum 0` — `0` is
+ * deliberate, because §Legacy detection identifies a legacy run by that value
+ * being "undefined or < 2".
+ */
+const CURRENT_ENGINE_VERSION = 1;
+const CURRENT_EVENT_LOG_SCHEMA_VERSION = 2;
+
 interface Run {
   runId: string;
   workflowId: string;
   status: RunStatus;
+  engineVersion: number;
+  eventLogSchemaVersion: number;
   inputs: Record<string, unknown>;
   events: RunEvent[];
   startedAt: string;
@@ -1929,6 +1955,10 @@ async function handleCreateRun(req: IncomingMessage, res: ServerResponse): Promi
     startedAt: new Date().toISOString(),
     endedAt: null,
     error: null,
+    // version-negotiation.md §Stamping — stamped at WRITE time from the
+    // constants, so the value in the record is the one the writer used.
+    engineVersion: CURRENT_ENGINE_VERSION,
+    eventLogSchemaVersion: CURRENT_EVENT_LOG_SCHEMA_VERSION,
     cancelRequested: false,
     abortController: new AbortController(),
     runTimeoutMs: resolvedRunTimeoutMs,
@@ -1997,6 +2027,11 @@ function handleGetRun(req: IncomingMessage, res: ServerResponse, runId: string):
     runId: run.runId,
     workflowId: run.workflowId,
     status: run.status,
+    // Projected from the record the writer stamped (version-negotiation.md
+    // §Stamping). Not defaulted here: a value invented on read would satisfy
+    // the check while the document carried nothing.
+    engineVersion: run.engineVersion,
+    eventLogSchemaVersion: run.eventLogSchemaVersion,
     inputs: run.inputs,
     startedAt: run.startedAt,
     endedAt: run.endedAt,
