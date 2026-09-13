@@ -1,6 +1,22 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-05, `@openwop/openwop-conformance@2.0.0-rc.61` + `@openwop/spec-artifacts@2.0.0-rc.61` (npm, corpus stamp VERIFIED), `--target-major 2 --max-workers 4`, **72** scenario files.** Host `openwop-host-v2-reference@2.0.0-rc.1`, build `commit:d029f8fe320eaa68df702f3fa110f782d1f02415`, local boot on port 3839, fresh store, one run; the bundle's `discovery.url` names that port and its `signature.keyId` the rotated key — asserted by the cut script before the artifact is kept (see the superseded measurement below for why). Route-level harness 21 / 21.
+> **Measurement — 2026-09-13, `@openwop/openwop-conformance@2.1.5` + `@openwop/spec-artifacts@2.1.5` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, **74** scenario files.** Host `openwop-host-v2-reference`, build `commit:0db8e18706214462ee3022ca9fc2b35d05956e3b`.
+>
+> **RFC 0148 §A dispositions (231 rows, 1606 assertions): executed-pass 187 · executed-fail 0 · blocked 0 · inapplicable 44 · skipped 0.** `claimedProfiles` = `openwop-discovery-core` (witnessCount 3, **certified**), `openwop-core-standard` (witnessCount **13**, **certified**), `openwop-conformance-seams-v2` (witnessCount 4, **certified**).
+>
+> **Signed bundle: [`bundle-v3.json`](./bundle-v3.json)** — `witnessSha256` **`c7ace8376d37...`**, Ed25519 under `v2-reference-2` (`keys/host.pub.pem`). `check-cut-gates.mjs --host-bundle` against the 2.1.5 corpus: **all ten predicate groups PASS, 0 failed 0 blocked, exit 0** (Identity, Registers, Closure, Deprecation, Paths, Codemods, Waiver, Witness, Coexistence, Front door).
+>
+> **Why this re-cut happened, and it is the point of it.** The previous row measured `2.0.0-rc.61` on 2026-09-05 and stood while the suite moved **sixty-plus releases** — through the `v2.0.0` tag and on to 2.1.5. Nothing was wrong with it: it was accurate for the suite that ran it, which is exactly what `INTEROP-MATRIX.md` asks of a row. But `check-cut-gates`s `suiteVersionCheck` asks a different question — *"did this bundle run everything this corpus now requires of a host at its major"* — and a row that cannot answer that is not a neutral default. The reference host held the stalest row of the three while its steward was telling two production hosts that staleness costs something. This is that advice taken.
+>
+> **What the re-cut measured that rc.61 could not.** `runList` (RFC 0182, a family that did not exist at rc.61), the single-major branch of `v2-version-header-honored` (2.1.2), the self-describing replay terminal detail (2.1.4), and 74 scenario files against rc.61s 72.
+>
+> **`skipped 0` is supplied, not lucky.** `0176.pinned-run-disposition.continued` records `skipped` unless the operator names a change id the host implements — *"no normative surface lists the change ids a host implements"* — so this cut sets `OPENWOP_IMPLEMENTED_CHANGE_IDS=v2-reference-change-1` on the host and `OPENWOP_TEST_IMPLEMENTED_CHANGE_ID=v2-reference-change-1` on the runner. **Both are required to reproduce these totals**; without them the same run is `executed-pass 186 · skipped 1` and still certifies all three profiles.
+>
+> **The 44 inapplicable rows:** optional families this host does not advertise (`a2a`, `mcp`, `saml`, `scim`, packs), each recorded with its reason by `behaviorGate` / `softSkip`, plus the corpus-ledger row.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-05, `@openwop/openwop-conformance@2.0.0-rc.61` + `@openwop/spec-artifacts@2.0.0-rc.61` (npm, corpus stamp VERIFIED), `--target-major 2 --max-workers 4`, **72** scenario files.** Host `openwop-host-v2-reference@2.0.0-rc.1`, build `commit:d029f8fe320eaa68df702f3fa110f782d1f02415`, local boot on port 3839, fresh store, one run; the bundle's `discovery.url` names that port and its `signature.keyId` the rotated key — asserted by the cut script before the artifact is kept (see the superseded measurement below for why). Route-level harness 21 / 21.
 >
 > **RFC 0148 §A dispositions (223 rows, 1551 assertions): executed-pass 181 · executed-fail 0 · blocked 0 · inapplicable 42 · skipped 0.** `claimedProfiles` = `openwop-discovery-core` (witnessCount 3, **certified**), `openwop-core-standard` (witnessCount **13**, **certified**), `openwop-conformance-seams-v2` (witnessCount 4, **certified**) — every profile it claims, for the third consecutive cut. The two rows added since rc.59 are rc.60's `v2-run-fork-prefix` (the unaided fork-boundary witness: this host is exclusive and passes it) and rc.61's `kind: other` note assertion on the effect-seam manifest (vacuous here — this host declares no `other` row).
 >
