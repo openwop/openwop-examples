@@ -9,7 +9,7 @@
  * Both carry a standard ETag and honour If-None-Match with 304.
  */
 import { createHash, createPublicKey } from 'node:crypto';
-import { ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, EXTENSION_ORG, HOST_ID, HOST_NAME, HOST_VENDOR, HOST_VERSION, MIN_CLIENT_VERSION, PROTOCOL_VERSIONS, SEAMS_PROFILE_ID, BUNDLE_SIGNING_KEY_ID, KEYS_DIR, SESSION_ISSUER, API_KEY_ISSUER, V1_VERSION } from './config.js';
+import { SERVED_VERSIONS, V1_RETIRED, ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, EXTENSION_ORG, HOST_ID, HOST_NAME, HOST_VENDOR, HOST_VERSION, MIN_CLIENT_VERSION, PROTOCOL_VERSIONS, SEAMS_PROFILE_ID, BUNDLE_SIGNING_KEY_ID, KEYS_DIR, SESSION_ISSUER, API_KEY_ISSUER, V1_VERSION } from './config.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Host } from './host.js';
@@ -60,7 +60,7 @@ export function v2Document(host: Host): Record<string, unknown> {
   const record = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'experimental', since: SINCE, until: EXPERIMENTAL_UNTIL, witness, ...facets });
   const stable = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'stable', since: SINCE, witness, ...facets });
   const doc: Record<string, unknown> = {
-    protocolVersions: [...PROTOCOL_VERSIONS],
+    protocolVersions: [...SERVED_VERSIONS],
     preferredVersion: c.preferredVersion,
     minClientVersion: MIN_CLIENT_VERSION,
     implementation: { name: HOST_NAME, version: HOST_VERSION, vendor: HOST_VENDOR },
@@ -108,7 +108,7 @@ export function v1Document(host: Host): Record<string, unknown> {
   const c = host.config;
   return {
     protocolVersion: V1_VERSION,
-    protocolVersions: [...PROTOCOL_VERSIONS],
+    protocolVersions: [...SERVED_VERSIONS],
     preferredVersion: c.preferredVersion,
     minClientVersion: MIN_CLIENT_VERSION,
     implementation: { name: HOST_NAME, version: HOST_VERSION, vendor: HOST_VENDOR },

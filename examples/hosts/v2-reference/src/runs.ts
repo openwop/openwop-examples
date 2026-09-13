@@ -3,7 +3,7 @@
  * keeps through the overlap (versioning.md §1.2). Handlers only; the loop is
  * executor.ts, the fork is replay.ts, the projections are effects.ts.
  */
-import { EVENT_LOG_SCHEMA_VERSION, ENGINE_VERSION, HOST_ID } from './config.js';
+import { EVENT_LOG_SCHEMA_VERSION, ENGINE_VERSION, HOST_ID, V1_RETIRED } from './config.js';
 import { compensationProjection, compensationStatusOf, effectsProjection, effectSeamManifest } from './effects.js';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { err } from './errors.js';
@@ -110,6 +110,15 @@ export function loadRun(ctx: Ctx, runId: string): RunRow {
   // client that holds a v1-minted id reaches the same run through the overlap
   // (versioning.md §5) — resolved under the CALLER's tenant, never another's,
   // so identity.md §5's 403 check has nothing to read and nothing to protect.
+  // identity.md §5: the bare form rides the overlap and dies with it. *"Once a
+  // host advertises no `1.x` member it MUST refuse the bare form `400
+  // validation_error`"* — there is no longer a v1 spelling for it to be the
+  // spelling OF, and admitting it would keep alive a class of identifier on
+  // which the tenant-bound `403 id_tenant_mismatch` check structurally cannot
+  // run. Refused at the seam rather than resolved leniently.
+  if (V1_RETIRED && !runId.includes('/')) {
+    throw err('validation_error', 'a bare run id is the v1 spelling and this host no longer advertises a 1.x member; use the tenant-bound form <tenantId>/<id> (identity.md §5)', { runId });
+  }
   const id = runId.includes('/') ? runId : `${tenant}/${runId}`;
   checkTenantBound(id, tenant, 'runId');
   const run = ctx.host.store.getRun(id);

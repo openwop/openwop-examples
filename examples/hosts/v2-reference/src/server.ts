@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadArtifacts } from './artifacts.js';
-import { loadConfig, type HostConfig, PKG_ROOT, V1_VERSION, V2_VERSION } from './config.js';
+import { loadConfig, type HostConfig, PKG_ROOT, V1_VERSION, V2_VERSION, SERVED_VERSIONS, V1_RETIRED } from './config.js';
 import { etagOf, v1Document, v2Document } from './discovery.js';
 import { err } from './errors.js';
 import { ensureDefaultCredential } from './identity.js';
@@ -169,7 +169,7 @@ const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fil
 if (isMain) {
   startHost().then((running) => {
     const c = running.host.config;
-    process.stdout.write(`openwop-host-v2-reference listening on http://${c.host}:${running.port} (protocolVersions ${V1_VERSION}, ${V2_VERSION}; preferredVersion ${c.preferredVersion}; db ${c.dbPath}; fixtures ${running.host.workflows.size}; seams ${c.seamsProfile ? 'mounted' : 'off'}; spec-artifacts ${running.host.artifacts.version})\n`);
+    process.stdout.write(`openwop-host-v2-reference listening on http://${c.host}:${running.port} (protocolVersions ${SERVED_VERSIONS.join(', ')}; preferredVersion ${c.preferredVersion}${V1_RETIRED ? ' — V1 RETIRED' : ''}; db ${c.dbPath}; fixtures ${running.host.workflows.size}; seams ${c.seamsProfile ? 'mounted' : 'off'}; spec-artifacts ${running.host.artifacts.version})\n`);
     const stop = (): void => { void running.close().then(() => process.exit(0)); };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);

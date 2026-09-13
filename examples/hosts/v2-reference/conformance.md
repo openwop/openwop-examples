@@ -1,6 +1,6 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-13, `@openwop/openwop-conformance@2.1.5` + `@openwop/spec-artifacts@2.1.5` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, **74** scenario files.** Host `openwop-host-v2-reference`, build `commit:0db8e18706214462ee3022ca9fc2b35d05956e3b`.
+> **Measurement — 2026-09-13, `@openwop/openwop-conformance@2.1.6` + `@openwop/spec-artifacts@2.1.6` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, **74** scenario files.** Host `openwop-host-v2-reference`, build `commit:0db8e18706214462ee3022ca9fc2b35d05956e3b`.
 >
 > **RFC 0148 §A dispositions (231 rows, 1606 assertions): executed-pass 187 · executed-fail 0 · blocked 0 · inapplicable 44 · skipped 0.** `claimedProfiles` = `openwop-discovery-core` (witnessCount 3, **certified**), `openwop-core-standard` (witnessCount **13**, **certified**), `openwop-conformance-seams-v2` (witnessCount 4, **certified**).
 >
