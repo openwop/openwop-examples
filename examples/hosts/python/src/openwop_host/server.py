@@ -593,6 +593,10 @@ def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
                 "runId": run.run_id,
                 "workflowId": run.workflow_id,
                 "status": run.status,
+                # Projected from the record the writer stamped
+                # (version-negotiation.md §Stamping), never defaulted here.
+                "engineVersion": run.engine_version,
+                "eventLogSchemaVersion": run.event_log_schema_version,
                 "inputs": run.inputs,
                 "startedAt": run.started_at,
                 "endedAt": run.ended_at,
