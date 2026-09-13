@@ -58,6 +58,59 @@ jobs:
       - name: Conformance (target major 2)
         if: steps.peers.outputs.published == 'true'
         run: npx openwop-conformance --base-url http://127.0.0.1:3838 --api-key openwop-v2-dev-key --target-major 2 --require-behavior --max-workers 4
+      # ── The retirement lane ────────────────────────────────────────────
+      #
+      # Every host passes through the v1-retired state exactly once, at the end
+      # of the overlap, and until 2026-09-13 no host had ever been MEASURED in
+      # it except one tier-2 throwaway service. That single rehearsal found a
+      # suite defect a dual-stack host cannot surface —
+      # `v2-version-header-honored` failed a CONFORMANT single-major host,
+      # fixed in suite 2.1.2 — and produced the first real answer to what going
+      # v2-only costs. Without a continuous instrument, the first host through
+      # the door in December is the one that discovers whatever else is there.
+      #
+      # This leg is that instrument. It boots the SAME host with one flag and
+      # runs the SAME major-2 suite, so a difference between the two legs is a
+      # difference retirement makes and nothing else.
+      #
+      # It earned its place on its first run: it failed
+      # `v2-compensation-read-projection`, whose unknown-run probe used a BARE
+      # run id — the v1 spelling, which `identity.md` §5 requires a retired host
+      # to refuse `400 validation_error`. The probe asked about shape and never
+      # reached the existence check it asserted. Suite 2.1.6 fixed the probe;
+      # the host was right.
+      - name: Stop the overlap host
+        if: steps.peers.outputs.published == 'true'
+        run: pkill -f 'tsx src/server.ts' || true
+      - name: Start the host with v1 RETIRED
+        id: retired
+        if: steps.peers.outputs.published == 'true'
+        env:
+          OPENWOP_V1_RETIRED: '1'
+          OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'
+          OPENWOP_PORT: '3839'
+          OPENWOP_DB_PATH: /tmp/v2-reference-retired.sqlite
+        run: |
+          npm start > /tmp/v2-reference-retired.log 2>&1 &
+          for i in {1..30}; do curl -sf http://127.0.0.1:3839/.well-known/openwop >/dev/null && break; sleep 1; done
+          # Assert the ATOMIC SET before running a suite against it. A lane that
+          # boots a host it has not checked is retired would report the overlap
+          # twice and call it coverage.
+          set -euo pipefail
+          adv=$(curl -sf http://127.0.0.1:3839/.well-known/openwop | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);console.log(JSON.stringify(d.protocolVersions)+" "+d.preferredVersion)})')
+          test "$adv" = '["2.0"] 2.0' || { echo "::error::retired host advertises $adv, expected [\"2.0\"] 2.0"; cat /tmp/v2-reference-retired.log; exit 1; }
+          v1hdr=$(curl -s -o /dev/null -w '%{http_code}' -H 'OpenWOP-Version: 1' http://127.0.0.1:3839/.well-known/openwop)
+          test "$v1hdr" = '406' || { echo "::error::OpenWOP-Version: 1 answered $v1hdr, expected 406 (versioning.md §1.3 row 2)"; exit 1; }
+          v1path=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer openwop-v2-dev-key' http://127.0.0.1:3839/v1/runs)
+          test "$v1path" = '404' || { echo "::error::a /v1 path answered $v1path, expected 404 (the path space retires atomically, versioning.md §5)"; exit 1; }
+          echo "retired host verified: protocolVersions [\"2.0\"], header 1 -> 406, /v1 -> 404"
+      - name: Conformance with v1 retired (target major 2)
+        if: steps.peers.outputs.published == 'true'
+        run: npx openwop-conformance --base-url http://127.0.0.1:3839 --api-key openwop-v2-dev-key --target-major 2 --require-behavior --max-workers 4
+      - name: Retired host log on failure
+        if: failure()
+        run: cat /tmp/v2-reference-retired.log || true
+
       - name: Host log on failure
         if: failure()
         run: cat /tmp/v2-reference.log || true

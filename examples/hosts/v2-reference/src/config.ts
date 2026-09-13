@@ -39,6 +39,31 @@ function envBool(name: string, fallback: boolean): boolean {
 export const V1_VERSION = '1.11';
 export const V2_VERSION = '2.0';
 export const PROTOCOL_VERSIONS: readonly string[] = [V1_VERSION, V2_VERSION];
+
+/**
+ * Retirement is ONE flag, and every consequence is derived from it.
+ *
+ * `versioning.md` §5: *"Retirement is atomic, and that is a consequence of §1.1
+ * rather than a separate rule."* Through the overlap `preferredVersion` MUST
+ * name a `1.x` member, so dropping v1 from `protocolVersions[]` and flipping
+ * the preference are the same act — *"there is no legal intermediate state"*.
+ * A host that exposes them as separate switches has made an illegal state
+ * reachable by configuration, so this host exposes one.
+ *
+ * WHY THIS EXISTS AT ALL. Every host passes through the retired state exactly
+ * once, in December, and until 2026-09-13 no host had ever been MEASURED in it
+ * except a tier-2 host's throwaway Cloud Run lane. That single rehearsal found
+ * a suite defect — `v2-version-header-honored` failed a *conformant*
+ * single-major host, fixed in suite 2.1.2 — which no dual-stack host could
+ * have surfaced, and it produced the first real answer to "what does going
+ * v2-only cost" (11 rows, every one of them a test OF the overlap). Without a
+ * continuous instrument, the first host through the door in December is the
+ * one that discovers whatever else is there. This is that instrument.
+ */
+export const V1_RETIRED = envBool('OPENWOP_V1_RETIRED', false);
+
+/** The advertised set. Retirement drops the `1.x` member; nothing else may. */
+export const SERVED_VERSIONS: readonly string[] = V1_RETIRED ? [V2_VERSION] : PROTOCOL_VERSIONS;
 export const ENGINE_VERSION = 1;
 export const EVENT_LOG_SCHEMA_VERSION = 3;
 export const EVENT_SCHEMA_VERSION = 1;
@@ -97,9 +122,19 @@ export interface HostConfig {
 }
 
 export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
-  const preferred = env('OPENWOP_PREFERRED_VERSION', V1_VERSION);
-  if (!PROTOCOL_VERSIONS.includes(preferred)) {
-    throw new Error(`OPENWOP_PREFERRED_VERSION must be one of ${PROTOCOL_VERSIONS.join(', ')} (got ${preferred})`);
+  // Derived, not independently settable: §1.1 binds preferredVersion to a 1.x
+  // member while one is advertised, and to the single major once it is not.
+  // Honouring an explicit v1 preference under retirement would manufacture the
+  // illegal intermediate state §5 says does not exist, so it is refused rather
+  // than silently overridden — a config that lies is worse than one that stops.
+  const preferred = V1_RETIRED ? V2_VERSION : env('OPENWOP_PREFERRED_VERSION', V1_VERSION);
+  if (V1_RETIRED && env('OPENWOP_PREFERRED_VERSION', V2_VERSION) !== V2_VERSION) {
+    throw new Error(
+      `OPENWOP_V1_RETIRED=1 and OPENWOP_PREFERRED_VERSION=${env('OPENWOP_PREFERRED_VERSION', '')} cannot both hold: versioning.md §1.1 requires preferredVersion to name the single advertised major once 1.x is dropped`,
+    );
+  }
+  if (!SERVED_VERSIONS.includes(preferred)) {
+    throw new Error(`OPENWOP_PREFERRED_VERSION must be one of ${SERVED_VERSIONS.join(', ')} (got ${preferred})`);
   }
   const build = /^(commit|image-digest|artifact-sha256):(.+)$/.exec(env('OPENWOP_HOST_BUILD', 'commit:dev'));
   const validate = env('OPENWOP_DEV_VALIDATE', process.env['NODE_ENV'] === 'production' ? 'off' : 'warn');

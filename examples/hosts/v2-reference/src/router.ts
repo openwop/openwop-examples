@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { MIN_CLIENT_VERSION, PROTOCOL_VERSIONS, V1_VERSION, V2_VERSION } from './config.js';
+import { MIN_CLIENT_VERSION, SERVED_VERSIONS, V1_RETIRED, V1_VERSION, V2_VERSION } from './config.js';
 import { HostError, err } from './errors.js';
 import { authenticate } from './identity.js';
 import { IDEMPOTENCY_KEY } from './ids.js';
@@ -110,8 +110,14 @@ export class Router {
 
     // The contract this request is served under — decided before anything else so
     // even a refusal names it (versioning.md §1.4).
+    // Under retirement there is exactly one major, so every request is served
+    // under it — including a `/v1/…` path, which then finds no route and falls
+    // to the 404 below rather than being served a contract this host no longer
+    // advertises. `OpenWOP-Version: 1` names a major not in protocolVersions[]
+    // and is refused 406 further down (§1.3 row 2), not quietly honoured.
     let major: 1 | 2;
-    if (isV1Path) major = 1;
+    if (V1_RETIRED) major = 2;
+    else if (isV1Path) major = 1;
     else if (requested === 2) major = 2;
     else if (requested === 1) major = 1;
     else if (requested === null && !malformed) major = path === '/.well-known/openwop' ? (preferredMajor === 2 ? 2 : 1) : 2;
@@ -144,11 +150,17 @@ export class Router {
 
     try {
       if (malformed) throw err('validation_error', 'OpenWOP-Version MUST be <major> or <major>.<minor>', { header: 'OpenWOP-Version' });
-      if (isV1Path && requested !== null && requested !== 1) {
+      if (!V1_RETIRED && isV1Path && requested !== null && requested !== 1) {
         throw err('protocol_version_mismatch', 'a /v1/ path key MUST NOT carry OpenWOP-Version with a value other than 1', { requested, path: '/v1/' });
       }
-      if (!isV1Path && requested !== null && requested !== 1 && requested !== 2) {
-        throw err('protocol_version_unsupported', `major ${requested} is not served by this host`, { protocolVersions: [...PROTOCOL_VERSIONS] });
+      // §1.3 row 2: a header naming a major not in protocolVersions[] MUST be
+      // 406 with the list echoed. Reading the ADVERTISED set rather than the
+      // built-in constant is what makes `OpenWOP-Version: 1` a refusal under
+      // retirement instead of a silently honoured downgrade — the single
+      // behaviour a dual-stack host can never exercise.
+      const servedMajors = new Set(SERVED_VERSIONS.map((v) => Number(v.split('.')[0])));
+      if ((!isV1Path || V1_RETIRED) && requested !== null && !servedMajors.has(requested)) {
+        throw err('protocol_version_unsupported', `major ${requested} is not served by this host`, { protocolVersions: [...SERVED_VERSIONS] });
       }
       const client = req.headers['openwop-client-version'];
       if (typeof client === 'string' && client.trim() !== '') {
