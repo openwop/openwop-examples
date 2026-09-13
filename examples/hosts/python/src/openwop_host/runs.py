@@ -75,6 +75,26 @@ class RunEvent:
         return out
 
 
+# The two run-document version axes (`spec/v1/version-negotiation.md`
+# §Stamping): *"Every persisted run document MUST carry an `engineVersion:
+# number` field set to the writer engine's `CURRENT_ENGINE_VERSION` constant at
+# write time"* and *"Every persisted run document MUST carry an
+# `eventLogSchemaVersion: number` field. The current v1 value is `2`."*
+#
+# This host stamped NEITHER, and nothing measured it: the Conformance Soak runs
+# `era-key-stamped-v1` against the SQLite host only. The defect here was not a
+# red anybody ignored — it was a red that did not exist, on a reference host,
+# for a v1 MUST. Recorded as a coverage gap when SQLite and in-memory were
+# fixed (openwop-examples#42, #45) and closed here last.
+#
+# Defaulted on the dataclass so every construction path is stamped, rather than
+# added at the one call site someone enumerated; and read back from the record
+# in the snapshot, because a value computed in the response would satisfy the
+# check while the document carried nothing.
+CURRENT_ENGINE_VERSION = 1
+CURRENT_EVENT_LOG_SCHEMA_VERSION = 2
+
+
 @dataclass
 class Run:
     run_id: str
@@ -85,6 +105,9 @@ class Run:
     # `RunOptions.configurable` from the create-run request (run-options.md).
     # The executor reads `runTimeoutMs` (RFC 0058) from here.
     configurable: dict[str, Any] = field(default_factory=dict)
+    # version-negotiation.md §Stamping — the writer's constants, at write time.
+    engine_version: int = CURRENT_ENGINE_VERSION
+    event_log_schema_version: int = CURRENT_EVENT_LOG_SCHEMA_VERSION
     ended_at: str | None = None
     error: dict[str, str] | None = None
     cancel_requested: bool = False
