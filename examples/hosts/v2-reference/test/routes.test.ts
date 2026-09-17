@@ -479,10 +479,10 @@ describe('identity.md §5 bound-id path projection (RFC 0184) + per-contract del
     const bodies = hits.map((h) => JSON.parse(h.body) as { runId: string; event: { payload: { owner: Record<string, unknown> } } });
     const v2 = bodies.find((b) => b.runId === runId);
     const v1 = bodies.find((b) => b.runId === runId.slice(runId.indexOf('/') + 1));
-    expect(v2).toBeDefined(); expect(v1).toBeDefined();
-    expect(Object.keys(v2!.event.payload.owner).sort()).toEqual(['subject', 'tenant']);
-    expect('subject' in v1!.event.payload.owner).toBe(false);
-    expect(typeof v1!.event.payload.owner.principal).toBe('string');
+    if (!v2 || !v1) throw new Error(`expected one delivery per contract; got runIds ${bodies.map((b) => b.runId).join(', ')}`);
+    expect(Object.keys(v2.event.payload.owner).sort()).toEqual(['subject', 'tenant']);
+    expect('subject' in v1.event.payload.owner).toBe(false);
+    expect(typeof v1.event.payload.owner.principal).toBe('string');
     await call('DELETE', `/webhooks/${enc(regV2.b.webhookId)}`); await call('DELETE', `/v1/webhooks/${enc(regV1.b.webhookId)}`, undefined, { 'OpenWOP-Version': '1.0' });
     srv.close();
   });
