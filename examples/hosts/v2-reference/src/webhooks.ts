@@ -12,7 +12,7 @@ import { err } from './errors.js';
 import { nowIso, tenantBound } from './ids.js';
 import type { AppendedEvent, Host } from './host.js';
 import type { DeliveryRow, WebhookRow } from './store.js';
-import { docForMajor } from './codemap.js';
+import { docForMajor, v1TypeOf } from './codemap.js';
 
 export function sign(secret: string, timestamp: string, rawBody: string): string {
   return createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
@@ -25,16 +25,27 @@ export function registerWebhook(host: Host, tenant: string, body: Record<string,
   validateEgressUrl(body['url'], host.config.webhookAllowPrivate);
   const events = body['events'];
   if (!Array.isArray(events) || events.length === 0 || !events.every((e) => typeof e === 'string' && e.length > 0)) throw err('validation_error', 'events[] MUST be a non-empty array of v2 event type names');
-  for (const e of events as string[]) {
-    if (!host.artifacts.v2EventTypes.has(e) && !host.artifacts.vendorEventPattern.test(e)) throw err('validation_error', `${e} is not a registered v2 event type`, { type: e });
-  }
+  // A subscription registered under the 1.x contract names its types in v1
+  // spelling (persistence.md §The v1 wire of an era-3 log); stored as the v2
+  // name the codemap maps it to, so the fan-out matches one vocabulary.
+  const isVendor = (e: string): boolean => host.artifacts.vendorEventPattern.test(e);
+  const stored: string[] = (events as string[]).map((e) => {
+    if (major === 1) {
+      // The v1 wire knows v1 spellings only: a v2-only name (`run.resume-started`) is not a v1 event type.
+      const mapped = host.artifacts.codemap.get(e);
+      if (mapped === undefined && !isVendor(e)) throw err('validation_error', `${e} is not a registered v1 event type`, { type: e });
+      return mapped ?? e;
+    }
+    if (!host.artifacts.v2EventTypes.has(e) && !isVendor(e)) throw err('validation_error', `${e} is not a registered v2 event type`, { type: e });
+    return e;
+  });
   if (body['secret'] !== undefined && (typeof body['secret'] !== 'string' || body['secret'].length === 0)) throw err('validation_error', 'secret MUST be a non-empty string');
   if (body['tags'] !== undefined && (!Array.isArray(body['tags']) || !body['tags'].every((t) => typeof t === 'string'))) throw err('validation_error', 'tags MUST be a string array');
   const row: WebhookRow = {
     webhook_id: tenantBound(tenant),
     tenant,
     url: body['url'],
-    events_json: JSON.stringify(events),
+    events_json: JSON.stringify(stored),
     secret: typeof body['secret'] === 'string' ? body['secret'] : randomBytes(24).toString('base64url'),
     tags_json: Array.isArray(body['tags']) ? JSON.stringify(body['tags']) : null,
     contract_major: major,
@@ -94,16 +105,18 @@ async function attempt(host: Host, d: DeliveryRow): Promise<void> {
   if (!sub) { host.store.updateDelivery(d.delivery_id, { state: 'dead-lettered', last_error: 'subscription removed' }); return; }
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = `sha256=${sign(sub.secret, timestamp, d.body)}`;
+  // The type header is rendered in the subscriber's contract, like the body (persistence.md §The v1 wire of an era-3 log).
+  const wireType = sub.contract_major === 2 ? d.event_type : v1TypeOf(d.event_type);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'OpenWOP-Webhook-Id': sub.webhook_id,
-    'OpenWOP-Event-Type': d.event_type,
+    'OpenWOP-Event-Type': wireType,
     'OpenWOP-Timestamp': timestamp,
     'OpenWOP-Signature': signature,
     'OpenWOP-Signature-Algorithm': 'v1',
     // Dual emission through the overlap (RFC 0176 §D.2), identical values.
     'X-openwop-Webhook-Id': sub.webhook_id,
-    'X-openwop-Event-Type': d.event_type,
+    'X-openwop-Event-Type': wireType,
     'X-openwop-Timestamp': timestamp,
     'X-openwop-Signature': signature,
     'X-openwop-Signature-Algorithm': 'v1',

@@ -487,3 +487,40 @@ describe('identity.md §5 bound-id path projection (RFC 0184) + per-contract del
     srv.close();
   });
 });
+
+describe('persistence.md §The v1 wire of an era-3 log — a renamed type reads in v1 spelling on /v1/ and v2 spelling on the v2 surface', () => {
+  it('a seeded log carrying run.resuming reads as run.resume-started under major 2 and run.resuming under major 1, on poll, SSE and a 1.x webhook delivery', async () => {
+    const { createServer } = await import('node:http');
+    const hits: Array<{ headers: Record<string, string | string[] | undefined>; body: string }> = [];
+    const srv = createServer((req, res) => { let body = ''; req.on('data', (c: Buffer) => { body += c.toString(); }); req.on('end', () => { hits.push({ headers: req.headers as never, body }); res.writeHead(204); res.end(); }); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/hook`;
+    // A 1.x registration names the type in v1 spelling.
+    const regV1 = await call('POST', '/v1/webhooks', { url, events: ['run.resuming'] }, { 'OpenWOP-Version': '1.0' });
+    expect(regV1.s).toBe(201);
+    const bad = await call('POST', '/v1/webhooks', { url, events: ['run.resume-started'] }, { 'OpenWOP-Version': '1.0' });
+    expect(bad.s).toBe(400);
+    const ts = (i: number): string => new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString();
+    // The seam is a v2 surface (SEAMS_PREFIX); it seeds an era-2 log in v1 vocabulary.
+    const seeded = await call('POST', '/conformance/seams/sample/event-log/seed', { eventLogSchemaVersion: 2, status: 'completed', events: [
+      { type: 'run.started', sequence: 0, payload: { workflowId: 'conformance-noop' }, timestamp: ts(0) },
+      { type: 'run.resuming', sequence: 1, payload: {}, timestamp: ts(1) },
+      { type: 'run.completed', sequence: 2, payload: { outputs: {} }, timestamp: ts(2) },
+    ] });
+    expect(seeded.s).toBe(201);
+    const runId: string = seeded.b.runId;
+    const bare = runId.includes('/') ? runId.slice(runId.indexOf('/') + 1) : runId;
+    const v2 = await call('GET', `/runs/${enc(runId)}/events/poll`);
+    expect(v2.b.events.map((e: { type: string }) => e.type)).toContain('run.resume-started');
+    const v1 = await call('GET', `/v1/runs/${enc(bare)}/events/poll`, undefined, { 'OpenWOP-Version': '1.0' });
+    expect(v1.s).toBe(200);
+    expect(v1.b.events.map((e: { type: string }) => e.type)).toContain('run.resuming');
+    expect(v1.b.events.map((e: { type: string }) => e.type)).not.toContain('run.resume-started');
+    const sse = await fetch(`${B}/v1/runs/${enc(bare)}/events?streamMode=updates`, { headers: { ...H, 'OpenWOP-Version': '1.0' } });
+    const text = await sse.text();
+    expect(text).toContain('"type":"run.resuming"');
+    expect(text).not.toContain('run.resume-started');
+    await call('DELETE', `/v1/webhooks/${enc(regV1.b.webhookId)}`, undefined, { 'OpenWOP-Version': '1.0' });
+    srv.close();
+  });
+});

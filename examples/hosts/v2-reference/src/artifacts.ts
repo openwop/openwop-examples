@@ -23,6 +23,8 @@ export interface SpecArtifacts {
   readonly codemap: ReadonlyMap<string, string>;
   /** v2 → v1: the spelling an era-2 log stores (persistence.md §The writer rule). */
   readonly codemapV2toV1: ReadonlyMap<string, string>;
+  /** persistence.md §The v1 wire of an era-3 log — true when every row inverts exactly. */
+  readonly codemapBijective: boolean;
   /** Every registered v2 event type. */
   readonly v2EventTypes: ReadonlySet<string>;
   readonly vendorEventPattern: RegExp;
@@ -73,10 +75,15 @@ export function loadArtifacts(): SpecArtifacts {
   const codemapV2toV1 = new Map<string, string>();
   for (const r of codemapDoc.rows) {
     codemap.set(r.v1, r.v2);
-    // Several v1 names fold onto one v2 name (lease.*); the first row wins, and
-    // an identity row always maps to itself.
     if (!codemapV2toV1.has(r.v2) || r.v1 === r.v2) codemapV2toV1.set(r.v2, r.v1);
   }
+  // persistence.md §The v1 wire of an era-3 log: the inverse of a row is exact
+  // only while the codemap is a bijection, and a host MUST verify that at load
+  // rather than assume it. A fold (two v1 names onto one v2 name) makes the
+  // inverse a guess; the host then refuses the v1 representation (codemap.ts
+  // docForMajor) rather than emit a spelling the log never had.
+  const codemapBijective = new Set(codemapDoc.rows.map((r) => r.v1)).size === codemapDoc.rows.length
+    && new Set(codemapDoc.rows.map((r) => r.v2)).size === codemapDoc.rows.length;
   const v2EventTypes = new Set<string>(runEvent.properties.type.oneOf.flatMap((b) => b.enum ?? []));
   const vendorPattern = runEvent.properties.type.oneOf.find((b) => b.pattern !== undefined)?.pattern
     ?? '^(?!openwop\\.)[a-z][a-z0-9]*(-[a-z0-9]+)*\\.[a-z][a-z0-9]*(-[a-z0-9]+)*(\\.[a-z][a-z0-9]*(-[a-z0-9]+)*)?$';
@@ -93,6 +100,7 @@ export function loadArtifacts(): SpecArtifacts {
     vendorCodePattern: new RegExp(errorsDoc.vendorCodePattern),
     codemap,
     codemapV2toV1,
+    codemapBijective,
     v2EventTypes,
     vendorEventPattern: new RegExp(vendorPattern),
     familyKeys,
