@@ -97,6 +97,8 @@ export interface WebhookRow {
   events_json: string;
   secret: string;
   tags_json: string | null;
+  /** The contract major the subscriber registered under (webhooks.md §Delivery): the rendering it receives. Rows from before the column default to 1 — the wire they always received. */
+  contract_major: 1 | 2;
   created_at: string;
 }
 
@@ -239,6 +241,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
   events_json TEXT NOT NULL,
   secret TEXT NOT NULL,
   tags_json TEXT NULL,
+  contract_major INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS deliveries (
@@ -313,6 +316,9 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(DDL);
+    // A database created before subscriptions recorded their contract: add the column, defaulting to the major-1 rendering those rows always received.
+    const webhookColumns = (this.db.prepare('PRAGMA table_info(webhooks)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!webhookColumns.includes('contract_major')) this.db.exec('ALTER TABLE webhooks ADD COLUMN contract_major INTEGER NOT NULL DEFAULT 1');
   }
 
   close(): void {
@@ -425,7 +431,7 @@ export class Store {
 
   // ── webhooks ──────────────────────────────────────────────────────────────
   insertWebhook(row: WebhookRow): void {
-    this.db.prepare('INSERT INTO webhooks (webhook_id, tenant, url, events_json, secret, tags_json, created_at) VALUES (@webhook_id, @tenant, @url, @events_json, @secret, @tags_json, @created_at)').run(row);
+    this.db.prepare('INSERT INTO webhooks (webhook_id, tenant, url, events_json, secret, tags_json, contract_major, created_at) VALUES (@webhook_id, @tenant, @url, @events_json, @secret, @tags_json, @contract_major, @created_at)').run(row);
   }
   getWebhook(id: string): WebhookRow | undefined {
     return this.db.prepare('SELECT * FROM webhooks WHERE webhook_id = ?').get(id) as WebhookRow | undefined;

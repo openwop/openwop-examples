@@ -12,12 +12,13 @@ import { err } from './errors.js';
 import { nowIso, tenantBound } from './ids.js';
 import type { AppendedEvent, Host } from './host.js';
 import type { DeliveryRow, WebhookRow } from './store.js';
+import { docForMajor } from './codemap.js';
 
 export function sign(secret: string, timestamp: string, rawBody: string): string {
   return createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
 }
 
-export function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>): { webhookId: string } {
+export function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): { webhookId: string } {
   const allowed = new Set(['url', 'events', 'secret', 'tags']);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw err('validation_error', `unknown key ${k} — the registration body is closed { url, events[], secret?, tags? }`, { key: k });
   if (typeof body['url'] !== 'string') throw err('validation_error', 'url is REQUIRED');
@@ -36,6 +37,7 @@ export function registerWebhook(host: Host, tenant: string, body: Record<string,
     events_json: JSON.stringify(events),
     secret: typeof body['secret'] === 'string' ? body['secret'] : randomBytes(24).toString('base64url'),
     tags_json: Array.isArray(body['tags']) ? JSON.stringify(body['tags']) : null,
+    contract_major: major,
     created_at: nowIso(),
   };
   host.store.insertWebhook(row);
@@ -76,7 +78,12 @@ export function subscribeFanout(host: Host): void {
     for (const sub of host.store.webhooksForTenant(e.run.tenant)) {
       const types = JSON.parse(sub.events_json) as string[];
       if (!types.includes(e.doc.type) || !tagsOverlap(sub, runTags)) continue;
-      const body = JSON.stringify({ runId: e.run.runId, workspaceId: runRow?.owner_json ? ((JSON.parse(runRow.owner_json) as { workspace?: string }).workspace ?? 'default') : 'default', event: e.doc });
+      // webhooks.md §Delivery: `event` is the verbatim run event AS THE SUBSCRIBER'S CONTRACT RENDERS IT —
+      // the same projection poll and SSE apply (versioning.md §1.2); a major-1 subscription keeps the
+      // bare run id and the v1 owner echo it has always received.
+      const major = sub.contract_major === 2 ? 2 : 1;
+      const runId = major === 1 ? e.run.runId.slice(e.run.runId.indexOf('/') + 1) : e.run.runId;
+      const body = JSON.stringify({ runId, workspaceId: runRow?.owner_json ? ((JSON.parse(runRow.owner_json) as { workspace?: string }).workspace ?? 'default') : 'default', event: docForMajor(e.doc, major) });
       host.store.insertDelivery({ delivery_id: tenantBound(e.run.tenant), webhook_id: sub.webhook_id, tenant: e.run.tenant, run_id: e.run.runId, sequence: e.doc.sequence, event_type: e.doc.type, body, attempts: 0, next_at: Date.now(), state: 'pending', last_status: null, last_error: null, created_at: nowIso(), updated_at: nowIso() });
     }
   });

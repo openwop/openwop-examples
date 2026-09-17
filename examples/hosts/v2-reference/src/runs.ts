@@ -9,7 +9,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { err } from './errors.js';
 import { applyPinDisposition, requestCancel, requestPause, requestResume, resolveAndResume, scheduleRun } from './executor.js';
 import { ownerOf, parseStreamModes, pollResponse, readEvents, streamRun } from './events.js';
-import { checkTenantBound, nowIso, NODE_ID, tenantBound, VERSION, WORKFLOW_ID } from './ids.js';
+import { docForMajor, ownerForMajor } from './codemap.js';
+import { checkTenantBound, nowIso, NODE_ID, projectBoundId, tenantBound, VERSION, WORKFLOW_ID } from './ids.js';
 import { mintToken, payloadOf, verifyToken } from './interrupts.js';
 import { forkRun } from './replay.js';
 import { route, STREAMED, withIdempotency, type Ctx, type Reply, type Route } from './router.js';
@@ -50,6 +51,12 @@ export function validateConfigurable(c: unknown): void {
     if (k === 'ai' && ai['mockProvider'] !== undefined) throw err('mock_provider_forbidden', 'mockProvider is test-keys-only and this host advertises no mock provider');
     if (k === 'run' && ai['runTimeoutMs'] !== undefined && (!Number.isInteger(ai['runTimeoutMs']) || (ai['runTimeoutMs'] as number) < 1 || (ai['runTimeoutMs'] as number) > 600_000)) throw err('validation_error', 'run.runTimeoutMs is out of range (1..limits.maxRunDurationMs)');
   }
+}
+
+/** The snapshot as the caller's contract renders it — the owner echo is the one field that differs (codemap.ts ownerForMajor). */
+function snapshotForMajor(ctx: Ctx, run: RunRow): Record<string, unknown> {
+  const snap = snapshot(ctx.host, run);
+  return ctx.major === 1 ? { ...snap, owner: ownerForMajor(snap['owner'] as Record<string, unknown>, 1) } : snap;
 }
 
 export function snapshot(host: Host, run: RunRow): Record<string, unknown> {
@@ -176,7 +183,8 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     scheduleRun(ctx.host, run.run_id);
     const prefix = ctx.major === 1 ? '/v1' : '';
     const wire = wireRunId(ctx, run.run_id);
-    const id = encodeURIComponent(wire);
+    // identity.md §5: a link carries the tenant-bound id projected (`~2F`), never `%2F` — a front door may decode `%2F` and strand every follower.
+    const id = projectBoundId(wire);
     return { status: 201, body: { runId: wire, status: 'pending', eventsUrl: `${ctx.baseUrl}${prefix}/runs/${id}/events`, statusUrl: `${ctx.baseUrl}${prefix}/runs/${id}` } };
   });
 }
@@ -233,7 +241,7 @@ async function listRuns(ctx: Ctx): Promise<Reply> {
 
 async function getRun(ctx: Ctx): Promise<Reply> {
   const run = loadRun(ctx, ctx.params['runId'] as string);
-  const body = { ...snapshot(ctx.host, run), runId: wireRunId(ctx, run.run_id) };
+  const body = { ...snapshotForMajor(ctx, run), runId: wireRunId(ctx, run.run_id) };
   const etag = `"seq-${ctx.host.store.lastSequence(run.run_id)}-${run.status}"`;
   if (ctx.header('if-none-match') === etag) return { status: 304, headers: { ETag: etag } };
   return { status: 200, body, headers: { ETag: etag } };
@@ -260,7 +268,7 @@ async function poll(ctx: Ctx): Promise<Reply> {
     });
     body = pollResponse(ctx.host, run, after);
   }
-  return { status: 200, body };
+  return { status: 200, body: { ...body, runId: wireRunId(ctx, body.runId), events: body.events.map((d) => docForMajor(d, ctx.major)) } };
 }
 
 async function stream(ctx: Ctx): Promise<Reply | typeof STREAMED> {
@@ -271,7 +279,7 @@ async function stream(ctx: Ctx): Promise<Reply | typeof STREAMED> {
   const bufferRaw = ctx.url.searchParams.get('bufferMs');
   const bufferMs = bufferRaw === null ? 0 : Number(bufferRaw);
   if (!Number.isFinite(bufferMs) || bufferMs < 0 || bufferMs > 5000) throw err('validation_error', 'bufferMs is 0..5000');
-  streamRun(ctx.host, run, ctx.res, { modes, lastEventId, bufferMs, snapshot: () => snapshot(ctx.host, ctx.host.store.getRun(run.run_id) ?? run), headers: ctx.responseHeaders });
+  streamRun(ctx.host, run, ctx.res, { modes, lastEventId, bufferMs, snapshot: () => snapshotForMajor(ctx, ctx.host.store.getRun(run.run_id) ?? run), headers: ctx.responseHeaders, project: (doc) => docForMajor(doc, ctx.major) });
   return STREAMED;
 }
 
@@ -347,7 +355,7 @@ async function fork(ctx: Ctx): Promise<Reply> {
     const r = forkRun(ctx.host, run, body);
     const wire = wireRunId(ctx, r.runId);
     const prefix = ctx.major === 1 ? '/v1' : '';
-    return { status: 201, body: { ...r, runId: wire, eventsUrl: `${ctx.baseUrl}${prefix}/runs/${encodeURIComponent(wire)}/events` } };
+    return { status: 201, body: { ...r, runId: wire, eventsUrl: `${ctx.baseUrl}${prefix}/runs/${projectBoundId(wire)}/events` } };
   });
 }
 

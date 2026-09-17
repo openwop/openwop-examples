@@ -9,7 +9,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { MIN_CLIENT_VERSION, SERVED_VERSIONS, V1_RETIRED, V1_VERSION, V2_VERSION } from './config.js';
 import { HostError, err } from './errors.js';
 import { authenticate } from './identity.js';
-import { IDEMPOTENCY_KEY } from './ids.js';
+import { IDEMPOTENCY_KEY, unprojectBoundId } from './ids.js';
 import type { Host, Subject } from './host.js';
 
 export interface Reply {
@@ -50,6 +50,9 @@ export interface Route {
   /** `v1` routes serve the 1.x contract; everything else is the 2.x surface. */
   readonly contract?: 1 | 2 | 'both';
 }
+
+/** The path parameters that carry a tenant-bound id (identity.md §5 table) — the only ones the `~` projection applies to; `nodeId` admits a literal `~`. */
+const TENANT_BOUND_PARAMS: ReadonlySet<string> = new Set(['runId', 'webhookId']);
 
 export function route(method: string, pattern: string, auth: boolean, handler: Handler, contract?: 1 | 2 | 'both'): Route {
   // A tenant-bound id (`<tenantId>/<opaque>`) may arrive with its slash raw or
@@ -183,7 +186,9 @@ export class Router {
         if (r.method !== method) continue;
         if (r.contract !== 'both' && (r.contract ?? 2) !== major) continue;
         matched = r;
-        params = Object.fromEntries(Object.entries(m.groups ?? {}).map(([k, v]) => [k, decodeURIComponent(v ?? '')]));
+        // identity.md §5: a tenant-bound parameter is accepted projected (`~2F`) or
+        // percent-encoded (`%2F`), decoded ONCE before the grammar is matched.
+        params = Object.fromEntries(Object.entries(m.groups ?? {}).map(([k, v]) => [k, TENANT_BOUND_PARAMS.has(k) ? unprojectBoundId(decodeURIComponent(v ?? '')) : decodeURIComponent(v ?? '')]));
         break;
       }
       if (!matched) {
