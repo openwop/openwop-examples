@@ -2528,6 +2528,42 @@ function handleGetRun(req: IncomingMessage, res: ServerResponse, runId: string):
   });
 }
 
+/**
+ * Append the `interrupt.resolved` event (`spec/v2/core/interrupt.md` §Events,
+ * payload `run-event-payloads.schema.json#/$defs/interruptResolved`).
+ *
+ * RFC 0183 §A.1: resolving an approval-kind interrupt MUST record the applied
+ * `action`; §A.2: `refine` MUST carry `refineFeedback` and `edit-accept` MUST
+ * carry `editedArtifactData`. Both are validated in `resolveApproval` before
+ * this is reached, and recorded verbatim.
+ *
+ * `interruptId` is host-minted in the tenant-bound `<tenant>/<opaque>` form;
+ * the opaque part is derived from (run, node, event sequence) so it is stable
+ * for a given resolution and distinct across repeat suspensions of one gate.
+ */
+function recordInterruptResolved(
+  runId: string,
+  nodeId: string,
+  kind: string,
+  resumeValue: unknown,
+  approval: { action?: string; refineFeedback?: unknown; editedArtifactData?: unknown },
+): void {
+  const seq = (stmts.countEvents.get(runId) as { n: number }).n;
+  const opaque = createHash('sha256').update(`${runId}\0${nodeId}\0${seq}`).digest('hex').slice(0, 32);
+  appendEvent(runId, 'interrupt.resolved', {
+    nodeId,
+    data: {
+      nodeId,
+      interruptId: `default/${opaque}`,
+      kind,
+      resumeValue,
+      ...(approval.action !== undefined ? { action: approval.action } : {}),
+      ...(approval.refineFeedback !== undefined ? { refineFeedback: approval.refineFeedback } : {}),
+      ...(approval.editedArtifactData !== undefined ? { editedArtifactData: approval.editedArtifactData } : {}),
+    },
+  });
+}
+
 async function handleResolveInterrupt(
   req: IncomingMessage,
   res: ServerResponse,
@@ -2610,7 +2646,34 @@ async function handleResolveInterrupt(
     return;
   }
 
+  if (outcome.kind === 'refined') {
+    // RFC 0183 §A.1/§A.2 — record the applied action with the feedback it
+    // requires, then send the gate back for another pass. There is no upstream
+    // generator in this executor to re-run with the feedback, so the cursor is
+    // left ON the gate and the executor re-enters it, re-suspending as a fresh
+    // interrupt (createInterrupt replaces the resolved row).
+    recordInterruptResolved(runId, nodeId, interrupt.kind, resumeValue, {
+      action: 'refine',
+      refineFeedback: outcome.refineFeedback,
+    });
+    db.prepare("UPDATE runs SET status = 'running' WHERE run_id = ?").run(runId);
+    if (tryClaim(runId)) {
+      void runWorkflow(runId).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        appendEvent(runId, 'run.failed', { data: { code: 'internal', message } });
+        setRunTerminal(runId, 'failed', { code: 'internal', message });
+      });
+    }
+    sendJSON(res, 200, {
+      runId,
+      status: 'running',
+      interrupt: { kind: interrupt.kind, nodeId, outcome: 'refined', votes: outcome.votes },
+    });
+    return;
+  }
+
   if (outcome.kind === 'rejected') {
+    recordInterruptResolved(runId, nodeId, interrupt.kind, resumeValue, { action: 'reject' });
     appendEvent(runId, 'node.completed', { nodeId, data: { outcome: 'rejected' } });
     appendEvent(runId, 'run.failed', {
       data: { code: 'interrupt_rejected', message: 'Approval gate rejected by quorum.' },
@@ -2628,6 +2691,18 @@ async function handleResolveInterrupt(
   }
 
   // 'resumed' — close out this node and resume the executor from the next one.
+  recordInterruptResolved(
+    runId,
+    nodeId,
+    interrupt.kind,
+    resumeValue,
+    interrupt.kind === 'approval'
+      ? {
+          action: outcome.finalAction,
+          ...(outcome.finalAction === 'edit-accept' ? { editedArtifactData: outcome.editedArtifactData } : {}),
+        }
+      : {},
+  );
   appendEvent(runId, 'node.resumed', { nodeId, data: { action: outcome.finalAction } });
   appendEvent(runId, 'node.completed', { nodeId });
   // Bump the executor cursor past the resumed node so runWorkflow starts

@@ -48,6 +48,45 @@ export interface ExternalEventConfig {
   readonly timeoutMs?: number;
 }
 
+/**
+ * `interrupt.md` §Approval `RefineFeedback`, as closed by
+ * `schemas/v2/run-event-payloads.schema.json#/$defs/interruptResolved`
+ * (RFC 0183 §A.2): `required: [scope]`, `additionalProperties: false`.
+ */
+export interface RefineFeedback {
+  readonly scope: 'whole' | 'section' | 'items';
+  readonly sectionPath?: string;
+  readonly itemIds?: ReadonlyArray<string>;
+  readonly tags?: ReadonlyArray<string>;
+  readonly text?: string;
+}
+
+const REFINE_SCOPES: ReadonlySet<string> = new Set(['whole', 'section', 'items']);
+const REFINE_FEEDBACK_KEYS: ReadonlySet<string> = new Set(['scope', 'sectionPath', 'itemIds', 'tags', 'text']);
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
+/** Returns an error message, or null when `v` is a well-formed RefineFeedback. */
+function refineFeedbackError(v: unknown): string | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    return "resumeValue.refineFeedback is REQUIRED for action 'refine' and MUST be an object (interrupt.md §Approval).";
+  }
+  const o = v as Record<string, unknown>;
+  for (const key of Object.keys(o)) {
+    if (!REFINE_FEEDBACK_KEYS.has(key)) return `resumeValue.refineFeedback.${key} is not a RefineFeedback field.`;
+  }
+  if (typeof o.scope !== 'string' || !REFINE_SCOPES.has(o.scope)) {
+    return 'resumeValue.refineFeedback.scope MUST be one of [whole, section, items].';
+  }
+  if (o.sectionPath !== undefined && typeof o.sectionPath !== 'string') return 'resumeValue.refineFeedback.sectionPath MUST be a string.';
+  if (o.itemIds !== undefined && !isStringArray(o.itemIds)) return 'resumeValue.refineFeedback.itemIds MUST be an array of strings.';
+  if (o.tags !== undefined && !isStringArray(o.tags)) return 'resumeValue.refineFeedback.tags MUST be an array of strings.';
+  if (o.text !== undefined && typeof o.text !== 'string') return 'resumeValue.refineFeedback.text MUST be a string.';
+  return null;
+}
+
 export type InterruptConfig = ApprovalConfig | ClarificationConfig | ExternalEventConfig;
 
 export interface Vote {
@@ -71,8 +110,22 @@ export interface InterruptRow {
 
 export type ResolveOutcome =
   | { kind: 'pending'; votes: Vote[] }
-  | { kind: 'resumed'; votes: Vote[]; finalAction: string }
+  | {
+      kind: 'resumed';
+      votes: Vote[];
+      /** `accept` or `edit-accept` — the action that released the gate. */
+      finalAction: string;
+      /** Present iff `finalAction === 'edit-accept'` (RFC 0183 §A.2). */
+      editedArtifactData?: unknown;
+    }
   | { kind: 'rejected'; votes: Vote[] }
+  /**
+   * RFC 0183 — `refine` resolves THIS suspension with structured feedback and
+   * sends the gate back for another pass. The SQLite executor has no generator
+   * node to re-invoke with the feedback, so the caller re-enters the executor
+   * at the gate itself, which re-suspends it as a fresh interrupt.
+   */
+  | { kind: 'refined'; votes: Vote[]; refineFeedback: RefineFeedback }
   | { kind: 'invalid'; status: 400 | 422; code: string; message: string }
   | { kind: 'expired' }
   | { kind: 'unknown' };
@@ -140,9 +193,17 @@ export function createInterrupt(
     typeof timeoutMs === 'number' && timeoutMs > 0
       ? new Date(Date.now() + timeoutMs).toISOString()
       : null;
+  // A node can suspend more than once in one run (an approval gate sent back
+  // by `refine`, RFC 0183). The (run_id, node_id) key is reused: a RESOLVED
+  // prior row is replaced by the fresh suspension; an ACTIVE one is left alone.
   db.prepare(
     `INSERT INTO interrupts (run_id, node_id, kind, config_json, payload_json, callback_token, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (run_id, node_id) DO UPDATE SET
+       kind = excluded.kind, config_json = excluded.config_json, payload_json = excluded.payload_json,
+       votes_json = '[]', resolved_at = NULL, outcome = NULL,
+       callback_token = excluded.callback_token, expires_at = excluded.expires_at
+     WHERE interrupts.resolved_at IS NOT NULL`,
   ).run(
     runId,
     nodeId,
@@ -347,7 +408,12 @@ export function resolveApproval(
     };
   }
 
-  const rv = resumeValue as { action?: unknown; voter?: unknown };
+  const rv = resumeValue as {
+    action?: unknown;
+    voter?: unknown;
+    refineFeedback?: unknown;
+    editedArtifactData?: unknown;
+  };
   const action = rv.action;
   const config = JSON.parse(row.config_json) as ApprovalConfig;
   if (typeof action !== 'string' || !config.actions.includes(action)) {
@@ -356,6 +422,24 @@ export function resolveApproval(
       status: 400,
       code: 'validation_error',
       message: `resumeValue.action MUST be one of [${config.actions.join(', ')}]`,
+    };
+  }
+
+  // interrupt.md §Approval — the per-action required field. RFC 0183 §A.2:
+  // `refine` and `edit-accept` are incomplete without their payload, so a
+  // resolution missing it is refused rather than recorded half-formed.
+  if (action === 'refine') {
+    const err = refineFeedbackError(rv.refineFeedback);
+    if (err !== null) {
+      return { kind: 'invalid', status: 400, code: 'validation_error', message: err };
+    }
+  }
+  if (action === 'edit-accept' && rv.editedArtifactData === undefined) {
+    return {
+      kind: 'invalid',
+      status: 400,
+      code: 'validation_error',
+      message: "resumeValue.editedArtifactData is REQUIRED for action 'edit-accept' (interrupt.md §Approval).",
     };
   }
 
@@ -378,15 +462,27 @@ export function resolveApproval(
     ? [...votes.filter((v) => v.voter !== newVote.voter), newVote]
     : [...votes, newVote];
 
+  // `refine` sends the artifact back: one approver's refine request resolves
+  // this suspension (the vote ledger is closed out with it) — it is neither an
+  // accept toward quorum nor a veto.
+  if (action === 'refine') {
+    markResolved(db, runId, nodeId, 'refined', updatedVotes);
+    return { kind: 'refined', votes: updatedVotes, refineFeedback: rv.refineFeedback as RefineFeedback };
+  }
+
   const required = config.requiredApprovals ?? 1;
-  const accepts = updatedVotes.filter((v) => v.action === 'accept').length;
+  // `edit-accept` is an accept carrying the approver's edits.
+  const accepts = updatedVotes.filter((v) => v.action === 'accept' || v.action === 'edit-accept').length;
   const rejects = updatedVotes.filter((v) => v.action === 'reject').length;
   const rejectionPolicy = config.rejectionPolicy ?? 'first';
 
-  // Resume condition: enough accepts.
+  // Resume condition: enough accepts. The action recorded is the one applied
+  // by the vote that released the gate.
   if (accepts >= required) {
     markResolved(db, runId, nodeId, 'accepted', updatedVotes);
-    return { kind: 'resumed', votes: updatedVotes, finalAction: 'accept' };
+    return action === 'edit-accept'
+      ? { kind: 'resumed', votes: updatedVotes, finalAction: action, editedArtifactData: rv.editedArtifactData }
+      : { kind: 'resumed', votes: updatedVotes, finalAction: 'accept' };
   }
 
   // Reject condition: per-policy.
