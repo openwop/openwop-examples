@@ -11,6 +11,8 @@
 > **`skipped 0` is supplied, not lucky.** `0176.pinned-run-disposition.continued` needs `OPENWOP_TEST_IMPLEMENTED_CHANGE_ID` naming a change id the host lists in `OPENWOP_IMPLEMENTED_CHANGE_IDS`; both were set to `rfc-0176-witness`.
 >
 > **The 44 inapplicable rows:** optional families this host does not advertise (`a2a`, `mcp`, `saml`, `scim`, packs), each recorded with its reason; `0168.coherence-not-in-bundle` is inapplicable in the npm layout.
+>
+> **Since this measurement (openwop-examples #49):** the v1 read path now spells an era-3 log's `type` through the inverted codemap row (`persistence.md` §The v1 wire of an era-`3` log — 36 renamed rows, bijection verified at load), on poll, SSE and the fan-out incl. the `OpenWOP-Event-Type` header; a 1.x registration names its types in v1 spelling. The noop fixture emits none of the renamed types, so the bundle totals are unchanged; the route test seeds `run.resuming` and reads it both ways.
 
 ---
 

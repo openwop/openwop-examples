@@ -104,6 +104,20 @@ export function ownerForMajor(owner: Record<string, unknown>, major: 1 | 2): Rec
   return projected;
 }
 
+/**
+ * persistence.md §The v1 wire of an era-3 log — an era-3 log is stored in v2
+ * vocabulary, and the same log MUST read on `/v1/…` exactly as before the cut:
+ * the `type` maps back through the SAME codemap row, inverted. A vendor-org
+ * type has no row on either side and passes through. If the codemap ever folds
+ * two v1 names onto one v2 name the inverse is no longer a function, and the
+ * host refuses the v1 representation rather than guess.
+ */
+export function v1TypeOf(v2Type: string): string {
+  const art = loadArtifacts();
+  if (!art.codemapBijective) throw err('event_type_unmapped', 'spec/v2/event-codemap.json is not a bijection on this host, so the v1 spelling of an era-3 log cannot be derived (persistence.md §The v1 wire of an era-3 log)', { type: v2Type });
+  return art.codemapV2toV1.get(v2Type) ?? v2Type;
+}
+
 /** A run event as one contract renders it: the v1 wire spells `engineVersion` as a string (v1 run-event.schema.json + runStarted), v2 as an integer. */
 export type WireEventDoc = Omit<RunEventDoc, 'engineVersion'> & { engineVersion?: number | string };
 
@@ -115,7 +129,7 @@ export type WireEventDoc = Omit<RunEventDoc, 'engineVersion'> & { engineVersion?
  */
 export function docForMajor(doc: RunEventDoc, major: 1 | 2): WireEventDoc {
   if (major !== 1) return doc;
-  const out: WireEventDoc = { ...doc };
+  const out: WireEventDoc = { ...doc, type: v1TypeOf(doc.type) };
   if (typeof doc.engineVersion === 'number') out.engineVersion = String(doc.engineVersion);
   if (doc.type !== 'run.started') return out;
   const p = doc.payload;
