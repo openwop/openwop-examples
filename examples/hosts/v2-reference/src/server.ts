@@ -100,10 +100,22 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
         let parsed: unknown = {};
         if (text.trim() !== '') { try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); } }
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
-        return { status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>) };
+        return { status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>, ctx.major) };
       });
     }),
     route('DELETE', '/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }),
+    // The 1.x webhook surface keeps its /v1/ path keys through the overlap (versioning.md §1.4); a
+    // subscription registered here is rendered in the v1 contract for its lifetime (webhooks.md §Delivery).
+    route('POST', '/v1/webhooks', true, async (ctx) => {
+      const text = await ctx.text();
+      return withIdempotency(ctx, 'registerWebhook', text, async () => {
+        let parsed: unknown = {};
+        if (text.trim() !== '') { try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); } }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
+        return { status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>, 1) };
+      });
+    }, 1),
+    route('DELETE', '/v1/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }, 1),
     route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string) })),
     ...runRoutes(),
     ...seamRoutes(host),
@@ -145,7 +157,7 @@ async function openapi(ctx: Ctx): Promise<Reply> {
   const root = ctx.host.artifacts.root;
   const v2 = resolve(root, 'api', 'v2', 'openapi.yaml');
   const paths = ctx.major === 1
-    ? ['/v1/runs', '/v1/runs/{runId}', '/v1/runs/{runId}/events', '/v1/runs/{runId}/events/poll', '/v1/runs/{runId}/cancel', '/v1/openapi.json']
+    ? ['/v1/runs', '/v1/runs/{runId}', '/v1/runs/{runId}/events', '/v1/runs/{runId}/events/poll', '/v1/runs/{runId}/cancel', '/v1/webhooks', '/v1/webhooks/{webhookId}', '/v1/openapi.json']
     : ['/.well-known/openwop', '/runs', '/runs/{runId}', '/runs/{runId}/events', '/runs/{runId}/events/poll', '/runs/{runId}/cancel', '/runs:bulk-cancel', '/runs/{runId}:pause', '/runs/{runId}:resume', '/runs/{runId}:fork', '/runs/{runId}/ancestry', '/runs/{runId}/annotations', '/runs/{runId}/compensation', '/runs/{runId}/effects', '/runs/{runId}/interrupts/{nodeId}', '/interrupts/{token}', '/webhooks', '/webhooks/{webhookId}', '/host/effect-seams', '/host/events', '/packs'];
   return { status: 200, body: { openapi: '3.1.0', info: { title: `OpenWOP v${ctx.major} — ${ctx.host.config.host}`, version: ctx.major === 1 ? V1_VERSION : V2_VERSION, description: ctx.major === 2 ? `The canonical document is @openwop/spec-artifacts ${ctx.host.artifacts.version} api/v2/openapi.yaml (${existsSync(v2) ? 'installed' : 'not installed'}); this host serves the path keys listed.` : 'v1 path keys served through the overlap.' }, paths: Object.fromEntries(paths.map((p) => [p, {}])) } };
 }

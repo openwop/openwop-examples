@@ -79,6 +79,54 @@ export function toStorageVocabulary(type: string, era: number): string {
   throw new Error(`refusing to append ${type} to an era-${era} log: the codemap carries no v1 spelling for it, and persistence.md §The writer rule fixes the log's vocabulary at run creation`);
 }
 
+/**
+ * versioning.md §1.2 / webhooks.md §Delivery — "one source, three renderings".
+ * The run's owner is stored once, in the v2 shape `{ tenant, workspace?, subject }`
+ * (identity.md §1). A major-1 reader — `/v1/…` poll, SSE, the snapshot, and a
+ * webhook subscription registered under the 1.x contract — receives the v1
+ * echo `{ tenant, workspace?, principal, principalKind }` (v1
+ * run-event-payloads.schema.json `runStarted.owner`, additionalProperties
+ * false: a `subject` key on that wire is invalid, not merely surprising). The
+ * projection is contract-scoped: the v2 wire never carries `principal`.
+ */
+export function ownerForMajor(owner: Record<string, unknown>, major: 1 | 2): Record<string, unknown> {
+  if (major !== 1) return owner;
+  const subject = owner['subject'];
+  if (subject === null || typeof subject !== 'object' || Array.isArray(subject)) return owner;
+  const s = subject as { issuer?: unknown; subjectId?: unknown; kind?: unknown };
+  const { subject: _dropped, ...rest } = owner;
+  void _dropped;
+  const projected: Record<string, unknown> = { ...rest };
+  if (typeof s.issuer === 'string' && typeof s.subjectId === 'string') projected['principal'] = `${s.issuer}#${s.subjectId}`;
+  // The v1 enum is user | agent | anonymous; a workload identity is an agent on that wire.
+  if (s.kind === 'user' || s.kind === 'agent' || s.kind === 'anonymous') projected['principalKind'] = s.kind;
+  else if (s.kind === 'workload') projected['principalKind'] = 'agent';
+  return projected;
+}
+
+/** A run event as one contract renders it: the v1 wire spells `engineVersion` as a string (v1 run-event.schema.json + runStarted), v2 as an integer. */
+export type WireEventDoc = Omit<RunEventDoc, 'engineVersion'> & { engineVersion?: number | string };
+
+/**
+ * The event as a reader under `major` sees it. Two fields differ between the
+ * contracts: `engineVersion` (envelope and `run.started` payload — string on v1,
+ * integer on v2; `rowToDoc` normalises the other direction on read) and the
+ * `run.started` owner echo (`ownerForMajor`). Everything else is the one source.
+ */
+export function docForMajor(doc: RunEventDoc, major: 1 | 2): WireEventDoc {
+  if (major !== 1) return doc;
+  const out: WireEventDoc = { ...doc };
+  if (typeof doc.engineVersion === 'number') out.engineVersion = String(doc.engineVersion);
+  if (doc.type !== 'run.started') return out;
+  const p = doc.payload;
+  if (p === null || typeof p !== 'object' || Array.isArray(p)) return out;
+  const payload: Record<string, unknown> = { ...(p as Record<string, unknown>) };
+  if (typeof payload['engineVersion'] === 'number') payload['engineVersion'] = String(payload['engineVersion']);
+  const owner = payload['owner'];
+  if (owner !== null && typeof owner === 'object' && !Array.isArray(owner)) payload['owner'] = ownerForMajor(owner as Record<string, unknown>, 1);
+  return { ...out, payload };
+}
+
 export function rowToDoc(row: EventRow, run: RunRow, owner: Record<string, unknown> | null): RunEventDoc {
   let payload: unknown = JSON.parse(row.payload_json);
   let type = row.type;

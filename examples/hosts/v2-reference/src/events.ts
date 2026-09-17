@@ -6,7 +6,7 @@
  */
 import type { ServerResponse } from 'node:http';
 import { ENGINE_VERSION, EVENT_SCHEMA_VERSION, LEGACY_ISSUER } from './config.js';
-import { eraOf, rowToDoc, toStorageVocabulary, type RunEventDoc } from './codemap.js';
+import { eraOf, rowToDoc, toStorageVocabulary, type RunEventDoc, type WireEventDoc } from './codemap.js';
 import { err } from './errors.js';
 import { nowIso, opaque } from './ids.js';
 import { TERMINAL, type AppendedEvent, type Host, type Owner } from './host.js';
@@ -90,7 +90,7 @@ export function parseStreamModes(raw: string | null): string[] {
   return value.split(',');
 }
 
-function admitted(modes: string[], doc: RunEventDoc): string | null {
+function admitted(modes: string[], doc: Pick<RunEventDoc, 'type'>): string | null {
   const vendor = !doc.type.includes('.') ? false : !/^(run|node|interrupt|approval|clarification|artifact|eval|deployment|workspace|replay|cap|compensation|negotiation|log|variable|version|lease|agent|output|provider|prompt|envelope|memory|budget|dispatch|orchestrator|conversation|channel|context|workflow|workflow-chain|trigger|tool|egress|import|goal|proposal|connector|authorization|voice|roster|commitment|model)\./.test(doc.type);
   for (const mode of modes) {
     if (mode === 'debug') return 'debug';
@@ -102,14 +102,14 @@ function admitted(modes: string[], doc: RunEventDoc): string | null {
 }
 
 /** events.md §SSE frames — id: sequence, event: type, data: RunEventDoc; keep-alive comments; closes on terminal. */
-export function streamRun(host: Host, run: RunRow, res: ServerResponse, opts: { modes: string[]; lastEventId: number | null; bufferMs: number; snapshot: () => Record<string, unknown>; headers: Record<string, string> }): void {
+export function streamRun(host: Host, run: RunRow, res: ServerResponse, opts: { modes: string[]; lastEventId: number | null; bufferMs: number; snapshot: () => Record<string, unknown>; headers: Record<string, string>; project?: (doc: RunEventDoc) => WireEventDoc }): void {
   // The backlog is read through the storage boundary BEFORE the 200 is
   // committed, so an untranslatable era-2 log answers 500 event_type_unmapped.
   const backlog = readEvents(host, run, opts.lastEventId ?? -1);
   res.writeHead(200, { ...opts.headers, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   const values = opts.modes.includes('values');
   let closed = false;
-  let batch: RunEventDoc[] = [];
+  let batch: WireEventDoc[] = [];
   let flushTimer: NodeJS.Timeout | null = null;
   const writeFrame = (id: number, event: string, data: unknown): void => {
     if (closed) return;
@@ -117,7 +117,7 @@ export function streamRun(host: Host, run: RunRow, res: ServerResponse, opts: { 
   };
   const flush = (): void => {
     if (batch.length === 0) return;
-    const last = batch[batch.length - 1] as RunEventDoc;
+    const last = batch[batch.length - 1] as WireEventDoc;
     writeFrame(last.sequence, 'batch', batch);
     batch = [];
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -130,7 +130,8 @@ export function streamRun(host: Host, run: RunRow, res: ServerResponse, opts: { 
     host.bus.off(`run:${run.run_id}`, onEvent);
     res.end();
   };
-  const emit = (doc: RunEventDoc): void => {
+  const emit = (raw: RunEventDoc): void => {
+    const doc = opts.project ? opts.project(raw) : raw;
     const mode = admitted(opts.modes, doc);
     if (mode === null) return;
     if (opts.bufferMs > 0) {

@@ -416,3 +416,74 @@ describe('webhooks + identity + packs + workspace', () => {
     expect(ev?.status).toBe(200);
   });
 });
+
+describe('identity.md §5 bound-id path projection (RFC 0184) + per-contract delivery rendering (webhooks.md §Delivery)', () => {
+  const project = (id: string): string => Array.from(new TextEncoder().encode(id)).map((b) => (b < 0x80 && /^[A-Za-z0-9._-]$/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `~${b.toString(16).toUpperCase().padStart(2, '0')}`)).join('');
+
+  it('a tenant-bound run id is readable at its ~-escaped segment, links carry that form, %2F still works, a double projection is 404 and a malformed escape is 400', async () => {
+    const created = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+    expect(created.s).toBe(201);
+    const runId: string = created.b.runId;
+    expect(runId).toMatch(/^[^/]+\/[^/]+$/);
+    const projected = project(runId);
+    expect(created.b.eventsUrl).toContain(`/runs/${projected}/events`);
+    expect(created.b.statusUrl).toContain(`/runs/${projected}`);
+    expect(created.b.eventsUrl).not.toMatch(/%2F/i);
+    const read = await call('GET', `/runs/${projected}`);
+    expect(read.s).toBe(200);
+    expect(read.b.runId).toBe(runId);
+    const percent = await call('GET', `/runs/${enc(runId)}`);
+    expect(percent.s).toBe(200);
+    const doubled = await call('GET', `/runs/${project(projected)}`);
+    expect(doubled.s).toBe(404);
+    const malformed = await call('GET', `/runs/${runId.split('/')[0]}~2`);
+    expect(malformed.s).toBe(400);
+    expect(malformed.b.error).toBe('validation_error');
+  });
+
+  it('a major-1 reader gets the v1 owner echo (principal, never subject); a major-2 reader gets subject, never principal', async () => {
+    const created = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+    const runId: string = created.b.runId;
+    await waitStatus(runId, ['completed']);
+    const v2 = await call('GET', `/runs/${enc(runId)}/events/poll`);
+    const startedV2 = v2.b.events.find((e: { type: string }) => e.type === 'run.started');
+    expect(Object.keys(startedV2.payload.owner).sort()).toEqual(['subject', 'tenant']);
+    const bare = runId.slice(runId.indexOf('/') + 1);
+    const v1 = await call('GET', `/v1/runs/${enc(bare)}/events/poll`, undefined, { 'OpenWOP-Version': '1.0' });
+    expect(v1.s).toBe(200);
+    expect(v1.b.runId).toBe(bare);
+    const startedV1 = v1.b.events.find((e: { type: string }) => e.type === 'run.started');
+    expect('subject' in startedV1.payload.owner).toBe(false);
+    expect(startedV1.payload.owner.principal).toMatch(/#/);
+    expect(startedV1.payload.owner.principalKind).toBe('user');
+    const snapV1 = await call('GET', `/v1/runs/${enc(bare)}`, undefined, { 'OpenWOP-Version': '1.0' });
+    expect('subject' in snapV1.b.owner).toBe(false);
+    expect(typeof snapV1.b.owner.principal).toBe('string');
+  });
+
+  it('a webhook subscription is delivered in the contract it registered under', async () => {
+    const { createServer } = await import('node:http');
+    const hits: Array<{ body: string }> = [];
+    const srv = createServer((req, res) => { let body = ''; req.on('data', (c: Buffer) => { body += c.toString(); }); req.on('end', () => { hits.push({ body }); res.writeHead(204); res.end(); }); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/hook`;
+    const regV2 = await call('POST', '/webhooks', { url, events: ['run.started'] });
+    const regV1 = await call('POST', '/v1/webhooks', { url, events: ['run.started'] }, { 'OpenWOP-Version': '1.0' });
+    expect(regV2.s).toBe(201); expect(regV1.s).toBe(201);
+    const created = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+    const runId: string = created.b.runId;
+    await waitStatus(runId, ['completed']);
+    const deadline = Date.now() + 5000;
+    while (hits.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    expect(hits.length).toBe(2);
+    const bodies = hits.map((h) => JSON.parse(h.body) as { runId: string; event: { payload: { owner: Record<string, unknown> } } });
+    const v2 = bodies.find((b) => b.runId === runId);
+    const v1 = bodies.find((b) => b.runId === runId.slice(runId.indexOf('/') + 1));
+    expect(v2).toBeDefined(); expect(v1).toBeDefined();
+    expect(Object.keys(v2!.event.payload.owner).sort()).toEqual(['subject', 'tenant']);
+    expect('subject' in v1!.event.payload.owner).toBe(false);
+    expect(typeof v1!.event.payload.owner.principal).toBe('string');
+    await call('DELETE', `/webhooks/${enc(regV2.b.webhookId)}`); await call('DELETE', `/v1/webhooks/${enc(regV1.b.webhookId)}`, undefined, { 'OpenWOP-Version': '1.0' });
+    srv.close();
+  });
+});
