@@ -1,6 +1,20 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-13, `@openwop/openwop-conformance@2.1.6` + `@openwop/spec-artifacts@2.1.6` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, **74** scenario files.** Host `openwop-host-v2-reference`, build `commit:0db8e18706214462ee3022ca9fc2b35d05956e3b`.
+> **Measurement — 2026-09-17, `@openwop/openwop-conformance@2.3.2` + `@openwop/spec-artifacts@2.3.2` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, build `commit:4e164465`.**
+>
+> **RFC 0148 §A dispositions (239 rows, 1682 assertions): executed-pass 195 · executed-fail 0 · blocked 0 · inapplicable 44 · skipped 0.** All three claimed profiles certified.
+>
+> **Signed bundle: [`bundle-v3.json`](./bundle-v3.json)** — `witnessSha256` **`2a4008600635…`**, Ed25519 under the ROTATED key id `v2-reference-3` (`keys/host.pub.pem`; the `-2` private half was never on the cutting machine, same shape as the 09-05 rotation).
+>
+> **Why this re-cut happened.** The previous row measured `2.1.6`. Cutting on `2.3.1` found two gaps in THIS host that were already binding on main — RFC 0184's `~`-projection (accepted `%2F` only, links spelled `%2F`) and the v2 owner echo + integer `engineVersion` served on the **v1** wire (poll, SSE, snapshot, every webhook subscriber) — and one defect in the SUITE: 2.3.1's `v2-webhook-delivery-shape` read `event.owner` on `run.completed`, a shape no host can emit (openwop #1376, fixed in 2.3.2). Both host gaps are closed here (openwop-examples #48): the router decodes the projection once, links emit it, a subscription records its contract major and the fan-out renders per contract, `/v1/webhooks` is served.
+>
+> **`skipped 0` is supplied, not lucky.** `0176.pinned-run-disposition.continued` needs `OPENWOP_TEST_IMPLEMENTED_CHANGE_ID` naming a change id the host lists in `OPENWOP_IMPLEMENTED_CHANGE_IDS`; both were set to `rfc-0176-witness`.
+>
+> **The 44 inapplicable rows:** optional families this host does not advertise (`a2a`, `mcp`, `saml`, `scim`, packs), each recorded with its reason; `0168.coherence-not-in-bundle` is inapplicable in the npm layout.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-13, `@openwop/openwop-conformance@2.1.6` + `@openwop/spec-artifacts@2.1.6` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, **74** scenario files.** Host `openwop-host-v2-reference`, build `commit:0db8e18706214462ee3022ca9fc2b35d05956e3b`.
 >
 > **RFC 0148 §A dispositions (231 rows, 1606 assertions): executed-pass 187 · executed-fail 0 · blocked 0 · inapplicable 44 · skipped 0.** `claimedProfiles` = `openwop-discovery-core` (witnessCount 3, **certified**), `openwop-core-standard` (witnessCount **13**, **certified**), `openwop-conformance-seams-v2` (witnessCount 4, **certified**).
 >
