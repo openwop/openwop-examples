@@ -1,6 +1,16 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-17, `@openwop/openwop-conformance@2.4.0` + `@openwop/spec-artifacts@2.4.0` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:f940927928a63dbcf2417760a99befc3c6a0330c` (generated `2026-09-18T03:52:16Z`).**
+> **Measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.1` + `@openwop/spec-artifacts@2.4.1` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:c6ee97c247ef4d255d67afb61daf615c71e0dfe4`.**
+>
+> **RFC 0148 §A dispositions (244 rows, 1979 assertions): executed-pass 230 · executed-fail 0 · blocked 0 · inapplicable 14 · skipped 0.** All three claimed profiles certified. `witnessSha256` **`b8a7d1d6941d…`**, Ed25519 under key id `v2-reference-3`.
+>
+> **What the extra row is.** 2.4.1 adds `v2-chain-pin-exact`'s third leg — an EXTERNAL `subChainRef` carrying `version: "^1.0.0"`. The other two legs are satisfied by schema validation alone (sabotage-proved here: delete this host's §E.1 pin rule and both stay green), because `ids.schema.json`'s `typeId` pattern already refuses the sibling spelling. `SubChainRef.ref` types the external `version` as a semver RANGE, so only the host's own rule can refuse it. `openwop.requirement.0177.chain-pin-exact.external-range-refused` is now **executed-pass in committed evidence** — the row reads host-enforced, not schema-refused.
+>
+> **A second preflight gap, found the same way as the first.** The initial 2.4.1 cut came back `blocked 4`: `v2-negotiation-decided-emitted` (both legs) and `0175.mrtr-rounds-ceiling.refused`. The host was fine again. The suite starts its A2A peer and MCP server **in-process, opt-in** on `OPENWOP_A2A_FAKE_PEER` / `OPENWOP_MCP_FAKE_SERVER`, and `cut-bundle.sh` set neither — so the host advertised `a2a` and `mcp`, the scenarios found no peer, and four rows recorded `blocked` rather than `inapplicable`. The script now sets both and asserts discovery really advertises the two families before it cuts, so the two halves cannot drift apart silently.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-17, `@openwop/openwop-conformance@2.4.0` + `@openwop/spec-artifacts@2.4.0` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:f940927928a63dbcf2417760a99befc3c6a0330c` (generated `2026-09-18T03:52:16Z`).**
 >
 > **RFC 0148 §A dispositions (243 rows, 1971 assertions): executed-pass 229 · executed-fail 0 · blocked 0 · inapplicable 14 · skipped 0.** All three claimed profiles certified — `openwop-discovery-core` (witnessCount 3), `openwop-core-standard` (13), `openwop-conformance-seams-v2` (4).
 >
