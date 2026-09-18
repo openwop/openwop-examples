@@ -647,3 +647,26 @@ describe('interop.md — negotiation is authenticated, floored and audited (RFC 
     } finally { srv.close(); }
   }, 30_000);
 });
+
+describe('identity.md §5 — a tenant-bound webhookId is tenant-checked before it is looked up (RFC 0187 §A.1)', () => {
+  it('a foreign tenant segment is 403 id_tenant_mismatch whether or not the id exists, and the caller own id still deletes', async () => {
+    const { createServer } = await import('node:http');
+    const srv = createServer((_q, r) => { r.writeHead(204); r.end(); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    try {
+      const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/hook`;
+      const reg = await call('POST', '/webhooks', { url, events: ['run.completed'] });
+      expect(reg.s).toBe(201);
+      const id: string = reg.b.webhookId;
+      expect(id).toMatch(/^[^/]+\/[^/]+$/);
+      const opaque = id.slice(id.indexOf('/') + 1);
+      // exists, foreign tenant → 403 (not 404): the grammar check runs first
+      const foreign = await call('DELETE', `/webhooks/${enc(`not-the-callers-tenant/${opaque}`)}`);
+      expect(foreign.s).toBe(403); expect(foreign.b.error).toBe('id_tenant_mismatch');
+      // does not exist, foreign tenant → the SAME 403, so the refusal discloses nothing
+      const ghost = await call('DELETE', `/webhooks/${enc('not-the-callers-tenant/zzzzzzzzzzzzzzzzzz')}`);
+      expect(ghost.s).toBe(403); expect(ghost.b.error).toBe('id_tenant_mismatch');
+      expect((await call('DELETE', `/webhooks/${enc(id)}`)).s).toBe(204);
+    } finally { srv.close(); }
+  });
+});
