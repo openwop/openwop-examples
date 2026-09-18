@@ -63,9 +63,20 @@ LINKED=$(curl -s -X POST "$BASE/conformance/seams/sample/auth/saml/validate" \
 [ "$LINKED" = "1" ] || { echo "PREFLIGHT FAIL: saml validate carried no \`link\` — v2-subject-link-record would record \`blocked\`"; exit 1; }
 echo "  saml validate carries link: $LINKED"
 
+# The A2A / MCP fakes are started IN-PROCESS by the suite, opt-in on these env
+# names — a cut without them records `blocked` on the negotiation and MRTR rows,
+# not `inapplicable`, because the host advertises the families. Assert discovery
+# really advertises them, so the two halves can never drift apart silently.
+FAM=$(curl -fsS "$BASE/.well-known/openwop" -H 'OpenWOP-Version: 2.0' \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s),c=d.capabilities??d;console.log(["a2a","mcp"].filter(k=>k in c).join(","))})')
+[ "$FAM" = "a2a,mcp" ] || { echo "PREFLIGHT FAIL: discovery advertises \"$FAM\", want a2a,mcp — the interop rows would record blocked"; exit 1; }
+echo "  discovery advertises: $FAM (suite fakes enabled in-process)"
+
 if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture answered"; exit 0; fi
 
 # ---- cut
+OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 \
+OPENWOP_MCP_FAKE_SERVER=true \
 OPENWOP_TEST_SAML_IDP_URL="$IDP" \
 OPENWOP_TEST_SCIM_URL="urn:openwop:conformance:scim" \
 OPENWOP_TEST_IMPLEMENTED_CHANGE_ID="rfc-0176-witness" \
