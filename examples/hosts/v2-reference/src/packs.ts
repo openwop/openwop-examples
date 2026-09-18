@@ -19,6 +19,7 @@ import { err } from './errors.js';
 import { nowIso } from './ids.js';
 import type { Host } from './host.js';
 import type { PackRow } from './store.js';
+import { assertExactPins, registerChainPack, unregisterChainPack } from './chains.js';
 
 const HOST_MAJOR = 2;
 const PACK_NAME = /^(core|vendor|community|private|local)\.[a-z][a-z0-9_-]*(\.[a-z][a-zA-Z0-9_-]*)+$/;
@@ -95,6 +96,21 @@ export function validateManifest(host: Host, manifest: Record<string, unknown>, 
     const runtime = m['runtime'] as { language?: unknown; entry?: unknown } | undefined;
     if (!runtime || typeof runtime !== 'object' || typeof runtime.language !== 'string') throw err('pack_validation_failed', 'a node pack MUST declare runtime.language', { reason: 'invalid_manifest' });
     if (!Array.isArray(m['nodes'])) throw err('pack_validation_failed', 'a node pack MUST declare nodes[]', { reason: 'invalid_manifest' });
+  }
+  if (m['kind'] === 'workflow-chain') {
+    // §Exact pins FIRST. The schema also rejects an unpinned reference, but a
+    // schema failure is a generic refusal (and under devValidate: strict it is
+    // an internal error); the host's own rule MUST produce the host's own
+    // error, naming the reference the author has to fix. Then the schema for
+    // everything the pin rule does not cover, then expansion — a chain that
+    // cannot expand is not registrable, so the refusal lands here rather than
+    // at the first run that needed it.
+    assertExactPins(m);
+    host.validate('workflow-chain-pack-manifest', m, `chain pack ${name}@${version}`);
+    registerChainPack(host, m);
+  }
+  if (m['kind'] === 'form-content') {
+    host.validate('form-content-pack-manifest', m, `form pack ${name}@${version}`);
   }
   if (m['kind'] === 'prompt') {
     if (!Array.isArray(m['prompts']) || m['prompts'].length === 0) throw err('pack_validation_failed', 'a prompt pack MUST declare prompts[] (minItems 1)', { reason: 'invalid_manifest' });

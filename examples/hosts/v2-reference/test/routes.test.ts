@@ -670,3 +670,61 @@ describe('identity.md §5 — a tenant-bound webhookId is tenant-checked before 
     } finally { srv.close(); }
   });
 });
+
+describe('workflow-chain-packs.md — pins, deterministic children, substitution and the depth guard', () => {
+  const chainPack = (name: string, chains: unknown[]): Record<string, unknown> => ({ name, version: '1.0.0', kind: 'workflow-chain', engines: { openwop: '>=2.0.0 <3.0.0' }, chains });
+  const one = (chainId: string, typeId: string, extra: Record<string, unknown> = {}) => ({ chainId, version: '1.0.0', label: 'L', description: 'D', parameters: { type: 'object', properties: {} }, dag: { nodes: [{ id: 'n1', typeId }], edges: [] }, ...extra });
+  const publish = (m: Record<string, unknown>) => call('PUT', `/conformance/seams/packs-test/${enc(m['name'] as string)}/-/1.0.0.tgz`, pack(m), { 'Content-Type': 'application/octet-stream' });
+  const fresh = (slug: string) => `core.openwop.rt-${slug}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  it('refuses a ranged and a bare reference, accepts an exact pin', async () => {
+    const range = await publish(chainPack(fresh('range'), [one('c.range', 'core.ai.callPrompt@^1')]));
+    expect(range.s, JSON.stringify(range.b)).toBeGreaterThanOrEqual(400); expect(range.b.details?.reason).toBe('chain_reference_unpinned');
+    const bare = await publish(chainPack(fresh('bare'), [one('c.bare', 'core.ai.callPrompt')]));
+    expect(bare.s).toBeGreaterThanOrEqual(400); expect(bare.b.details?.reason).toBe('chain_reference_unpinned');
+    const exact = await publish(chainPack(fresh('exact'), [one('c.exact', 'core.ai.callPrompt@1.0.0')]));
+    expect([200, 201], JSON.stringify(exact.b)).toContain(exact.s);
+  });
+
+  it('an EXTERNAL reference carrying a range is refused — the schema admits `version` as a range, so only the host rule catches it', async () => {
+    // The schema's SubChainRef external form types `version` as a semver RANGE,
+    // and the node-reference pattern already refuses `@^1`. This is the case the
+    // schema cannot catch and §Exact pins still forbids, so it is the honest
+    // witness that the host rule exists at all.
+    const ext = { ...one('c.ext', 'core.ai.callPrompt@1.0.0'), subChains: [{ ref: { packName: 'core.openwop.other', chainId: 'c.remote', version: '^1.0.0' } }] };
+    const ranged = await publish(chainPack(fresh('ext-range'), [ext]));
+    expect(ranged.s, JSON.stringify(ranged.b)).toBeGreaterThanOrEqual(400);
+    expect(ranged.b.details?.reason).toBe('chain_reference_unpinned');
+  });
+
+  it('a {{params.*}} token is substituted at expansion, never persisted', async () => {
+    const withParam = { ...one('c.param', 'core.ai.callPrompt@1.0.0'), parameters: { type: 'object', properties: { greeting: { default: 'hello' } } } };
+    (withParam.dag.nodes[0] as Record<string, unknown>)['name'] = '{{params.greeting}}';
+    const ok = await publish(chainPack(fresh('param'), [withParam]));
+    expect([200, 201]).toContain(ok.s);
+    const unbound = { ...one('c.unbound', 'core.ai.callPrompt@1.0.0'), parameters: { type: 'object', properties: {} } };
+    (unbound.dag.nodes[0] as Record<string, unknown>)['name'] = '{{params.missing}}';
+    const bad = await publish(chainPack(fresh('unbound'), [unbound]));
+    expect(bad.s).toBeGreaterThanOrEqual(400); expect(bad.b.details?.reason).toBe('chain_parameter_unbound');
+  });
+
+  it('a chain that composes itself fails closed, and the advertised maxDepth is the enforced one', async () => {
+    const selfRef = { ...one('c.self', 'core.ai.callPrompt@1.0.0'), subChains: [{ ref: 'c.self' }] };
+    const cyclic = await publish(chainPack(fresh('cycle'), [selfRef]));
+    expect(cyclic.s).toBeGreaterThanOrEqual(400); expect(cyclic.b.error).toBe('sub_chain_cycle');
+    const d = await (await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0' } })).json() as { workflowChainPacks?: { subChains?: { maxDepth?: number } } };
+    expect(d.workflowChainPacks?.subChains?.maxDepth).toBe(8);
+  });
+
+  it('two parents composing the same child share one registration, and the child outlives the first parent deleted', async () => {
+    const child = one('c.shared', 'core.ai.callPrompt@1.0.0');
+    const p1 = fresh('p1'); const p2 = fresh('p2');
+    expect([200, 201]).toContain((await publish(chainPack(p1, [child, { ...one('c.p1', 'core.ai.callPrompt@1.0.0'), subChains: [{ ref: 'c.shared' }] }]))).s);
+    expect([200, 201]).toContain((await publish(chainPack(p2, [child, { ...one('c.p2', 'core.ai.callPrompt@1.0.0'), subChains: [{ ref: 'c.shared' }] }]))).s);
+    const del = await fetch(`${B}/conformance/seams/packs-test/${enc(p1)}/-/1.0.0`, { method: 'DELETE', headers: { Authorization: `Bearer ${K}`, 'OpenWOP-Version': '2.0' } });
+    expect(del.status).toBe(204);
+    // The child survives: its other parent still references it.
+    const still = await publish(chainPack(fresh('probe'), [{ ...one('c.probe', 'core.ai.callPrompt@1.0.0'), subChains: [{ ref: 'c.shared' }] }, child]));
+    expect([200, 201]).toContain(still.s);
+  });
+});

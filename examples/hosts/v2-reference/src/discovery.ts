@@ -89,6 +89,9 @@ export function v2Document(host: Host): Record<string, unknown> {
     // interop.md: the facets carry every required field; the seams profile drives the exchange (§22/§23) and the audit event is on the host's own log.
     a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions] }),
     mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr } }),
+    // workflow-chain-packs.md: registering, expanding and bounding chains is the
+    // obligation; the advertised maxDepth IS the enforced one (chains.ts).
+    workflowChainPacks: record('witnessable-gated', { subChains: { maxDepth: c.chainMaxDepth } }),
     packs: record('claims-check', { testMode: { isolated: true, scopes: ['core', 'vendor', 'community', 'private', 'local'] } }),
     // security-defaults.md §Sandbox isolation: the family binds the eight node-pack-sandbox-* invariants; the seam (§8) is how the suite drives them.
     sandbox: record('seam-gated', { isolationModel: SANDBOX_FACET.isolationModel, allowedHostCalls: [...SANDBOX_FACET.allowedHostCalls], memoryLimitBytes: c.sandboxMemoryLimitBytes, wallClockLimitMs: c.sandboxWallClockLimitMs }),
