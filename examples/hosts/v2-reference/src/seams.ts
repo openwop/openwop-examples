@@ -8,6 +8,7 @@
  *   POST sample/auth/credential/{mint,revoke}   the per-lane revoke seam (RFC 0170 §B.3)
  *   POST sample/test/workload-identity/resolve  §20 workload identity (RFC 0154 / 0170 §B.4)
  *   POST sample/test/sandbox-{load,invoke}      §8 sandbox seam (RFC 0173 §B; sandbox.ts)
+ *   POST sample/auth/{saml/validate,scim/provision} + GET sample/auth/subject-links   RFC 0050 seams; the link record (RFC 0159/0163; saml-scim.ts)
  *   PUT/GET/DELETE packs-test/{name}/-/{version}[.tgz|.sig]   the isolated pack catalog
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
  */
@@ -25,6 +26,7 @@ import { route, type Ctx, type Reply, type Route } from './router.js';
 import { verifyInbound } from './webhooks.js';
 import type { Host } from './host.js';
 import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
+import { samlValidate, scimProvision, subjectLink } from './saml-scim.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
 /** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
@@ -237,6 +239,24 @@ async function sandboxInvoke(ctx: Ctx): Promise<Reply> {
   return { status: 200, body: await invokeSandboxed(ctx.host, body.typeId, args, allowed) };
 }
 
+/** RFC 0050 seams (host-sample-test-seams.md): the host's genuine SAML ACS and SCIM server, driven by the suite. */
+async function samlValidateRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<Record<string, unknown>>();
+  return samlValidate(ctx.subject?.tenant ?? ctx.host.config.tenant, body, ctx.host.config.webhookAllowPrivate);
+}
+async function scimProvisionRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<Record<string, unknown>>();
+  return scimProvision(ctx.subject?.tenant ?? ctx.host.config.tenant, body, ctx.host.config.webhookAllowPrivate);
+}
+/** identity.md §3 — the link is a record a host can show. */
+async function subjectLinksRoute(ctx: Ctx): Promise<Reply> {
+  const externalId = ctx.url.searchParams.get('externalId');
+  if (!externalId) throw err('validation_error', 'externalId is REQUIRED');
+  const link = subjectLink(ctx.subject?.tenant ?? ctx.host.config.tenant, externalId);
+  if (!link) throw err('not_found', 'no subject link for that externalId');
+  return { status: 200, body: { link } };
+}
+
 export function seamRoutes(host: Host): Route[] {
   if (!host.config.seamsProfile) return [];
   const p = SEAMS_PREFIX;
@@ -248,6 +268,9 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/auth/credential/mint`, true, mint),
     route('POST', `${p}/sample/auth/credential/revoke`, true, revoke),
     route('POST', `${p}/sample/test/workload-identity/resolve`, true, workloadResolve),
+    route('POST', `${p}/sample/auth/saml/validate`, true, samlValidateRoute),
+    route('POST', `${p}/sample/auth/scim/provision`, true, scimProvisionRoute),
+    route('GET', `${p}/sample/auth/subject-links`, true, subjectLinksRoute),
     route('POST', `${p}/sample/test/sandbox-load`, true, sandboxLoad),
     route('POST', `${p}/sample/test/sandbox-invoke`, true, sandboxInvoke),
     route('PUT', `${p}/packs-test/{name}/-/{version}.tgz`, true, packPut),
