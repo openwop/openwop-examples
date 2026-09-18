@@ -561,13 +561,13 @@ describe('RFC 0159 / RFC 0163 — the saml + scim lanes form a link record on on
     // The IdP is the operator's process (scripts/synthetic-idp.ts, built on the suite's minter); it is not part of the host's compile unit.
     const { spawn } = await import('node:child_process');
     const startIdp = (port: number, entityID?: string): Promise<{ url: string; entityID: string; close: () => void }> => new Promise((resolve, reject) => {
-      const child = spawn('npx', ['tsx', 'scripts/synthetic-idp.ts', String(port), ...(entityID ? [entityID] : [])], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/synthetic-idp.ts', String(port), ...(entityID ? [entityID] : [])], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '';
-      child.stdout.on('data', (c: Buffer) => { out += c.toString(); const m = /synthetic IdP (\S+) at (http:\/\/\S+)/.exec(out); if (m) resolve({ entityID: m[1] as string, url: m[2] as string, close: () => child.kill() }); });
+      child.stdout.on('data', (c: Buffer) => { out += c.toString(); const m = /synthetic IdP (\S+) at (http:\/\/\S+)/.exec(out); if (m) resolve({ entityID: m[1] as string, url: m[2] as string, close: () => { child.stdin.end(); child.kill(); } }); });
       child.on('exit', (code) => reject(new Error(`synthetic IdP exited ${code}`)));
     });
-    const idp = await startIdp(3839);
-    const other = await startIdp(3840, 'urn:openwop:conformance:idp-B');
+    const idp = await startIdp(0);
+    const other = await startIdp(0, 'urn:openwop:conformance:idp-B');
     const scimUrl = 'urn:openwop:conformance:scim';
     try {
       for (const variant of ['alg-none', 'bad-signature', 'unsigned', 'expired', 'not-yet-valid', 'signature-wrapping']) {
