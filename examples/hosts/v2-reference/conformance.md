@@ -1,6 +1,20 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-17, `@openwop/openwop-conformance@2.3.2` + `@openwop/spec-artifacts@2.3.2` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, build `commit:4e164465`.**
+> **Measurement — 2026-09-17, `@openwop/openwop-conformance@2.4.0` + `@openwop/spec-artifacts@2.4.0` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:f940927928a63dbcf2417760a99befc3c6a0330c` (generated `2026-09-18T03:52:16Z`).**
+>
+> **RFC 0148 §A dispositions (243 rows, 1971 assertions): executed-pass 229 · executed-fail 0 · blocked 0 · inapplicable 14 · skipped 0.** All three claimed profiles certified — `openwop-discovery-core` (witnessCount 3), `openwop-core-standard` (13), `openwop-conformance-seams-v2` (4).
+>
+> **Signed bundle: [`bundle-v3.json`](./bundle-v3.json)** — `witnessSha256` **`d3241cbf163b…`**, Ed25519 under key id `v2-reference-3`.
+>
+> **What this cut adds.** Every optional family the host has implemented since the 2.3.2 row is now ADVERTISED and therefore MEASURED, not described: `sandbox` (#50), `saml` + `scim` (#51), `a2a` + `mcp` (#52), `webhooks` per-contract fan-out (#53), `workflowChainPacks` (#54). `inapplicable` falls 44 → 14 and eight of the nine host-tier ids move from *implemented* to *witnessed in committed evidence*. The ninth is `forms`, which stays unadvertised: the family obliges field validation and internationalized labels at a form-bearing surface this host does not have, and advertising it to turn one row green would make the discovery document lie.
+>
+> **The 14 inapplicable rows** are honest gaps, not skips: `forms` (2 rows) and the `connections` provider-conflict seam (3) are unadvertised families; `0168.coherence-not-in-bundle` is inapplicable in the npm layout; `0170.run-diff-identical` and `memory-attribution-replay-stable` need surfaces this host does not serve; `v2-bound-id-kinds`'s `deliveryId` leg records a CORPUS gap — the kind is bound in `ids.schema.json` but no read surface in the corpus returns one, so no suite can witness it on any host.
+>
+> **Supplied, not lucky.** `skipped 0` needs `OPENWOP_TEST_IMPLEMENTED_CHANGE_ID` naming a change id in `OPENWOP_IMPLEMENTED_CHANGE_IDS` (both `rfc-0176-witness`), plus the `a2a`/`mcp` fake peers and the synthetic SAML IdP running. **Preflight every one of those before certifying:** the first attempt at this cut recorded three `blocked` rows — and one `blocked` row denies certification under RFC 0168 §E.1 — because the synthetic IdP had exited, which is indistinguishable from a broken host in the result. `scripts/cut-bundle.sh` now drives a real SCIM provision and a real SAML assertion and asserts the `link` field is present before it starts the suite.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-17, `@openwop/openwop-conformance@2.3.2` + `@openwop/spec-artifacts@2.3.2` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 4`, build `commit:4e164465`.**
 >
 > **RFC 0148 §A dispositions (239 rows, 1686 assertions): executed-pass 195 · executed-fail 0 · blocked 0 · inapplicable 44 · skipped 0.** All three claimed profiles certified.
 >

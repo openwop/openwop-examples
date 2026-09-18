@@ -106,6 +106,12 @@ v2-reference/
 └── conformance.md        the honest tally
 ```
 
+## Cutting the bundle
+
+`./scripts/cut-bundle.sh` cuts [`bundle-v3.json`](./bundle-v3.json): it starts the host and the synthetic IdP, **preflights every opt-in fixture**, then runs the suite with `--target-major 2 --require-behavior --max-workers 1 --certify`. `PREFLIGHT_ONLY=1 ./scripts/cut-bundle.sh` checks the fixtures and stops.
+
+The preflight is the point. RFC 0168 §E.1 denies certification for ANY `blocked` row, and a dead fixture records `blocked` exactly like a broken host would — so the two are indistinguishable in the result. The script therefore drives a real SCIM provision and a real SAML assertion and asserts the `link` field is present, checking the FIELD each scenario reads rather than that a process exists. It also sets `OPENWOP_WEBHOOK_ALLOW_PRIVATE=1`, which is required and not optional: the suite's webhook receivers and the IdP are both on loopback and the egress guard refuses them without it.
+
 ## The SAML/SCIM seams need a synthetic IdP
 
-`host-sample-test-seams.md` leaves the synthetic IdP's HTTP shape to the operator. This host's is `scripts/synthetic-idp.ts` (built on the suite's `createSyntheticSamlIdp()`): `GET {idpUrl}/metadata → { entityID, certificatePem }` and `GET {idpUrl}/assert?variant=<v>&nameId=<n> → { entityID, certificatePem, assertion }`. Run `npx tsx scripts/synthetic-idp.ts 3839`, then cut with `OPENWOP_TEST_SAML_IDP_URL=http://127.0.0.1:3839 OPENWOP_TEST_SCIM_URL=urn:openwop:conformance:scim` (the SCIM URL names the connection; the host is the SCIM server).
+`host-sample-test-seams.md` leaves the synthetic IdP's HTTP shape to the operator. This host's is `scripts/synthetic-idp.ts` (built on the suite's `createSyntheticSamlIdp()`): `GET {idpUrl}/metadata → { entityID, certificatePem }` and `GET {idpUrl}/assert?variant=<v>&nameId=<n> → { entityID, certificatePem, assertion }`. Run `npx tsx scripts/synthetic-idp.ts 3839` (add `--exit-with-parent` only when a harness pipes its stdin — a detached launch would otherwise exit at once), then cut with `OPENWOP_TEST_SAML_IDP_URL=http://127.0.0.1:3839 OPENWOP_TEST_SCIM_URL=urn:openwop:conformance:scim` (the SCIM URL names the connection; the host is the SCIM server).
