@@ -561,7 +561,7 @@ describe('RFC 0159 / RFC 0163 — the saml + scim lanes form a link record on on
     // The IdP is the operator's process (scripts/synthetic-idp.ts, built on the suite's minter); it is not part of the host's compile unit.
     const { spawn } = await import('node:child_process');
     const startIdp = (port: number, entityID?: string): Promise<{ url: string; entityID: string; close: () => void }> => new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/synthetic-idp.ts', String(port), ...(entityID ? [entityID] : [])], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/synthetic-idp.ts', String(port), ...(entityID ? [entityID] : []), '--exit-with-parent'], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '';
       child.stdout.on('data', (c: Buffer) => { out += c.toString(); const m = /synthetic IdP (\S+) at (http:\/\/\S+)/.exec(out); if (m) resolve({ entityID: m[1] as string, url: m[2] as string, close: () => { child.stdin.end(); child.kill(); } }); });
       child.on('exit', (code) => reject(new Error(`synthetic IdP exited ${code}`)));

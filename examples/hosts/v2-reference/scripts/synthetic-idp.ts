@@ -34,9 +34,12 @@ export function startSyntheticIdp(port = 0, entityID?: string): Promise<{ url: s
 }
 
 if (process.argv[1] && process.argv[1].endsWith('synthetic-idp.ts')) {
-  // A spawned IdP dies with its parent: the test pipes stdin and the end of the pipe ends the process,
-  // so no orphan keeps a port bound after the harness exits (CI's retired lane reuses 3839).
-  if (!process.stdin.isTTY) { process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); }
+  // `--exit-with-parent` ties the process to a piped stdin, so a spawning test
+  // harness leaves no orphan holding the port (CI's retired lane reuses 3839).
+  // It is OPT-IN: a detached operator launch (`npx tsx … &`) has a stdin that
+  // ends immediately, and tying to it silently killed the IdP mid-cut — the
+  // subject-link rows then recorded `blocked` with no sign of why.
+  if (process.argv.includes('--exit-with-parent')) { process.stdin.resume(); process.stdin.on('end', () => process.exit(0)); }
   const port = Number(process.argv[2] ?? 3839);
   startSyntheticIdp(port, process.argv[3]).then((s) => console.log(`synthetic IdP ${s.entityID} at ${s.url}`)).catch((e) => { console.error(e); process.exit(1); });
 }
