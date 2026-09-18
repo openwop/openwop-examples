@@ -595,3 +595,55 @@ describe('RFC 0159 / RFC 0163 — the saml + scim lanes form a link record on on
     } finally { idp.close(); other.close(); }
   }, 30_000);
 });
+
+describe('interop.md — negotiation is authenticated, floored and audited (RFC 0175 §D)', () => {
+  const startPeers = (a2a: string, mcp: string): Promise<{ a2a: string; mcp: string; close: () => void }> => new Promise((resolve, reject) => {
+    const { spawn } = require('node:child_process') as typeof import('node:child_process');
+    const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/fake-peers.ts', a2a, mcp], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = ''; child.stdout.on('data', (c: Buffer) => { out += c.toString(); const m = /fake peers a2a=(\S+) mcp=(\S+)/.exec(out); if (m) resolve({ a2a: m[1] as string, mcp: m[2] as string, close: () => { child.stdin.end(); child.kill(); } }); });
+    child.on('exit', (code) => reject(new Error(`fake peers exited ${code}`)));
+  });
+  const decided = async (runId: string) => (await call('GET', `/runs/${enc(runId)}/events/poll?timeout=1`)).b.events.filter((e: { type: string }) => e.type === 'negotiation.decided');
+  it('accepts a dual-era peer at the preferred version and leaves negotiation.decided on the host log; refuses a below-floor peer with interop_version_unsupported and audits that too', async () => {
+    const peers = await startPeers('1.0,0.3', '2026-07-28,2025-06-18');
+    try {
+      const a = await call('POST', '/conformance/seams/sample/a2a/invoke', { peerUrl: peers.a2a });
+      expect(a.s).toBe(200); expect(a.b.negotiatedVersion).toBe('1.0');
+      const ev = await decided(a.b.runId); expect(ev.length).toBe(1); expect(ev[0].payload.outcome).toBe('accepted'); expect(ev[0].payload.peerDigest).toMatch(/^[0-9a-f]{64}$/);
+      const m = await call('POST', '/conformance/seams/sample/mcp/invoke', { serverUrl: peers.mcp });
+      expect(m.s).toBe(200); expect(m.b.negotiatedVersion).toBe('2026-07-28');
+      const mrtr = await call('POST', '/conformance/seams/sample/mcp/invoke', { serverUrl: peers.mcp, tool: 'needs_input', clientCapabilities: { elicitation: {} }, elicitationAnswer: { name: 'Ada' } });
+      expect(mrtr.s).toBe(200); expect(mrtr.b.mrtr?.inputRequiredSeen).toBe(true); expect(mrtr.b.mrtr?.requestStateEchoed).toBe(true);
+      const low = await call('POST', '/conformance/seams/sample/mcp/invoke', { serverUrl: peers.mcp, requestVersion: '2025-06-18' });
+      expect(low.s).toBe(400); expect(low.b.error).toBe('interop_version_unsupported'); expect(low.b.details.protocol).toBe('mcp');
+      const lowEv = await decided(low.b.details.runId); expect(lowEv[0].payload.outcome).toBe('refused'); expect(lowEv[0].payload.reason).toBe('below-floor');
+    } finally { peers.close(); }
+  }, 30_000);
+  it('a peer offering only a below-floor version is refused without the host speaking it on the wire; an unauthenticated exchange never lands below preferredVersion', async () => {
+    const peers = await startPeers('0.3', '2025-06-18');
+    try {
+      const a = await call('POST', '/conformance/seams/sample/a2a/invoke', { peerUrl: peers.a2a, authenticated: true, peerOffersOnly: '0.3' });
+      expect(a.s).toBe(400); expect(a.b.error).toBe('interop_version_unsupported'); expect((await decided(a.b.details.runId))[0].payload.reason).toBe('below-floor');
+      const u = await call('POST', '/conformance/seams/sample/a2a/invoke', { peerUrl: peers.a2a, authenticated: false, peerOffersOnly: '0.3' });
+      expect(u.s).toBe(400); expect(['below-floor', 'unauthenticated']).toContain((await decided(u.b.details.runId))[0].payload.reason);
+      const m = await call('POST', '/conformance/seams/sample/mcp/invoke', { serverUrl: peers.mcp, authenticated: false });
+      expect(m.s).toBe(400);
+    } finally { peers.close(); }
+  }, 30_000);
+  it('the MRTR ceiling: a server that keeps asking is refused at maxRounds + 1 with mcp_mrtr_rounds_exceeded and sees no retry beyond it', async () => {
+    const { createServer } = await import('node:http');
+    let calls = 0;
+    const srv = createServer((req, res) => { let b = ''; req.on('data', (c: Buffer) => { b += c.toString(); }); req.on('end', () => {
+      const rpc = JSON.parse(b) as { id: unknown; method: string };
+      const reply = (result: unknown) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result })); };
+      if (rpc.method === 'server/discover') return reply({ resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: {} });
+      calls += 1; reply({ resultType: 'input_required', inputRequests: { who: { method: 'elicitation/create', params: {} } }, requestState: `loop:${calls}` });
+    }); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    try {
+      const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/mcp`;
+      const r = await call('POST', '/conformance/seams/sample/mcp/invoke', { serverUrl: url, tool: 'needs_input_loop', arguments: { rounds: 9 }, clientCapabilities: { elicitation: {} }, elicitationAnswer: { name: 'Ada' } });
+      expect(r.s).toBe(422); expect(r.b.error).toBe('mcp_mrtr_rounds_exceeded'); expect(calls).toBeLessThanOrEqual(5);
+    } finally { srv.close(); }
+  }, 30_000);
+});
