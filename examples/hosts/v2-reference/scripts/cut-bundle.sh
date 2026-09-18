@@ -75,6 +75,16 @@ echo "  discovery advertises: $FAM (suite fakes enabled in-process)"
 if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture answered"; exit 0; fi
 
 # ---- cut
+# Strict mode (--require-behavior, wired in suite 2.4.5 — before that the flag
+# was a silent no-op) demands that every capability-gated scenario either find
+# its family ADVERTISED or find an explicit opt-out. Three families this host
+# deliberately does not implement, declared here rather than left to soft-skip:
+#   family.forms   — obliges field validation and i18n labels at a form-bearing
+#                    surface this host does not have (the ninth host-tier id).
+#   family.memory  — no agent-memory layer.
+#   connections.packsSupported — no connection-provider surface.
+# An opt-out is a CLAIM, not a hiding place: it appears in the bundle.
+OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported \
 OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 \
 OPENWOP_MCP_FAKE_SERVER=true \
 OPENWOP_TEST_SAML_IDP_URL="$IDP" \

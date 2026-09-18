@@ -1,6 +1,18 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.2` + `@openwop/spec-artifacts@2.4.2` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:87cb8a007d056b2579ccfab622498fcca427088c`.**
+> **Measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.5` + `@openwop/spec-artifacts@2.4.5`, `--target-major 2 --require-behavior --max-workers 1`, build `commit:5416757dbe69`.**
+>
+> **RFC 0148 §A dispositions (245 rows, 1997 assertions): executed-pass 231 · executed-fail 0 · blocked 0 · inapplicable 7 · skipped 7.** All three profiles certified. `witnessSha256` **`4d76b664e02e…`**.
+>
+> **This is the first cut in which `--require-behavior` did anything.** Suite 2.4.5 wired it; before that the CLI never parsed the flag and it fell into a silent default arm, so every earlier bundle from this host named strict mode on its command line and ran NON-strict. The first genuinely strict run returned **7 `executed-fail` rows** — none of them a protocol defect: strict mode requires every capability-gated scenario to find its family advertised **or** find an explicit opt-out, and this host had neither for `family.forms`, `family.memory` and `connections.packsSupported`. It had been soft-skipping all three silently.
+>
+> **The three opt-outs are now declared** (`OPENWOP_OPTED_OUT_PROFILES`), which is why `skipped` moves 0 → 7. An opt-out is a CLAIM, not a hiding place: each row carries "operator declared an honest opt-out" in the bundle where a reader can see it. `forms` remains the deliberate one — the family obliges field validation and internationalized labels at a form-bearing surface this host does not have.
+>
+> **10 rows now carry `partial-witness:`.** Suite 2.4.5 propagates that marker to the per-`it` records, which are what RFC 0174 §B.1 rule 4 reads; before, a leg that asserted and then soft-skipped recorded a bare `executed-pass`. The clearest case is `0173.webhook-durable-delivery.dead-letter`, which ends in an unconditional soft-skip on every host because the corpus serves no dead-letter read surface at all.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.2` + `@openwop/spec-artifacts@2.4.2` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:87cb8a007d056b2579ccfab622498fcca427088c`.**
 >
 > **RFC 0148 §A dispositions (245 rows, 1985 assertions): executed-pass 231 · executed-fail 0 · blocked 0 · inapplicable 14 · skipped 0.** All three claimed profiles certified. `witnessSha256` **`9217e347b85f…`**, Ed25519 under key id `v2-reference-3`.
 >
