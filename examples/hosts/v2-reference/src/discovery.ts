@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import type { Host } from './host.js';
 import { SANDBOX_FACET } from './sandbox.js';
 import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
+import { A2A_FACET, MCP_FACET } from './interop.js';
 
 const SINCE = '2.0';
 /**
@@ -85,6 +86,9 @@ export function v2Document(host: Host): Record<string, unknown> {
     compensation: record('seam-gated', { profileVersion: '1', orderingModels: ['reverse-completion'], manualIntervention: false }),
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
     heartbeat: record('witnessable-gated', { minIntervalSec: 5, maxRuntimeMs: 1000, deliveryChannel: '/host/events' }),
+    // interop.md: the facets carry every required field; the seams profile drives the exchange (§22/§23) and the audit event is on the host's own log.
+    a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions] }),
+    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr } }),
     packs: record('claims-check', { testMode: { isolated: true, scopes: ['core', 'vendor', 'community', 'private', 'local'] } }),
     // security-defaults.md §Sandbox isolation: the family binds the eight node-pack-sandbox-* invariants; the seam (§8) is how the suite drives them.
     sandbox: record('seam-gated', { isolationModel: SANDBOX_FACET.isolationModel, allowedHostCalls: [...SANDBOX_FACET.allowedHostCalls], memoryLimitBytes: c.sandboxMemoryLimitBytes, wallClockLimitMs: c.sandboxWallClockLimitMs }),

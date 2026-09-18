@@ -8,6 +8,7 @@
  *   POST sample/auth/credential/{mint,revoke}   the per-lane revoke seam (RFC 0170 §B.3)
  *   POST sample/test/workload-identity/resolve  §20 workload identity (RFC 0154 / 0170 §B.4)
  *   POST sample/test/sandbox-{load,invoke}      §8 sandbox seam (RFC 0173 §B; sandbox.ts)
+ *   POST sample/{a2a,mcp}/invoke                §22/§23 negotiation drivers (RFC 0175; interop.ts)
  *   POST sample/auth/{saml/validate,scim/provision} + GET sample/auth/subject-links   RFC 0050 seams; the link record (RFC 0159/0163; saml-scim.ts)
  *   PUT/GET/DELETE packs-test/{name}/-/{version}[.tgz|.sig]   the isolated pack catalog
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
@@ -27,6 +28,7 @@ import { verifyInbound } from './webhooks.js';
 import type { Host } from './host.js';
 import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
 import { samlValidate, scimProvision, subjectLink } from './saml-scim.js';
+import { a2aInvoke, mcpInvoke } from './interop.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
 /** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
@@ -257,6 +259,10 @@ async function subjectLinksRoute(ctx: Ctx): Promise<Reply> {
   return { status: 200, body: { link } };
 }
 
+/** host-sample-test-seams.md §22/§23 — the host's real A2A / MCP client path, driven once. */
+async function a2aInvokeRoute(ctx: Ctx): Promise<Reply> { return a2aInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>()); }
+async function mcpInvokeRoute(ctx: Ctx): Promise<Reply> { return mcpInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>()); }
+
 export function seamRoutes(host: Host): Route[] {
   if (!host.config.seamsProfile) return [];
   const p = SEAMS_PREFIX;
@@ -271,6 +277,8 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/auth/saml/validate`, true, samlValidateRoute),
     route('POST', `${p}/sample/auth/scim/provision`, true, scimProvisionRoute),
     route('GET', `${p}/sample/auth/subject-links`, true, subjectLinksRoute),
+    route('POST', `${p}/sample/a2a/invoke`, true, a2aInvokeRoute),
+    route('POST', `${p}/sample/mcp/invoke`, true, mcpInvokeRoute),
     route('POST', `${p}/sample/test/sandbox-load`, true, sandboxLoad),
     route('POST', `${p}/sample/test/sandbox-invoke`, true, sandboxInvoke),
     route('PUT', `${p}/packs-test/{name}/-/{version}.tgz`, true, packPut),
