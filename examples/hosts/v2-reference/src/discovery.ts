@@ -13,6 +13,7 @@ import { SERVED_VERSIONS, V1_RETIRED, ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Host } from './host.js';
+import { SANDBOX_FACET } from './sandbox.js';
 
 const SINCE = '2.0';
 /**
@@ -84,6 +85,8 @@ export function v2Document(host: Host): Record<string, unknown> {
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
     heartbeat: record('witnessable-gated', { minIntervalSec: 5, maxRuntimeMs: 1000, deliveryChannel: '/host/events' }),
     packs: record('claims-check', { testMode: { isolated: true, scopes: ['core', 'vendor', 'community', 'private', 'local'] } }),
+    // security-defaults.md §Sandbox isolation: the family binds the eight node-pack-sandbox-* invariants; the seam (§8) is how the suite drives them.
+    sandbox: record('seam-gated', { isolationModel: SANDBOX_FACET.isolationModel, allowedHostCalls: [...SANDBOX_FACET.allowedHostCalls], memoryLimitBytes: c.sandboxMemoryLimitBytes, wallClockLimitMs: c.sandboxWallClockLimitMs }),
     workspace: record('witnessable-gated', { versioned: false, maxFileBytes: 262_144, maxFiles: 256 }),
     auth: record('seam-gated', {
       lanes: [
