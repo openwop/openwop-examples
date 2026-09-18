@@ -29,6 +29,7 @@ import type { Host } from './host.js';
 import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
 import { samlValidate, scimProvision, subjectLink } from './saml-scim.js';
 import { a2aInvoke, mcpInvoke } from './interop.js';
+import { unregisterChainPack } from './chains.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
 /** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
@@ -175,6 +176,11 @@ async function packGet(ctx: Ctx): Promise<Reply> {
   return { status: 200, raw: p.tarball, contentType: 'application/tar+gzip', headers: { ETag: `"${p.sha256}"` } };
 }
 async function packDelete(ctx: Ctx): Promise<Reply> {
+  // §Co-registered children: a parent's deletion decrements its children, and a
+  // child goes only when its LAST parent does — so this runs before the row is
+  // gone and can still read the manifest.
+  const row = ctx.host.store.getPack('test', ctx.params['name'] as string, ctx.params['version'] as string);
+  if (row?.kind === 'workflow-chain') unregisterChainPack(ctx.host, JSON.parse(row.manifest_json) as Record<string, unknown>);
   if (!ctx.host.store.deletePack('test', ctx.params['name'] as string, ctx.params['version'] as string)) throw err('pack_version_not_found', 'no such test-catalog version');
   return { status: 204 };
 }

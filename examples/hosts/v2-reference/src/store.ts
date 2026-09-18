@@ -288,6 +288,19 @@ CREATE TABLE IF NOT EXISTS packs (
   published_at TEXT NOT NULL,
   PRIMARY KEY (catalog, name, version)
 );
+CREATE TABLE IF NOT EXISTS chain_workflows (
+  workflow_id TEXT PRIMARY KEY,
+  definition_json TEXT NOT NULL
+);
+-- workflow-chain-packs.md §Co-registered children: one row per (parent, child)
+-- carrying the RESOLVED reference, so the count is the number of parents and a
+-- re-instantiation reproduces the same child.
+CREATE TABLE IF NOT EXISTS chain_ownership (
+  parent_chain_id TEXT NOT NULL,
+  child_workflow_id TEXT NOT NULL,
+  resolved_ref TEXT NOT NULL,
+  PRIMARY KEY (parent_chain_id, child_workflow_id)
+);
 CREATE TABLE IF NOT EXISTS annotations (
   annotation_id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,
@@ -498,6 +511,28 @@ export class Store {
   }
 
   // ── packs ─────────────────────────────────────────────────────────────────
+  upsertChainChild(workflowId: string, definitionJson: string): void {
+    this.db.prepare('INSERT INTO chain_workflows (workflow_id, definition_json) VALUES (?, ?) ON CONFLICT(workflow_id) DO UPDATE SET definition_json = excluded.definition_json').run(workflowId, definitionJson);
+  }
+  deleteChainChild(workflowId: string): void {
+    this.db.prepare('DELETE FROM chain_workflows WHERE workflow_id = ?').run(workflowId);
+  }
+  getChainWorkflow(workflowId: string): { workflow_id: string; definition_json: string } | undefined {
+    return this.db.prepare('SELECT * FROM chain_workflows WHERE workflow_id = ?').get(workflowId) as { workflow_id: string; definition_json: string } | undefined;
+  }
+  recordChainOwnership(parentChainId: string, childWorkflowId: string, resolvedRef: string): void {
+    this.db.prepare('INSERT INTO chain_ownership (parent_chain_id, child_workflow_id, resolved_ref) VALUES (?, ?, ?) ON CONFLICT(parent_chain_id, child_workflow_id) DO UPDATE SET resolved_ref = excluded.resolved_ref').run(parentChainId, childWorkflowId, resolvedRef);
+  }
+  dropChainOwnership(parentChainId: string, childWorkflowId: string): void {
+    this.db.prepare('DELETE FROM chain_ownership WHERE parent_chain_id = ? AND child_workflow_id = ?').run(parentChainId, childWorkflowId);
+  }
+  chainChildrenOf(parentChainId: string): string[] {
+    return (this.db.prepare('SELECT child_workflow_id FROM chain_ownership WHERE parent_chain_id = ?').all(parentChainId) as Array<{ child_workflow_id: string }>).map((r) => r.child_workflow_id);
+  }
+  chainParentCount(childWorkflowId: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM chain_ownership WHERE child_workflow_id = ?').get(childWorkflowId) as { n: number }).n;
+  }
+
   getPack(catalog: string, name: string, version: string): PackRow | undefined {
     return this.db.prepare('SELECT * FROM packs WHERE catalog = ? AND name = ? AND version = ?').get(catalog, name, version) as PackRow | undefined;
   }

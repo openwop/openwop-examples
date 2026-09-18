@@ -123,6 +123,8 @@ export interface HostConfig {
   readonly workloadTrustRoots: readonly string[];
   readonly replayRetentionDays: number;
   /** security-defaults.md §Sandbox isolation — the caps the `sandbox` facet advertises and the child enforces. */
+  /** workflow-chain-packs.md §Composition depth — the advertised bound IS the enforced one. */
+  readonly chainMaxDepth: number;
   readonly sandboxMemoryLimitBytes: number;
   readonly sandboxWallClockLimitMs: number;
 }
@@ -166,6 +168,7 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     hostBuild: build ? { kind: build[1] as HostConfig['hostBuild']['kind'], id: build[2] as string } : { kind: 'commit', id: 'dev' },
     workloadTrustRoots: env('OPENWOP_WORKLOAD_TRUST_ROOTS', 'spiffe://example').split(',').map((s) => s.trim()).filter((s) => s.length > 0),
     replayRetentionDays: envInt('OPENWOP_REPLAY_RETENTION_DAYS', 30),
+    chainMaxDepth: envInt('OPENWOP_CHAIN_MAX_DEPTH', 8),
     sandboxMemoryLimitBytes: envInt('OPENWOP_SANDBOX_MEMORY_LIMIT_BYTES', 48 * 1024 * 1024),
     sandboxWallClockLimitMs: envInt('OPENWOP_SANDBOX_WALL_CLOCK_LIMIT_MS', 2000),
     ...overrides,
