@@ -9,7 +9,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { guardedRequest, validateEgressUrl } from './egress.js';
 import { err } from './errors.js';
-import { nowIso, tenantBound } from './ids.js';
+import { checkTenantBound, nowIso, tenantBound } from './ids.js';
 import type { AppendedEvent, Host } from './host.js';
 import type { DeliveryRow, WebhookRow } from './store.js';
 import { docForMajor, v1TypeOf } from './codemap.js';
@@ -56,6 +56,12 @@ export function registerWebhook(host: Host, tenant: string, body: Record<string,
 }
 
 export function unregisterWebhook(host: Host, tenant: string, webhookId: string): void {
+  // identity.md §5: the tenant segment is checked BEFORE the lookup. Checking it
+  // after means a foreign-tenant id that happens not to exist answers `404`, which
+  // is the wrong refusal AND discloses nothing only by accident — the grammar
+  // check is what makes the `403` independent of existence. RFC 0187 §A.1 binds
+  // `webhookId` to the kind, so the check has something to read.
+  checkTenantBound(webhookId, tenant, 'webhookId');
   const row = host.store.getWebhook(webhookId);
   if (!row) throw err('not_found', 'no such webhook');
   if (row.tenant !== tenant) throw err('forbidden', 'the subscription belongs to another tenant');
