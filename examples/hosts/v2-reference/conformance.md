@@ -1,6 +1,14 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.1` + `@openwop/spec-artifacts@2.4.1` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:c6ee97c247ef4d255d67afb61daf615c71e0dfe4`.**
+> **Measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.2` + `@openwop/spec-artifacts@2.4.2` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:87cb8a007d056b2579ccfab622498fcca427088c`.**
+>
+> **RFC 0148 §A dispositions (245 rows, 1985 assertions): executed-pass 231 · executed-fail 0 · blocked 0 · inapplicable 14 · skipped 0.** All three claimed profiles certified. `witnessSha256` **`9217e347b85f…`**, Ed25519 under key id `v2-reference-3`.
+>
+> **`check-cut-gates.mjs --host-bundle` now reports `0 failed, 0 blocked` — RFC 0167 §G.2 passes completely against this bundle for the first time.** The last outstanding id was `openwop.requirement.0173.pack-isolation.seam`, which no host could ever have witnessed: it was minted only inside `v2-pack-isolation`'s shared `invoke()` helper, and `generate-requirement-registry.mjs` harvests `req(…)` within an `it`, so the id never reached `requirements.json` and no bundle could carry a row — while `check-cut-gates.mjs`, which scans every `req(` in the source, went on demanding one. Suite 2.4.2 gave the seam contract its own `it`; this cut carries the row.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.1` + `@openwop/spec-artifacts@2.4.1` (npm, corpus stamp VERIFIED), `--target-major 2 --require-behavior --max-workers 1`, build `commit:c6ee97c247ef4d255d67afb61daf615c71e0dfe4`.**
 >
 > **RFC 0148 §A dispositions (244 rows, 1979 assertions): executed-pass 230 · executed-fail 0 · blocked 0 · inapplicable 14 · skipped 0.** All three claimed profiles certified. `witnessSha256` **`b8a7d1d6941d…`**, Ed25519 under key id `v2-reference-3`.
 >
