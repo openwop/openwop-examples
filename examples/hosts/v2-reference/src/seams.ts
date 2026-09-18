@@ -7,6 +7,7 @@
  *   POST sample/webhooks/receive                receiveWebhookDelivery (RFC 0176 §D.2)
  *   POST sample/auth/credential/{mint,revoke}   the per-lane revoke seam (RFC 0170 §B.3)
  *   POST sample/test/workload-identity/resolve  §20 workload identity (RFC 0154 / 0170 §B.4)
+ *   POST sample/test/sandbox-{load,invoke}      §8 sandbox seam (RFC 0173 §B; sandbox.ts)
  *   PUT/GET/DELETE packs-test/{name}/-/{version}[.tgz|.sig]   the isolated pack catalog
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
  */
@@ -23,6 +24,7 @@ import { TERMINAL } from './host.js';
 import { route, type Ctx, type Reply, type Route } from './router.js';
 import { verifyInbound } from './webhooks.js';
 import type { Host } from './host.js';
+import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
 /** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
@@ -217,6 +219,24 @@ async function wsDelete(ctx: Ctx): Promise<Reply> {
   return { status: 204 };
 }
 
+/** host-sample-test-seams.md §8 — the synthetic pack registry is pre-populated; `load` answers for every listed pack. */
+async function sandboxLoad(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ packId?: unknown }>();
+  if (typeof body.packId !== 'string' || body.packId.length === 0) throw err('validation_error', 'packId is REQUIRED');
+  const known = sandboxPackIds().some((t) => t.startsWith(`${body.packId}.`) || t === body.packId);
+  if (!known) throw err('not_found', `no synthetic pack ${body.packId}`);
+  return { status: 200, body: { ok: true, packId: body.packId } };
+}
+
+/** §8 `sandbox-invoke`: 200 { result } | 200 { error: SandboxError } — a refusal is a RESULT of the invocation, not an HTTP error. */
+async function sandboxInvoke(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ typeId?: unknown; args?: unknown; allowedHostCalls?: unknown }>();
+  if (typeof body.typeId !== 'string' || body.typeId.length === 0) throw err('validation_error', 'typeId is REQUIRED');
+  const args = body.args !== undefined && body.args !== null && typeof body.args === 'object' && !Array.isArray(body.args) ? (body.args as Record<string, unknown>) : {};
+  const allowed = Array.isArray(body.allowedHostCalls) && body.allowedHostCalls.every((c) => typeof c === 'string') ? (body.allowedHostCalls as string[]) : [];
+  return { status: 200, body: await invokeSandboxed(ctx.host, body.typeId, args, allowed) };
+}
+
 export function seamRoutes(host: Host): Route[] {
   if (!host.config.seamsProfile) return [];
   const p = SEAMS_PREFIX;
@@ -228,6 +248,8 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/auth/credential/mint`, true, mint),
     route('POST', `${p}/sample/auth/credential/revoke`, true, revoke),
     route('POST', `${p}/sample/test/workload-identity/resolve`, true, workloadResolve),
+    route('POST', `${p}/sample/test/sandbox-load`, true, sandboxLoad),
+    route('POST', `${p}/sample/test/sandbox-invoke`, true, sandboxInvoke),
     route('PUT', `${p}/packs-test/{name}/-/{version}.tgz`, true, packPut),
     route('GET', `${p}/packs-test/{name}/-/{version}.tgz`, true, packGet),
     route('GET', `${p}/packs-test/{name}/-/{version}.sig`, true, packSig),

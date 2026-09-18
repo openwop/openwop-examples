@@ -12,6 +12,8 @@
 >
 > **The 44 inapplicable rows:** optional families this host does not advertise (`a2a`, `mcp`, `saml`, `scim`, packs), each recorded with its reason; `0168.coherence-not-in-bundle` is inapplicable in the npm layout.
 >
+> **Since this measurement (openwop-examples #50):** the host advertises the `sandbox` family — isolationModel `process`: one `--permission` child per invocation with an empty environment, a heap cap and a wall-clock kill — and mounts the §8 seam (`sample/test/sandbox-{load,invoke}`) with the eleven synthetic packs as real escape attempts. `v2-pack-isolation` (9 legs) passes locally; it was one of the nine host-tier ids no committed bundle witnessed. Next cut moves `inapplicable` 44 → 43 and adds the pack-isolation rows.
+>
 > **Since this measurement (openwop-examples #49):** the v1 read path now spells an era-3 log's `type` through the inverted codemap row (`persistence.md` §The v1 wire of an era-`3` log — 36 renamed rows, bijection verified at load), on poll, SSE and the fan-out incl. the `OpenWOP-Event-Type` header; a 1.x registration names its types in v1 spelling. The noop fixture emits none of the renamed types, so the bundle totals are unchanged; the route test seeds `run.resuming` and reads it both ways.
 
 ---

@@ -524,3 +524,32 @@ describe('persistence.md §The v1 wire of an era-3 log — a renamed type reads 
     srv.close();
   });
 });
+
+describe('security-defaults.md §Sandbox isolation — the §8 seam runs real escape attempts in a permission-model child', () => {
+  const invoke = (typeId: string, extra: Record<string, unknown> = {}) => call('POST', '/conformance/seams/sample/test/sandbox-invoke', { typeId, ...extra });
+  it('advertises sandbox with isolationModel process and the caps the child enforces', async () => {
+    const d = await (await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0' } })).json() as { sandbox?: { isolationModel?: string; wallClockLimitMs?: number } };
+    expect(d.sandbox?.isolationModel).toBe('process');
+    expect(typeof d.sandbox?.wallClockLimitMs).toBe('number');
+  });
+  it('refuses the five escapes with the canonical escapeKind', async () => {
+    for (const [typeId, kind] of [['misbehave.fs-escape-read', 'host-fs-escape'], ['misbehave.fs-escape-write', 'host-fs-escape'], ['misbehave.env-leak', 'host-env-leak'], ['misbehave.network-escape', 'network-escape'], ['misbehave.process-escape', 'host-process-escape']] as const) {
+      const r = await invoke(typeId);
+      expect(r.s).toBe(200);
+      expect(r.b.error?.code, typeId).toBe('sandbox_escape_attempt');
+      expect(r.b.error?.details?.escapeKind, typeId).toBe(kind);
+    }
+  });
+  it('kills a wall-clock overrun and reports a heap overrun', async () => {
+    expect((await invoke('misbehave.timeout')).b.error?.code).toBe('sandbox_timeout');
+    expect((await invoke('misbehave.memory-bomb')).b.error?.code).toBe('sandbox_memory_exceeded');
+  }, 30_000);
+  it('a fresh context per invocation, the capability gate, and the two well-behaved baselines', async () => {
+    for (let i = 0; i < 3; i++) expect((await invoke('misbehave.cross-pack-mutate')).b.result?.shared).toBe(1);
+    const denied = await invoke('misbehave.capability-gate-violation');
+    expect(denied.b.error?.code).toBe('sandbox_capability_denied'); expect(denied.b.error?.details?.requestedCapability).toBe('fetch');
+    expect((await invoke('well-behaved.echo', { args: { input: 'hi' } })).b.result?.echoed).toBe('hi');
+    expect((await invoke('well-behaved.host-fetch', { allowedHostCalls: ['fetch'] })).b.result?.status).toBe(200);
+    expect((await call('POST', '/conformance/seams/sample/test/sandbox-load', { packId: 'misbehave' })).s).toBe(200);
+  }, 30_000);
+});
