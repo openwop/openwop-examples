@@ -553,3 +553,45 @@ describe('security-defaults.md §Sandbox isolation — the §8 seam runs real es
     expect((await call('POST', '/conformance/seams/sample/test/sandbox-load', { packId: 'misbehave' })).s).toBe(200);
   }, 30_000);
 });
+
+describe('RFC 0159 / RFC 0163 — the saml + scim lanes form a link record on one trust root, and a leaver is denied', () => {
+  const V = '/conformance/seams/sample/auth/saml/validate';
+  const P = '/conformance/seams/sample/auth/scim/provision';
+  it('valid assertion accepted, every negative refused 401, link formed only on the bound trust root, deactivation sets deniedAt and denies', async () => {
+    // The IdP is the operator's process (scripts/synthetic-idp.ts, built on the suite's minter); it is not part of the host's compile unit.
+    const { spawn } = await import('node:child_process');
+    const startIdp = (port: number, entityID?: string): Promise<{ url: string; entityID: string; close: () => void }> => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/synthetic-idp.ts', String(port), ...(entityID ? [entityID] : [])], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', (c: Buffer) => { out += c.toString(); const m = /synthetic IdP (\S+) at (http:\/\/\S+)/.exec(out); if (m) resolve({ entityID: m[1] as string, url: m[2] as string, close: () => { child.stdin.end(); child.kill(); } }); });
+      child.on('exit', (code) => reject(new Error(`synthetic IdP exited ${code}`)));
+    });
+    const idp = await startIdp(0);
+    const other = await startIdp(0, 'urn:openwop:conformance:idp-B');
+    const scimUrl = 'urn:openwop:conformance:scim';
+    try {
+      for (const variant of ['alg-none', 'bad-signature', 'unsigned', 'expired', 'not-yet-valid', 'signature-wrapping']) {
+        const r = await call('POST', V, { idpUrl: idp.url, variant });
+        expect(r.s, variant).toBe(401); expect(r.b.error, variant).toBe('unauthenticated');
+      }
+      const externalId = `idp-op-${Date.now().toString(36)}`;
+      const created = await call('POST', P, { scimUrl, op: 'create-user', externalId, userName: 'r.smith', idpUrl: idp.url });
+      expect(created.s).toBe(201);
+      const ok = await call('POST', V, { idpUrl: idp.url, variant: 'valid', nameId: externalId });
+      expect(ok.s).toBe(200); expect(ok.b.authenticated).toBe(true);
+      expect(ok.b.link?.keyClass).toBe('opaque-idp'); expect(ok.b.link?.issuer).toBe(idp.entityID); expect(ok.b.link?.deniedAt).toBeUndefined();
+      const read = await call('GET', `/conformance/seams/sample/auth/subject-links?externalId=${encodeURIComponent(externalId)}`);
+      expect(read.s).toBe(200); expect(read.b.link?.a?.subjectId).toBe(ok.b.link.a.subjectId);
+      // RFC 0163 §B: a second trust root asserting the same NameID does not link and is not authenticated through the first's connection.
+      const otherId = `idp-op-x-${Date.now().toString(36)}`;
+      await call('POST', P, { scimUrl: 'urn:openwop:conformance:scim-2', op: 'create-user', externalId: otherId, idpUrl: idp.url });
+      const cross = await call('POST', V, { idpUrl: other.url, variant: 'valid', nameId: otherId });
+      expect(cross.s).toBe(200); expect(cross.b.link).toBeUndefined();
+      // RFC 0159 §A.3: deactivation → deniedAt on the record → the SAML decision fails closed.
+      const off = await call('POST', P, { scimUrl, op: 'deactivate-user', externalId });
+      expect(off.s).toBe(200); expect(typeof off.b.link?.deniedAt).toBe('string');
+      const after = await call('POST', V, { idpUrl: idp.url, variant: 'valid', nameId: externalId });
+      expect(after.s).toBe(200); expect(after.b.authenticated).toBe(false); expect(after.b.linkedDenied).toBe(true);
+    } finally { idp.close(); other.close(); }
+  }, 30_000);
+});

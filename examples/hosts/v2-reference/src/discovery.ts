@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Host } from './host.js';
 import { SANDBOX_FACET } from './sandbox.js';
+import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
 
 const SINCE = '2.0';
 /**
@@ -92,8 +93,12 @@ export function v2Document(host: Host): Record<string, unknown> {
       lanes: [
         { lane: 'api-key', issuers: [API_KEY_ISSUER], revocation: 'next-request', minimumAssurance: 'bearer' },
         { lane: 'session', issuers: [SESSION_ISSUER], revocation: 'next-request', minimumAssurance: 'bearer' },
+        // RFC 0159 / RFC 0163: both lanes advertised implies the linking contract; the key class is declared (§A.1) and honoured (§A.2).
+        { lane: 'saml', issuers: [SAML_LANE_ISSUER], revocation: 'not-on-or-after', minimumAssurance: 'bearer' },
+        { lane: 'scim', issuers: [SAML_LANE_ISSUER], revocation: 'bound-connection', minimumAssurance: 'bearer' },
         { lane: 'workload', issuers: [...c.workloadTrustRoots], revocation: 'delegation-expiry', minimumAssurance: 'key-bound', delegationProofs: ['svid-chain', 'mtls-key-binding'] },
       ],
+      subjectLinkKey: SUBJECT_LINK_KEY,
     }),
   };
   if (c.seamsProfile) {

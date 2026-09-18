@@ -105,3 +105,7 @@ v2-reference/
 ├── bundle-v3.json        the signed certification bundle
 └── conformance.md        the honest tally
 ```
+
+## The SAML/SCIM seams need a synthetic IdP
+
+`host-sample-test-seams.md` leaves the synthetic IdP's HTTP shape to the operator. This host's is `scripts/synthetic-idp.ts` (built on the suite's `createSyntheticSamlIdp()`): `GET {idpUrl}/metadata → { entityID, certificatePem }` and `GET {idpUrl}/assert?variant=<v>&nameId=<n> → { entityID, certificatePem, assertion }`. Run `npx tsx scripts/synthetic-idp.ts 3839`, then cut with `OPENWOP_TEST_SAML_IDP_URL=http://127.0.0.1:3839 OPENWOP_TEST_SCIM_URL=urn:openwop:conformance:scim` (the SCIM URL names the connection; the host is the SCIM server).
