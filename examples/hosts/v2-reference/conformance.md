@@ -1,6 +1,24 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-19, `@openwop/openwop-conformance@2.24.0` + `@openwop/spec-artifacts@2.24.0` (npm, corpus stamp VERIFIED — 277 vendored `api/` + `schemas/` files match their SHA-256 digests), `--target-major 2 --require-behavior --max-workers 1`, build `commit:b3c06d179f49`.**
+> **Measurement — 2026-09-19, `@openwop/openwop-conformance@2.25.0` + `@openwop/spec-artifacts@2.25.0` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:796b076`.**
+>
+> **RFC 0148 §A dispositions (246 rows, 1996 assertions): executed-pass 233 · executed-fail 0 · blocked 0 · inapplicable 6 · skipped 7.** All three claimed profiles certified. `witnessSha256` **`c27516af1841…`**, Ed25519 under key id `v2-reference-3`.
+>
+> **This host now advertises `webhooks.deadLetter` and serves the canonical RFC 0188 read.** It had served `GET /webhooks/{webhookId}/dead-letters` for some time — as a **vendor extension**, under `extensions.<org>.host.deadLetterRead`, returning a vendor-shaped body. Advertising the facet without fixing the shape would have published exactly the vacuous claim RFC 0193 exists to stop, so the projection was rewritten to §A:
+>
+> - The page is closed over `{deliveries, nextCursor}`. The old root carried `webhookId` and `retentionDays`, which `additionalProperties: false` forbids, and named the array `deadLetters`.
+> - The record carries the nine required fields. It previously omitted `webhookId`, `eventId`, `expiresAt` and `reason`, and carried `sequence` and **`lastError`** — the subscriber's response text. §B.1 makes the record content-free *by construction*, and that field was the reason why: a dead-letter queue is precisely the traffic the subscriber never received.
+> - §A.2's tenant check now runs **before** the lookup, so a foreign-tenant id that does not exist answers `403 id_tenant_mismatch` rather than `404`. It had been checked after, which made the refusal depend on existence.
+> - §A.3 pagination: `limit` clamped to the advertised `maxPageSize`, an HMAC-signed keyset cursor **bound to the subscription**, so one minted elsewhere is refused `400 validation_error` rather than interpreted.
+> - `expiresAt` is derived from the same config the retention purge uses, so `expiresAt − deadLetteredAt` checks the mechanism rather than restating a number.
+>
+> **The first cut after advertising the facet was NOT CERTIFIED, and the suite was right to refuse it.** 232 passed, 0 failed, and `0188.dead-letter-content-free` recorded `blocked`: that leg read a **fresh** subscription's sink, looped over zero rows and asserted nothing, which RFC 0148 §A resolves to `blocked`. It could never have passed on any host — it went unnoticed only because every host until now recorded `inapplicable` for want of the facet. Fixed in suite **2.25.0** (openwop/openwop#1432); this cut is against that suite.
+>
+> **`0173.webhook-durable-delivery.dead-letter` is now a clean `executed-pass`.** It had carried a partial-witness note on every bundle ever cut — first "the corpus serves no dead-letter read surface", then "the host does not advertise the facet". The sink half of `webhooks.md` §Durability is witnessed here for the first time by any bundle.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-19, `@openwop/openwop-conformance@2.24.0` + `@openwop/spec-artifacts@2.24.0` (npm, corpus stamp VERIFIED — 277 vendored `api/` + `schemas/` files match their SHA-256 digests), `--target-major 2 --require-behavior --max-workers 1`, build `commit:b3c06d179f49`.**
 >
 > **RFC 0148 §A dispositions (246 rows, 1977 assertions): executed-pass 231 · executed-fail 0 · blocked 0 · inapplicable 8 · skipped 7.** All three claimed profiles certified. `witnessSha256` **`277906937a14…`**, Ed25519 under key id `v2-reference-3`.
 >

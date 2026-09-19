@@ -68,15 +68,112 @@ export function unregisterWebhook(host: Host, tenant: string, webhookId: string)
   host.store.deleteWebhook(webhookId);
 }
 
-export function deadLetterProjection(host: Host, tenant: string, webhookId: string): Record<string, unknown> {
+/**
+ * RFC 0188 §A — the dead-letter read.
+ *
+ * This replaces a VENDOR-SHAPED projection that shared the path. The old body
+ * was `{webhookId, retentionDays, deadLetters[]}` with per-record `sequence`
+ * and `lastError`; the canonical page is closed over `{deliveries, nextCursor}`
+ * and the record closed over nine required fields, so three of the old keys are
+ * now schema violations rather than extras.
+ *
+ * `lastError` is the one that mattered. It carried the subscriber's response
+ * text, and §B.1 makes the record content-free BY CONSTRUCTION — a dead-letter
+ * queue is every event the subscriber failed to receive, so a record that
+ * carries any of the exchange turns one read scope into a replay of exactly
+ * that traffic for the whole retention window.
+ */
+const DEAD_LETTER_CURSOR_KEY = randomBytes(32);
+
+/** The cursor binds the subscription: §A.3 refuses one minted for another. */
+function mintDeadLetterCursor(webhookId: string, row: DeliveryRow): string {
+  const payload = `${webhookId}|${row.updated_at}|${row.delivery_id}`;
+  const mac = createHmac('sha256', DEAD_LETTER_CURSOR_KEY).update(payload).digest('base64url');
+  return Buffer.from(`${payload}|${mac}`).toString('base64url');
+}
+
+function readDeadLetterCursor(raw: string, webhookId: string): { updatedAt: string; deliveryId: string } {
+  let decoded = '';
+  try { decoded = Buffer.from(raw, 'base64url').toString('utf8'); } catch { /* fall through to the shape check */ }
+  const parts = decoded.split('|');
+  if (parts.length !== 4) throw err('validation_error', 'cursor is not one this host minted', { field: 'cursor' });
+  const [boundWebhook, updatedAt, deliveryId, mac] = parts as [string, string, string, string];
+  const expect = createHmac('sha256', DEAD_LETTER_CURSOR_KEY).update(`${boundWebhook}|${updatedAt}|${deliveryId}`).digest('base64url');
+  if (mac.length !== expect.length || !timingSafeEqual(Buffer.from(mac), Buffer.from(expect))) {
+    throw err('validation_error', 'cursor is not one this host minted', { field: 'cursor' });
+  }
+  // §A.3: a cursor minted by one subscription MUST NOT be accepted on another.
+  // Checked AFTER the mac so a forged binding cannot be used to probe.
+  if (boundWebhook !== webhookId) throw err('validation_error', 'cursor was minted for another subscription', { field: 'cursor' });
+  return { updatedAt, deliveryId };
+}
+
+/** `eventId` lives in the stored delivery body; §B.1 forbids returning the body, not reading one field out of it. */
+function eventIdOf(row: DeliveryRow): string {
+  try {
+    const parsed = JSON.parse(row.body) as { event?: { eventId?: unknown } };
+    const id = parsed.event?.eventId;
+    if (typeof id === 'string' && id.length > 0) return id;
+  } catch { /* a body that will not parse cannot yield an id */ }
+  // Deterministic and unique per delivery, so the field is never absent on a
+  // record the schema requires it on.
+  return `evt_${row.delivery_id}`;
+}
+
+export function deadLetterProjection(
+  host: Host,
+  tenant: string,
+  webhookId: string,
+  query?: URLSearchParams,
+): Record<string, unknown> {
+  // §A.2 — the tenant segment is checked BEFORE the lookup, so a foreign-tenant
+  // id that happens not to exist answers 403 and not 404. Checking after made
+  // the refusal depend on existence, which is the disclosure the rule forbids.
+  checkTenantBound(webhookId, tenant, 'webhookId');
   const row = host.store.getWebhook(webhookId);
   if (!row) throw err('not_found', 'no such webhook');
   if (row.tenant !== tenant) throw err('forbidden', 'the subscription belongs to another tenant');
-  return {
-    webhookId,
-    retentionDays: host.config.webhookRetentionDays,
-    deadLetters: host.store.deadLetters(webhookId).map((d) => ({ deliveryId: d.delivery_id, runId: d.run_id, sequence: d.sequence, eventType: d.event_type, attempts: d.attempts, lastStatus: d.last_status, lastError: d.last_error, deadLetteredAt: d.updated_at })),
+
+  const max = host.config.webhookDeadLetterMaxPageSize;
+  let limit = max;
+  const limitRaw = query?.get('limit') ?? null;
+  if (limitRaw !== null) {
+    if (!/^[1-9]\d*$/.test(limitRaw)) throw err('validation_error', 'limit MUST be an integer >= 1', { field: 'limit' });
+    limit = Math.min(Number(limitRaw), max);
+  }
+  const cursorRaw = query?.get('cursor') ?? null;
+  const after = cursorRaw !== null ? readDeadLetterCursor(cursorRaw, webhookId) : undefined;
+
+  // One extra row tells us whether a next page exists without a second query.
+  const rows = host.store.deadLetters(webhookId, { limit: limit + 1, ...(after ? { after } : {}) });
+  const page = rows.slice(0, limit);
+  const retentionMs = host.config.webhookRetentionDays * 86_400_000;
+
+  const body: Record<string, unknown> = {
+    deliveries: page.map((d) => ({
+      deliveryId: d.delivery_id,
+      webhookId: d.webhook_id,
+      runId: d.run_id,
+      eventId: eventIdOf(d),
+      eventType: d.event_type,
+      attempts: d.attempts,
+      deadLetteredAt: d.updated_at,
+      // §A.4: `expiresAt` is what turns `retentionDays` from an advertisement
+      // into an observable — it is derived from the SAME config the purge timer
+      // uses, so a reader checking `expiresAt - deadLetteredAt` against the
+      // advertised facet is checking the mechanism, not a restated number.
+      expiresAt: new Date(Date.parse(d.updated_at) + retentionMs).toISOString(),
+      // This host exhausts retries; it has no payload-projection failure path,
+      // so claiming `payload_unprojectable` anywhere would be a reason it never
+      // actually has.
+      reason: 'retries_exhausted',
+      ...(d.last_status !== null ? { lastStatus: d.last_status } : {}),
+    })),
   };
+  if (rows.length > limit && page.length > 0) {
+    body['nextCursor'] = mintDeadLetterCursor(webhookId, page[page.length - 1] as DeliveryRow);
+  }
+  return body;
 }
 
 function tagsOverlap(subscription: WebhookRow, runTags: readonly string[]): boolean {

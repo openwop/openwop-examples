@@ -73,7 +73,7 @@ export function v2Document(host: Host): Record<string, unknown> {
     fixtures: advertisedFixtures(host),
     testing: { testKeyPrefix: 'ow2k_' },
     extensions: {
-      [`${EXTENSION_ORG}.host`]: { hostId: HOST_ID, build: c.hostBuild, webhookBackoffBaseMs: c.webhookBackoffBaseMs, deadLetterRetentionDays: c.webhookRetentionDays, deadLetterRead: '/webhooks/{webhookId}/dead-letters' },
+      [`${EXTENSION_ORG}.host`]: { hostId: HOST_ID, build: c.hostBuild, webhookBackoffBaseMs: c.webhookBackoffBaseMs, deadLetterRetentionDays: c.webhookRetentionDays },
     },
     // ── core families ───────────────────────────────────────────────────
     limits: stable('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
@@ -81,7 +81,12 @@ export function v2Document(host: Host): Record<string, unknown> {
     interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),
     runList: record('witnessable-gated', { maxPageSize: 100, filters: ['workflowId', 'status'] }),
     replay: record('witnessable-gated', { modes: ['replay', 'branch'], retention: { days: c.replayRetentionDays }, effectSeamsManifest: '/host/effect-seams' }),
-    webhooks: record('witnessable-gated', { signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' } }),
+    // RFC 0188 §A.5 — the DELIVERY dead-letter sink, distinct from the top-level
+    // `deadLetter` FAMILY (RFC 0053), which is the RUN sink. `retentionDays` is
+    // read from the same config the purge timer uses and that `expiresAt` is
+    // derived from, so the advertisement, the record and the mechanism cannot
+    // drift apart into a number that is merely restated.
+    webhooks: record('witnessable-gated', { signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, deadLetter: { retentionDays: c.webhookRetentionDays, maxPageSize: c.webhookDeadLetterMaxPageSize } }),
     idempotency: record('witnessable-gated', { crossRegion: 'single-region' }),
     compensation: record('seam-gated', { profileVersion: '1', orderingModels: ['reverse-completion'], manualIntervention: false }),
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),

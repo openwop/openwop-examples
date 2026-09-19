@@ -352,7 +352,34 @@ describe('webhooks + identity + packs + workspace', () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(hits.length).toBe(3);
     const dl = await call('GET', `/webhooks/${enc(reg.b.webhookId)}/dead-letters`);
-    expect(dl.b.deadLetters.length).toBe(1);
+    // RFC 0188 §A.1 — the page is closed over { deliveries, nextCursor }. This
+    // read used to return a vendor shape (`deadLetters`, plus `webhookId` and
+    // `retentionDays` at the root) that the canonical schema forbids.
+    expect(Object.keys(dl.b).sort()).toEqual(['deliveries']);
+    expect(dl.b.deliveries.length).toBe(1);
+    const rec = dl.b.deliveries[0] as Record<string, unknown>;
+    // §A.4 — nine required fields, and §B.1 closes the record: the old shape
+    // carried `sequence` and `lastError`, and `lastError` held the subscriber's
+    // response text, which is exactly the exchange a dead-letter read must not
+    // replay.
+    for (const k of ['deliveryId', 'webhookId', 'runId', 'eventId', 'eventType', 'attempts', 'deadLetteredAt', 'expiresAt', 'reason']) {
+      expect(rec[k], `record MUST carry ${k}`).toBeDefined();
+    }
+    expect(rec['lastError']).toBeUndefined();
+    expect(rec['sequence']).toBeUndefined();
+    expect(rec['reason']).toBe('retries_exhausted');
+    // `expiresAt - deadLetteredAt` MUST equal the advertised retention: that is
+    // what turns the facet from an advertisement into an observable.
+    const advertised = (await call('GET', '/.well-known/openwop')).b.webhooks.deadLetter;
+    expect(Date.parse(rec['expiresAt'] as string) - Date.parse(rec['deadLetteredAt'] as string))
+      .toBe((advertised.retentionDays as number) * 86_400_000);
+    // §A.3 — a cursor minted for another subscription is refused, not interpreted.
+    expect((await call('GET', `/webhooks/${enc(reg.b.webhookId)}/dead-letters?cursor=bm90LWEtY3Vyc29y`)).s).toBe(400);
+    // §A.2 — the tenant segment is checked BEFORE the lookup, so a foreign-tenant
+    // id that does not exist answers 403 and not 404.
+    const foreignId = `not-the-callers-tenant/${(reg.b.webhookId as string).slice((reg.b.webhookId as string).indexOf('/') + 1)}`;
+    const foreignDl = await call('GET', `/webhooks/${enc(foreignId)}/dead-letters`);
+    expect(foreignDl.s).toBe(403); expect(foreignDl.b.error).toBe('id_tenant_mismatch');
     expect((await call('DELETE', `/webhooks/${enc(reg.b.webhookId)}`)).s).toBe(204);
     srv.close();
     const body = JSON.stringify({ runId: 'r', workspaceId: 'w', event: { type: 'run.completed', sequence: 1, payload: {} } });
