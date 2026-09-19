@@ -116,7 +116,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
       });
     }, 1),
     route('DELETE', '/v1/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }, 1),
-    route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string) })),
+    route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, ctx.url.searchParams) })),
     ...runRoutes(),
     ...seamRoutes(host),
   );

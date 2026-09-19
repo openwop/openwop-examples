@@ -112,6 +112,7 @@ export interface HostConfig {
   readonly webhookMaxAttempts: number;
   readonly webhookBackoffBaseMs: number;
   readonly webhookRetentionDays: number;
+  readonly webhookDeadLetterMaxPageSize: number;
   readonly implementedChangeIds: ReadonlySet<string>;
   readonly devValidate: 'off' | 'warn' | 'strict';
   readonly interruptSecret: string;
@@ -158,6 +159,7 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     webhookMaxAttempts: envInt('OPENWOP_WEBHOOK_MAX_ATTEMPTS', 5),
     webhookBackoffBaseMs: envInt('OPENWOP_WEBHOOK_BACKOFF_BASE_MS', 500),
     webhookRetentionDays: envInt('OPENWOP_WEBHOOK_RETENTION_DAYS', 7),
+    webhookDeadLetterMaxPageSize: envInt('OPENWOP_WEBHOOK_DEAD_LETTER_MAX_PAGE', 100),
     implementedChangeIds: new Set(env('OPENWOP_IMPLEMENTED_CHANGE_IDS', '').split(',').map((s) => s.trim()).filter((s) => s.length > 0)),
     devValidate: validate === 'strict' ? 'strict' : validate === 'off' || validate === 'false' ? 'off' : 'warn',
     interruptSecret: env('OPENWOP_INTERRUPT_SECRET', randomBytes(32).toString('hex')),

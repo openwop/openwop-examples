@@ -467,8 +467,19 @@ export class Store {
     const sets = keys.map((k) => `${k} = @${k}`).join(', ');
     this.db.prepare(`UPDATE deliveries SET ${sets}, updated_at = @updated_at WHERE delivery_id = @delivery_id`).run({ ...patch, updated_at: new Date().toISOString(), delivery_id: id });
   }
-  deadLetters(webhookId: string): DeliveryRow[] {
-    return this.db.prepare(`SELECT * FROM deliveries WHERE webhook_id = ? AND state = 'dead-lettered' ORDER BY created_at ASC`).all(webhookId) as DeliveryRow[];
+  /**
+   * RFC 0188 §A.1 — newest first, keyset-paginated. `updated_at` is when the
+   * delivery was dead-lettered (the exhausting attempt wrote it), which is what
+   * the record's `deadLetteredAt` reports and what the retention purge measures,
+   * so ordering on it keeps the page, the field and the expiry on one clock.
+   */
+  deadLetters(webhookId: string, opts?: { limit?: number; after?: { updatedAt: string; deliveryId: string } }): DeliveryRow[] {
+    const limit = opts?.limit ?? -1;
+    if (opts?.after) {
+      return this.db.prepare(`SELECT * FROM deliveries WHERE webhook_id = ? AND state = 'dead-lettered' AND (updated_at < ? OR (updated_at = ? AND delivery_id < ?)) ORDER BY updated_at DESC, delivery_id DESC LIMIT ?`)
+        .all(webhookId, opts.after.updatedAt, opts.after.updatedAt, opts.after.deliveryId, limit) as DeliveryRow[];
+    }
+    return this.db.prepare(`SELECT * FROM deliveries WHERE webhook_id = ? AND state = 'dead-lettered' ORDER BY updated_at DESC, delivery_id DESC LIMIT ?`).all(webhookId, limit) as DeliveryRow[];
   }
   purgeDeadLetters(olderThanIso: string): number {
     return this.db.prepare(`DELETE FROM deliveries WHERE state = 'dead-lettered' AND updated_at < ?`).run(olderThanIso).changes;
