@@ -57,6 +57,26 @@ jobs:
           cat /tmp/v2-reference.log; exit 1
       - name: Conformance (target major 2)
         if: steps.peers.outputs.published == 'true'
+        env:
+          # Measure the SAME host the published bundle describes. Before this,
+          # CI invoked the suite bare while scripts/cut-bundle.sh supplied a
+          # whole env block, so the two disagreed about what this host even
+          # offers — and CI has been red on main since 2026-09-18 07:46, when
+          # suite 2.4.5 first made --require-behavior do anything.
+          #
+          # The three opt-outs are the ones cut-bundle.sh declares: strict mode
+          # requires every capability-gated scenario to find its family
+          # ADVERTISED or find an explicit opt-out, and this host implements
+          # none of the three. An opt-out is a CLAIM, not a hiding place — it is
+          # recorded in the bundle where a reader can see it.
+          #
+          # The fakes are in-process and match the cut. The SAML/SCIM seam
+          # opt-ins are deliberately NOT set: they need the synthetic IdP that
+          # only cut-bundle.sh starts, and those rows skip honestly without it.
+          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported'
+          OPENWOP_A2A_FAKE_PEER: 'true'
+          OPENWOP_A2A_FAKE_PEER_VERSIONS: '1.0,0.3'
+          OPENWOP_MCP_FAKE_SERVER: 'true'
         run: npx openwop-conformance --base-url http://127.0.0.1:3838 --api-key openwop-v2-dev-key --target-major 2 --require-behavior --max-workers 4
       # ── The retirement lane ────────────────────────────────────────────
       #
@@ -106,6 +126,26 @@ jobs:
           echo "retired host verified: protocolVersions [\"2.0\"], header 1 -> 406, /v1 -> 404"
       - name: Conformance with v1 retired (target major 2)
         if: steps.peers.outputs.published == 'true'
+        env:
+          # Measure the SAME host the published bundle describes. Before this,
+          # CI invoked the suite bare while scripts/cut-bundle.sh supplied a
+          # whole env block, so the two disagreed about what this host even
+          # offers — and CI has been red on main since 2026-09-18 07:46, when
+          # suite 2.4.5 first made --require-behavior do anything.
+          #
+          # The three opt-outs are the ones cut-bundle.sh declares: strict mode
+          # requires every capability-gated scenario to find its family
+          # ADVERTISED or find an explicit opt-out, and this host implements
+          # none of the three. An opt-out is a CLAIM, not a hiding place — it is
+          # recorded in the bundle where a reader can see it.
+          #
+          # The fakes are in-process and match the cut. The SAML/SCIM seam
+          # opt-ins are deliberately NOT set: they need the synthetic IdP that
+          # only cut-bundle.sh starts, and those rows skip honestly without it.
+          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported'
+          OPENWOP_A2A_FAKE_PEER: 'true'
+          OPENWOP_A2A_FAKE_PEER_VERSIONS: '1.0,0.3'
+          OPENWOP_MCP_FAKE_SERVER: 'true'
         run: npx openwop-conformance --base-url http://127.0.0.1:3839 --api-key openwop-v2-dev-key --target-major 2 --require-behavior --max-workers 4
       - name: Retired host log on failure
         if: failure()
