@@ -1,6 +1,20 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.5` + `@openwop/spec-artifacts@2.4.5`, `--target-major 2 --require-behavior --max-workers 1`, build `commit:5416757dbe69`.**
+> **Measurement — 2026-09-19, `@openwop/openwop-conformance@2.24.0` + `@openwop/spec-artifacts@2.24.0` (npm, corpus stamp VERIFIED — 277 vendored `api/` + `schemas/` files match their SHA-256 digests), `--target-major 2 --require-behavior --max-workers 1`, build `commit:b3c06d179f49`.**
+>
+> **RFC 0148 §A dispositions (246 rows, 1977 assertions): executed-pass 231 · executed-fail 0 · blocked 0 · inapplicable 8 · skipped 7.** All three claimed profiles certified. `witnessSha256` **`277906937a14…`**, Ed25519 under key id `v2-reference-3`.
+>
+> **The previous cut's note — "the corpus serves no dead-letter read surface at all" — stopped being true at suite 2.7.0 and this cut is the proof.** RFC 0188 landed `GET /webhooks/{webhookId}/dead-letters` in `api/v2/openapi.yaml`, and the bundle changes in exactly the three ways that implies:
+>
+> - `openwop.requirement.0173.webhook-durable-delivery.dead-letter` moves from `partial-witness: blocked: no normative dead-letter read surface…` to `partial-witness: inapplicable: host does not advertise the webhooks.deadLetter facet`. The reason is now an honest host choice instead of a missing contract.
+> - Two rows **appear** — `openwop.requirement.0188.dead-letter-read` and `.dead-letter-content-free` — both `inapplicable` for the same honest reason (RFC 0188 §A.5 makes the read a `404` for a host that does not advertise the facet, not an obligation).
+> - One row **disappears**: `openwop.it.v2-bound-id-kinds.deliveryid-the-kind-has-no-wire-surface-to-be-bound-on-a-corpus-gap-recorded`. That gap is closed — `deliveryId` now has a wire surface to be bound on.
+>
+> **A stale bundle misreports the corpus, not just the host.** This host was pinned to `2.4.5` while the corpus reached `2.24.0`, and for nineteen releases its published evidence told every reader that openwop served no dead-letter read. It did, from 2.7.0 on. A bundle is a claim about the tree it ran against; re-read the date before treating one as a debt the corpus owes you.
+
+---
+
+> **SUPERSEDED measurement — 2026-09-18, `@openwop/openwop-conformance@2.4.5` + `@openwop/spec-artifacts@2.4.5`, `--target-major 2 --require-behavior --max-workers 1`, build `commit:5416757dbe69`.**
 >
 > **RFC 0148 §A dispositions (245 rows, 1997 assertions): executed-pass 231 · executed-fail 0 · blocked 0 · inapplicable 7 · skipped 7.** All three profiles certified. `witnessSha256` **`4d76b664e02e…`**.
 >
