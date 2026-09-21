@@ -101,16 +101,25 @@ curl -fsS "$BASE/.well-known/openwop" -H 'OpenWOP-Version: 2.0' >/dev/null || { 
 # that had not bound its port yet — a refusal that read as a broken fixture.
 for _ in $(seq 1 30); do curl -fsS "$IDP/metadata" >/dev/null 2>&1 && break; sleep 1; done
 
+# PUBLIC posture: prove the IdP front FORWARDS before the host is told to use it.
+# A name that resolves is not a tunnel that forwards; the edge can answer 502/530
+# for some seconds after the listener comes up.
+if [ -n "$PUBLIC" ]; then
+  for _ in $(seq 1 60); do curl -fsS --max-time 5 "$IDP_FOR_HOST/metadata" 2>/dev/null | grep -q entityID && break; sleep 1; done
+  curl -fsS --max-time 5 "$IDP_FOR_HOST/metadata" | grep -q entityID || { echo "PREFLIGHT FAIL: the IdP public front $IDP_FOR_HOST never forwarded /metadata"; exit 1; }
+  echo "  idp public front forwards: $IDP_FOR_HOST"
+fi
+
 # ---- preflight: assert the FIELD each scenario reads, not that a process exists
 ENT=$(curl -fsS "$IDP/metadata" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).entityID??""))')
 [ -n "$ENT" ] || { echo "PREFLIGHT FAIL: synthetic IdP served no entityID at $IDP"; exit 1; }
 echo "  idp entityID: $ENT"
 
 NID="preflight-$RANDOM$RANDOM"
-SC=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/conformance/seams/sample/auth/scim/provision" \
+SC=$(curl -s -o /tmp/cut-scim-preflight.json -w '%{http_code}' -X POST "$BASE/conformance/seams/sample/auth/scim/provision" \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -H 'OpenWOP-Version: 2.0' \
   -d "{\"op\":\"create-user\",\"externalId\":\"$NID\",\"idpUrl\":\"$IDP_FOR_HOST\"}")
-[ "$SC" = "201" ] || { echo "PREFLIGHT FAIL: scim provision answered $SC (want 201)"; exit 1; }
+[ "$SC" = "201" ] || { echo "PREFLIGHT FAIL: scim provision answered $SC (want 201): $(head -c 600 /tmp/cut-scim-preflight.json)"; exit 1; }
 echo "  scim provision: $SC"
 
 LINKED=$(curl -s -X POST "$BASE/conformance/seams/sample/auth/saml/validate" \

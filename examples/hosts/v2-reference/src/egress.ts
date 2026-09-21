@@ -86,7 +86,18 @@ export async function guardedRequest(url: URL, init: { method: string; headers: 
       headers: { ...init.headers, Host: url.host },
       timeout: init.timeoutMs,
       // connect to the validated address without re-resolving
-      lookup: (_h: string, _o: unknown, cb: (e: Error | null, a: string, f: number) => void) => cb(null, address, family),
+      // Node calls a custom `lookup` in TWO shapes and this answered only one.
+      // With `all: true` - what net.connect asks for on every current Node -
+      // the callback takes an ARRAY of { address, family }; answering
+      // (null, address, family) made Node read `addresses[0].address` off a
+      // string and fail every connect with "Invalid IP address: undefined".
+      // An IP-literal URL never reaches `lookup`, so loopback fixtures always
+      // worked and NOTHING ELSE EVER DID: this host could not deliver a webhook,
+      // fire an http effect, or reach an IdP at any real hostname. It went
+      // unseen because every cut ran against 127.0.0.1 under a relaxed guard -
+      // found by the first cut that relaxed nothing.
+      lookup: (_h: string, o: { all?: boolean } | undefined, cb: (e: Error | null, a: string | Array<{ address: string; family: number }>, f?: number) => void) =>
+        (o?.all === true ? cb(null, [{ address, family }]) : cb(null, address, family)),
       servername: url.protocol === 'https:' ? url.hostname : undefined,
     } as never, (res) => {
       const chunks: Buffer[] = [];
