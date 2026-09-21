@@ -58,6 +58,12 @@ for _ in $(seq 1 60); do
 done
 curl -fsS "$BASE/.well-known/openwop" -H 'OpenWOP-Version: 2.0' >/dev/null || { echo "host never answered discovery"; exit 1; }
 
+# Wait for the IdP too. This script only ever waited for the HOST, and got away
+# with it because `npx tsx` made the host the slower of the two to boot. Under
+# the supervisor the host is up first, and the preflight below curled an IdP
+# that had not bound its port yet — a refusal that read as a broken fixture.
+for _ in $(seq 1 30); do curl -fsS "$IDP/metadata" >/dev/null 2>&1 && break; sleep 1; done
+
 # ---- preflight: assert the FIELD each scenario reads, not that a process exists
 ENT=$(curl -fsS "$IDP/metadata" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).entityID??""))')
 [ -n "$ENT" ] || { echo "PREFLIGHT FAIL: synthetic IdP served no entityID at $IDP"; exit 1; }
