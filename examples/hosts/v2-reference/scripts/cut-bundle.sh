@@ -107,7 +107,7 @@ OPENWOP_TEST_IMPLEMENTED_CHANGE_ID="rfc-0176-witness" \
 npx openwop-conformance --base-url "$BASE" --api-key "$KEY" \
   --target-major 2 --require-behavior --max-workers 1 \
   --certify "$OUT" --bundle-version 3 --host-build "commit:$SHA" \
-  --signing-key keys/host.pem --signing-key-id v2-reference-3
+  --signing-key keys/host.pem --signing-key-id v2-reference-4
 
 node -e '
 const b=require("fs").readFileSync(process.argv[1],"utf8"),j=JSON.parse(b);

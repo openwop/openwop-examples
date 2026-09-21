@@ -97,7 +97,13 @@ export const DEFAULT_TENANT = 'openwop-reference-tenant';
 // Rotated 2026-09-17 (`v2-reference-2` → `v2-reference-3`): the -2 private half
 // was never on this machine either (same shape as the 09-05 rotation), so the
 // 2.3.1 re-cut signs under a fresh pair; -2's public key stays in git history.
-export const BUNDLE_SIGNING_KEY_ID = 'v2-reference-3';
+// Rotated 2026-09-20 (`v2-reference-3` → `v2-reference-4`): the -3 private half
+// was not on this machine either — the third rotation for the same reason. The
+// key is gitignored and lived only in a worktree that was later removed. From
+// -4 the private half is ALSO kept outside the repository, in the steward's
+// `~/.openwop-private-keys/v2-reference-4.host.pem`, so a later cut copies it
+// into `keys/host.pem` instead of rotating; -3's public key stays in git history.
+export const BUNDLE_SIGNING_KEY_ID = 'v2-reference-4';
 export const KEYS_DIR = new URL('../keys/', import.meta.url).pathname;
 
 export interface HostConfig {
