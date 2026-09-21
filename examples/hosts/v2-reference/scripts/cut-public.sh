@@ -77,15 +77,37 @@ open_tunnel idp "$IDP_PORT";      IDP_URL="$TUNNEL_URL"
 # resolver answered ENOTFOUND, and the SCIM preflight read 500. curl exit 6 is
 # "could not resolve host"; any HTTP answer at all (Cloudflare's 502/530 for a
 # listener that is not up yet included) means the NAME is live.
+#
+# AND THE FIRST LOOKUP MUST NOT COME TOO EARLY. Measured 2026-09-21, two cuts
+# running: a name was looked up before its A record had propagated, the recursive
+# resolver (Google, 8.8.8.8) cached the EMPTY answer, and trycloudflare.com's SOA
+# sets the negative TTL to 1800 s. The name then answered AAAA but no A for half
+# an hour; this machine has no IPv6 route, so getaddrinfo returned nothing and
+# curl exited 6 for the whole 90 s wait - with three healthy tunnels open beside
+# it. Retrying cannot outlast a 30-minute negative cache. So: (1) let the names
+# SETTLE before anything asks for them; (2) ask a DIFFERENT resolver first
+# (Cloudflare over HTTPS - a cache the host never reads), so an early miss
+# poisons nothing the cut depends on; (3) only then touch the system resolver,
+# and if IT says no while the other says yes, name the poisoned cache and stop
+# at once rather than hold ingress open for a wait that cannot succeed.
+SETTLE_SECONDS="${SETTLE_SECONDS:-30}"
+doh_has_a() {
+  curl -s --max-time 5 -H 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$1&type=A" 2>/dev/null | grep -q '"type":1,'
+}
 wait_resolves() {
-  local url="$1" rc
-  for _ in $(seq 1 90); do
+  local url="$1" host rc
+  host="${url#https://}"
+  for _ in $(seq 1 60); do doh_has_a "$host" && break; sleep 2; done
+  doh_has_a "$host" || { echo "public name has no A record after 120 s (asked Cloudflare DoH): $url" >&2; exit 1; }
+  for _ in $(seq 1 10); do
     rc=0; curl -s -o /dev/null --max-time 5 "$url" || rc=$?
     [ "$rc" -ne 6 ] && return 0
-    sleep 1
+    sleep 2
   done
-  echo "public name never resolved: $url" >&2; exit 1
+  echo "the SYSTEM resolver cannot resolve $url although its A record exists - a negatively-cached early lookup (negative TTL 1800 s). Waiting will not help; re-run, and the new tunnels get new names." >&2; exit 1
 }
+echo "letting the four names settle for ${SETTLE_SECONDS}s before anything looks them up..."
+sleep "$SETTLE_SECONDS"
 for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL"; do wait_resolves "$u"; done
 echo "all four public names resolve"
 [ "${#PIDS[@]}" -eq 4 ] || { echo "expected 4 tunnel pids recorded in this shell, have ${#PIDS[@]} - refusing to continue with ingress the trap cannot close" >&2; exit 1; }

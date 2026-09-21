@@ -65,12 +65,21 @@ export function durabilitySeamMounted(host: Host): boolean {
  * Only the kill rows witness that. `lastBootReentryMs` is reported so a boot
  * that blew its own budget is visible here rather than merely undetected.
  */
-export function recoveryBound(host: Host): { bound: number; terms: Array<{ name: string; ms: number; enforcedBy: string }>; lastBootReentryMs: number | null; bootReentryWithinBudget: boolean | null } {
+/**
+ * This host's ONE recovery class. The bound response and both kill responses name
+ * it with the same constant, because suite 2.34.0 publishes the rung in the
+ * bundle only when each kill row's class names a DECLARED entry (RFC 0158 §E):
+ * a bound that does not say which class it governs cannot be bound to the
+ * exercise that was judged against it.
+ */
+export const RECOVERY_CLASS = 'single-instance-restart';
+
+export function recoveryBound(host: Host): { class: string; bound: number; terms: Array<{ name: string; ms: number; enforcedBy: string }>; lastBootReentryMs: number | null; bootReentryWithinBudget: boolean | null } {
   const terms = [
     { name: 'supervisor.restartDelay', ms: host.config.supervisorRestartMs, enforcedBy: 'OPERATOR — the restart supervisor (scripts/supervisor.mjs); declared via OPENWOP_SUPERVISOR_RESTART_MS, not enforceable from inside the process it restarts' },
     { name: 'boot.reentryBudget', ms: host.config.bootReentryBudgetMs, enforcedBy: 'recoverInFlightRuns() — every non-terminal run is re-entered at boot, before the listener opens; the measured duration is reported beside this budget' },
   ];
-  return { bound: terms.reduce((a, t) => a + t.ms, 0), terms, lastBootReentryMs, bootReentryWithinBudget: lastBootReentryMs === null ? null : lastBootReentryMs <= host.config.bootReentryBudgetMs };
+  return { class: RECOVERY_CLASS, bound: terms.reduce((a, t) => a + t.ms, 0), terms, lastBootReentryMs, bootReentryWithinBudget: lastBootReentryMs === null ? null : lastBootReentryMs <= host.config.bootReentryBudgetMs };
 }
 
 let lastBootReentryMs: number | null = null;
@@ -158,7 +167,7 @@ async function kill(ctx: Ctx): Promise<Reply> {
     // is never called. The kill lands once the response — which carries the
     // runId the suite follows across the death — has been flushed.
     ctx.res.once('finish', () => die());
-    return { status: 202, body: { runId: run.run_id, mode, recoveryClass: 'single-instance-restart', recoveryBoundMs } };
+    return { status: 202, body: { runId: run.run_id, mode, recoveryClass: RECOVERY_CLASS, recoveryBoundMs } };
   }
 
   // during-execution: dispatch for real, and die at the run's first
@@ -172,7 +181,7 @@ async function kill(ctx: Ctx): Promise<Reply> {
     host.bus.on(`run:${run.run_id}`, (a: AppendedEvent) => { if (a.doc.type === 'node.started') die(); });
     scheduleRun(host, run.run_id);
   });
-  return { status: 202, body: { runId: run.run_id, mode, recoveryClass: 'single-instance-restart', recoveryBoundMs } };
+  return { status: 202, body: { runId: run.run_id, mode, recoveryClass: RECOVERY_CLASS, recoveryBoundMs } };
 }
 
 export function durabilityRoutes(host: Host): Route[] {

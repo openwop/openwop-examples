@@ -91,6 +91,9 @@ describe('the recovery bound is arithmetic a reader can recompute', () => {
     const { B } = await boot({ durabilitySeam: true, supervisorRestartMs: 1500, bootReentryBudgetMs: 4000 });
     const r = (await call(B, 'GET', '/host/durability/bound')).b;
     expect(r.bound).toBe(5500);
+    // The class is NAMED, and it is the one the kill responses name — suite 2.34.0
+    // derives a rung only when a kill row's class names a declared entry.
+    expect(r.class).toBe('single-instance-restart');
     expect(r.terms.reduce((a: number, t: { ms: number }) => a + t.ms, 0)).toBe(r.bound);
     expect(r.terms.map((t: { name: string }) => t.name)).toEqual(['supervisor.restartDelay', 'boot.reentryBudget']);
     expect(r.terms[0].enforcedBy).toMatch(/^OPERATOR/);

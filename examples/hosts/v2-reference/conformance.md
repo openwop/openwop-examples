@@ -1,6 +1,22 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-21, `@openwop/openwop-conformance@2.33.1` + `@openwop/spec-artifacts@2.33.1` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:a084218`. THE FIRST CUT OF THIS HOST WITH NOTHING RELAXED.**
+> **Measurement — 2026-09-21, `@openwop/openwop-conformance@2.34.0` + `@openwop/spec-artifacts@2.34.0` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:2e6e42d`. THE FIRST BUNDLE THAT CARRIES RFC 0158's RUNG AND RECOVERY BOUND.**
+>
+> **RFC 0148 §A dispositions (255 rows, 2014 assertions): executed-pass 242 · executed-fail 0 · blocked 0 · inapplicable 6 · skipped 7.** All three claimed profiles certified. `host.relaxations`: none; guard CLOSED (`PUBLIC=1`, as below). `witnessSha256` **`cb45c96fd815…`**, Ed25519 under key id `v2-reference-4`. Verified in a clean directory with the suite installed from npm, not from this checkout: zero rejections, certified list re-derived, **rung re-derived**.
+>
+> **What is new is IN the bundle, not on this page.** RFC 0158 §E publishes a rung in the certification bundle instead of in discovery, and until suite 2.34.0 the bundle had no seat for one. This bundle states `durability.rung: durable-single-instance`, and the verifier does not take its word — it re-derives it from three signed rows:
+>
+> | row | `evidence` |
+> | --- | --- |
+> | `0158.bound-is-derived` | class `single-instance-restart`, bound **6 000 ms** = `supervisor.restartDelay` 1 000 (the OPERATOR's term — this process cannot enforce its own restart) + `boot.reentryBudget` 5 000 |
+> | `0158.kill-after-accept` | class `single-instance-restart`, judged against 6 000 ms, resumption observed at **1 787 ms** after a real `SIGKILL` |
+> | `0158.kill-during-execution` | same class and bound, resumption observed at **1 883 ms** |
+>
+> The supervisor counted 2 deaths for the 2 kill rows. **What this does not show:** one class, one process, SQLite — no peer resumed anything (`durable-multi-instance` is unclaimed and the verifier refuses a bundle that claims it), and `bound-is-derived` is arithmetic, a paper check; only the two observed intervals say the mechanism ran. The host change that made the rung derivable is one constant: the bound response now names the class the kill responses always named.
+>
+> **Two attempts before this one died before the suite started, and the cause was in `cut-public.sh`.** It looked a tunnel name up before its A record existed; Google Public DNS cached the empty answer for the zone's 1 800 s negative TTL; with no IPv6 route the name was unresolvable for half an hour while the other three tunnels sat healthy. Fixed in the script (settle, probe a resolver the host never reads, fail fast on a poisoned cache). Teardown was verified all three times.
+>
+> **Earlier measurement — 2026-09-21, `@openwop/openwop-conformance@2.33.1` + `@openwop/spec-artifacts@2.33.1` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:a084218`. THE FIRST CUT OF THIS HOST WITH NOTHING RELAXED.**
 >
 > **RFC 0148 §A dispositions (255 rows, 2014 assertions): executed-pass 242 · executed-fail 0 · blocked 0 · inapplicable 6 · skipped 7.** All three claimed profiles certified. **`host.relaxations`: none — and this time that is true.** `witnessSha256` **`7f3d5089e843…`**, Ed25519 under key id `v2-reference-4`; `--verify` zero rejections, certified list re-derived.
 >
