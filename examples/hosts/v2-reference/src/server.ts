@@ -20,12 +20,12 @@ import { ensureDefaultCredential } from './identity.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
 import { seamRoutes } from './seams.js';
+import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { Store } from './store.js';
 import { createValidator } from './validate.js';
 import { deadLetterProjection, registerWebhook, startDeliveryWorker, subscribeFanout, unregisterWebhook } from './webhooks.js';
 import { installedPacks } from './packs.js';
 import { withIdempotency } from './router.js';
-import { scheduleRun } from './executor.js';
 import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
@@ -119,11 +119,13 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, ctx.url.searchParams) })),
     ...runRoutes(),
     ...seamRoutes(host),
+    ...durabilityRoutes(host),
   );
   subscribeFanout(host);
   const stopWorker = startDeliveryWorker(host);
-  // Runs left non-terminal by a previous process re-enter the loop (durability across restart).
-  for (const r of store.nonTerminalRuns()) if ((r.era ?? 2) >= 3 && (r.status === 'running' || r.status === 'pending' || r.status === 'cancelling')) scheduleRun(host, r.run_id);
+  // Runs left non-terminal by a previous process re-enter the loop (durability across restart),
+  // and a run that had started is RECORDED as recovered (`workflow.restored`) — durability.ts.
+  recoverInFlightRuns(host);
 
   const server = createServer((req, res) => { void router.handle(req, res); });
   await new Promise<void>((ok) => server.listen(config.port, config.host, ok));
@@ -182,6 +184,7 @@ if (isMain) {
   startHost().then((running) => {
     const c = running.host.config;
     process.stdout.write(`openwop-host-v2-reference listening on http://${c.host}:${running.port} (protocolVersions ${SERVED_VERSIONS.join(', ')}; preferredVersion ${c.preferredVersion}${V1_RETIRED ? ' — V1 RETIRED' : ''}; db ${c.dbPath}; fixtures ${running.host.workflows.size}; seams ${c.seamsProfile ? 'mounted' : 'off'}; spec-artifacts ${running.host.artifacts.version})\n`);
+    if (durabilitySeamMounted(running.host)) process.stdout.write('  RFC 0158 DURABILITY SEAM MOUNTED — POST /host/durability/kill terminates this process (OPENWOP_DURABILITY_SEAM); never set this in production\n');
     const stop = (): void => { void running.close().then(() => process.exit(0)); };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);

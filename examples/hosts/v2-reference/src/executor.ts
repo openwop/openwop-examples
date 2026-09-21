@@ -272,10 +272,23 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       setStatus(host, run, waitingStatusFor(result.suspend.kind), { current_node_id: node.id });
       return;
     }
+    // DUPLICATE DELIVERY (RFC 0158 §C). `scheduleRun` admits one loop per run,
+    // but the same accepted work can still reach this function twice, and the
+    // `await` above is where the two interleave. Whatever the other delivery
+    // recorded while this one waited is authoritative: a run it already ended
+    // stays ended, and a node it already completed is not completed again.
+    // Measured before this check: one effect (the ledger claim held) and a log
+    // carrying TWO `run.completed` — the second appended past the terminal
+    // event. From the re-read to the append is synchronous, so nothing can
+    // interleave between the check and the write it guards.
+    run = host.store.getRun(runId) as RunRow;
+    if (TERMINAL.has(run.status)) return;
+    if (fold(host, run).completed.includes(node.id)) { completed.push(node.id); continue; }
     appendEvent(host, run, 'node.completed', { nodeId: node.id, outputs: result.outputs, durationMs: Date.now() - nodeStart }, { nodeId: node.id });
     completed.push(node.id);
   }
   run = host.store.getRun(runId) as RunRow;
+  if (TERMINAL.has(run.status)) return; // the other delivery of this work already ended it
   if (run.cancel_requested === 1) { terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
   appendEvent(host, run, 'run.completed', { outputs: {}, durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
   host.store.invalidateInterruptsForRun(run.run_id);

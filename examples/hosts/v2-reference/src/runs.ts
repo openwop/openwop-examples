@@ -133,6 +133,25 @@ export function loadRun(ctx: Ctx, runId: string): RunRow {
   return applyPinDisposition(ctx.host, run);
 }
 
+/**
+ * ACCEPTANCE, separated from DISPATCH. The run row is durable the moment this
+ * returns; nothing has been scheduled. `createRun` dispatches immediately after;
+ * the RFC 0158 `kill-after-accept` seam (durability.ts) is the one caller that
+ * does not — it holds dispatch so a real process death can land in a window
+ * that is otherwise microseconds wide (§E item 11). Both go through this one
+ * function so the seam exercises the production acceptance path, not a copy.
+ */
+export function acceptRun(host: Host, subject: NonNullable<Ctx['subject']>, workflowId: string, inputs: Record<string, unknown>, options: Record<string, unknown>, scopeId: string | null): RunRow {
+  const run: RunRow = {
+    run_id: tenantBound(subject.tenant), tenant: subject.tenant, workflow_id: workflowId, status: 'pending', era: EVENT_LOG_SCHEMA_VERSION,
+    owner_json: JSON.stringify({ tenant: subject.tenant, subject }), options_json: JSON.stringify(options), inputs_json: JSON.stringify(inputs),
+    created_at: nowIso(), updated_at: nowIso(), started_at: null, completed_at: null, current_node_id: null, error_json: null,
+    source_run_id: null, fork_mode: null, from_seq: null, compensation_json: null, pause_requested: 0, cancel_requested: 0, pin_checked: 1, scope_id: scopeId,
+  };
+  host.store.insertRun(run);
+  return run;
+}
+
 async function createRun(ctx: Ctx): Promise<Reply> {
   const text = await ctx.text();
   return withIdempotency(ctx, 'createRun', text, async () => {
@@ -173,13 +192,7 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     if (body['metadata'] !== undefined) options['metadata'] = body['metadata'];
     const inputs = { ...Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue])), ...((body['inputs'] as Record<string, unknown> | undefined) ?? {}) };
     for (const v of def.variables) if (v.required === true && inputs[v.name] === undefined) throw err('validation_error', `input ${v.name} is required by the workflow`, { variable: v.name });
-    const run: RunRow = {
-      run_id: tenantBound(subject.tenant), tenant: subject.tenant, workflow_id: workflowId, status: 'pending', era: EVENT_LOG_SCHEMA_VERSION,
-      owner_json: JSON.stringify({ tenant: subject.tenant, subject }), options_json: JSON.stringify(options), inputs_json: JSON.stringify(inputs),
-      created_at: nowIso(), updated_at: nowIso(), started_at: null, completed_at: null, current_node_id: null, error_json: null,
-      source_run_id: null, fork_mode: null, from_seq: null, compensation_json: null, pause_requested: 0, cancel_requested: 0, pin_checked: 1, scope_id: scopeId,
-    };
-    ctx.host.store.insertRun(run);
+    const run = acceptRun(ctx.host, subject, workflowId, inputs, options, scopeId);
     scheduleRun(ctx.host, run.run_id);
     const prefix = ctx.major === 1 ? '/v1' : '';
     const wire = wireRunId(ctx, run.run_id);
