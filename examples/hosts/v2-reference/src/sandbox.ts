@@ -50,7 +50,14 @@ export async function invokeSandboxed(host: Host, typeId: string, args: Record<s
   if (source === undefined) throw err('validation_error', `unknown synthetic typeId ${typeId} (host-sample-test-seams.md §8 lists them)`, { typeId });
   for (const c of allowedHostCalls) if (!(SANDBOX_FACET.allowedHostCalls as readonly string[]).includes(c)) throw err('validation_error', `allowedHostCalls names ${c}, which sandbox.allowedHostCalls does not offer`, { call: c });
   const heapMb = Math.max(16, Math.floor(host.config.sandboxMemoryLimitBytes / (1024 * 1024)));
-  const child = spawn(process.execPath, ['--permission', `--max-old-space-size=${heapMb}`, CHILD], { env: {}, stdio: ['pipe', 'pipe', 'pipe'] });
+  // `--allow-fs-read=<CHILD>` grants the child its OWN entry file and nothing
+  // else. Node >= 24 grants the entry point implicitly; 22.13 and 23.6 do not,
+  // and there every invocation died reading `child.cjs` before pack code ran —
+  // all nine RFC 0173 isolation rows answered `sandbox_invocation_error` on a
+  // runtime this package's `engines` admits. The grant is not a widening: the
+  // file is this sandbox's own non-secret source, and a read of anything else
+  // is still refused with ERR_ACCESS_DENIED (witnessed: /etc/hosts).
+  const child = spawn(process.execPath, ['--permission', `--allow-fs-read=${CHILD}`, `--max-old-space-size=${heapMb}`, CHILD], { env: {}, stdio: ['pipe', 'pipe', 'pipe'] });
   let out = ''; let errText = '';
   child.stdout.on('data', (c: Buffer) => { out += c.toString(); });
   child.stderr.on('data', (c: Buffer) => { errText += c.toString(); });

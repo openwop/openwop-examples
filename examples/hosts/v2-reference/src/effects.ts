@@ -93,6 +93,9 @@ export function businessKey(run: RunRow, node: WorkflowNode, request: { method: 
 
 export interface FetchOutcome { status: number; error?: string; suppressed?: boolean }
 
+/** Effect attempts THIS process holds the claim on and has not yet recorded an outcome for — see performHttpFetch. */
+const inFlight = new Map<string, Promise<FetchOutcome>>();
+
 /** The request one `core.httpFetch` node makes, with the run's input overrides applied. */
 function requestOf(run: RunRow, node: WorkflowNode): { method: string; url: string; body: string | undefined; transportRetries: number } {
   const inputs = JSON.parse(run.inputs_json) as Record<string, unknown>;
@@ -148,6 +151,28 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
       // Another executor already completed this attempt: resolve to its outcome.
       return { outputs: { ...(JSON.parse(claim.row.outcome_json as string) as FetchOutcome), deduplicated: true }, effectId };
     }
+    const flightKey = `${effectId}#${ledgerAttempt}`;
+    if (!claim.won) {
+      // The claim is held and has NO outcome yet. Two very different states
+      // share that description, and until RFC 0158's duplicate-delivery row
+      // counted this effect at its destination they were handled as one:
+      //
+      //   - the holder is ALIVE, in this process, mid-request. Firing here is a
+      //     double-fire — measured: the same accepted work delivered twice
+      //     landed TWO requests on the receiver. Wait for the holder's outcome.
+      //   - the holder is a DEAD incarnation that claimed and never recorded.
+      //     Whether its request left is unknowable. Taking the attempt over
+      //     under the SAME `Idempotency-Key` is the only safe move (RFC 0150
+      //     §B: the provider deduplicates), and is what the fall-through below
+      //     always did.
+      //
+      // An in-memory map tells them apart exactly, because a claim this process
+      // holds is in it and a dead incarnation's cannot be.
+      const holder = inFlight.get(flightKey);
+      if (holder !== undefined) return { outputs: { ...(await holder), deduplicated: true }, effectId };
+    }
+    let settle: (o: FetchOutcome) => void = () => undefined;
+    inFlight.set(flightKey, new Promise<FetchOutcome>((resolve) => { settle = resolve; }));
     try {
       const target = validateEgressUrl(request.url, host.config.webhookAllowPrivate);
       // The effect identity IS the provider's idempotency key (RFC 0150 §B).
@@ -158,6 +183,8 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
       outcome = { status: 0, error: (e as Error).message };
     }
     host.store.updateEffect(run.run_id, effectId, ledgerAttempt, { state: outcome.error === undefined ? 'completed' : 'released', outcome_json: JSON.stringify(outcome) });
+    settle(outcome);
+    inFlight.delete(flightKey);
     if (outcome.error === undefined) break;
   }
   if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed after ${ledgerAttempt} transport attempt(s): ${outcome.error}`);

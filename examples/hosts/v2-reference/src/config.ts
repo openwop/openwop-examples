@@ -108,6 +108,12 @@ export interface HostConfig {
   readonly dbPath: string;
   readonly preferredVersion: string;
   readonly seamsProfile: boolean;
+  /** RFC 0158 §E item 12 — the self-terminating seam. Deployment-time, boot-read, default OFF. */
+  readonly durabilitySeam: boolean;
+  /** The operator's restart supervisor delay: a TERM of the recovery bound that lives outside this process. */
+  readonly supervisorRestartMs: number;
+  /** The budget boot has to re-enter every in-flight run; exceeding it is reported, not hidden. */
+  readonly bootReentryBudgetMs: number;
   readonly webhookAllowPrivate: boolean;
   readonly webhookMaxAttempts: number;
   readonly webhookBackoffBaseMs: number;
@@ -155,6 +161,9 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     dbPath: env('OPENWOP_DB_PATH', join(PKG_ROOT, 'data', 'v2-reference.sqlite')),
     preferredVersion: preferred,
     seamsProfile: envBool('OPENWOP_SEAMS_PROFILE', true),
+    durabilitySeam: envBool('OPENWOP_DURABILITY_SEAM', false),
+    supervisorRestartMs: envInt('OPENWOP_SUPERVISOR_RESTART_MS', 1000),
+    bootReentryBudgetMs: envInt('OPENWOP_BOOT_REENTRY_BUDGET_MS', 5000),
     webhookAllowPrivate: envBool('OPENWOP_WEBHOOK_ALLOW_PRIVATE', false),
     webhookMaxAttempts: envInt('OPENWOP_WEBHOOK_MAX_ATTEMPTS', 5),
     webhookBackoffBaseMs: envInt('OPENWOP_WEBHOOK_BACKOFF_BASE_MS', 500),
