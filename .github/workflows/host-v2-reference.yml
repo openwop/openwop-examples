@@ -50,7 +50,14 @@ jobs:
       - name: Start the host
         if: steps.peers.outputs.published == 'true'
         env:
-          OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'   # the suite's receiver is a loopback listener (recorded relaxation)
+          # The suite's fixtures are loopback listeners, so CI runs this host with
+          # its egress guard OPEN. That is a relaxation, and until 2026-09-21 this
+          # job ran under it while declaring nothing - the same defect
+          # scripts/cut-bundle.sh had (openwop docs/KNOWN-LIMITS.md). It is now
+          # DECLARED in BOTH Conformance steps below. CI is a REGRESSION LANE: it
+          # says the host still behaves, never that it certifies. The certifying
+          # cut is scripts/cut-public.sh, guard closed, run by an operator.
+          OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'
         run: |
           npm start > /tmp/v2-reference.log 2>&1 &
           for i in {1..30}; do curl -sf http://127.0.0.1:3838/.well-known/openwop >/dev/null && exit 0; sleep 1; done
@@ -74,6 +81,13 @@ jobs:
           # opt-ins are deliberately NOT set: they need the synthetic IdP that
           # only cut-bundle.sh starts, and those rows skip honestly without it.
           OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported'
+          # The relaxation this leg's host runs under, declared. Suite >= 2.33.0
+          # checks: `v2-webhook-egress-refusal` registers eight destinations the
+          # guard MUST refuse, and with the guard open and NOTHING declared it
+          # fails (it did, on this job's first run on 2.33.1). Declared, the row
+          # records `inapplicable` and the profile built on `webhooks` honestly
+          # does not certify.
+          OPENWOP_HOST_RELAXATIONS: '[{"obligation":"webhooks.egress-guard","durability":"session","reason":"CI regression lane: OPENWOP_WEBHOOK_ALLOW_PRIVATE opens this host egress guard because every suite fixture is a loopback listener"}]'
           OPENWOP_A2A_FAKE_PEER: 'true'
           OPENWOP_A2A_FAKE_PEER_VERSIONS: '1.0,0.3'
           OPENWOP_MCP_FAKE_SERVER: 'true'
@@ -143,6 +157,13 @@ jobs:
           # opt-ins are deliberately NOT set: they need the synthetic IdP that
           # only cut-bundle.sh starts, and those rows skip honestly without it.
           OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported'
+          # The relaxation this leg's host runs under, declared. Suite >= 2.33.0
+          # checks: `v2-webhook-egress-refusal` registers eight destinations the
+          # guard MUST refuse, and with the guard open and NOTHING declared it
+          # fails (it did, on this job's first run on 2.33.1). Declared, the row
+          # records `inapplicable` and the profile built on `webhooks` honestly
+          # does not certify.
+          OPENWOP_HOST_RELAXATIONS: '[{"obligation":"webhooks.egress-guard","durability":"session","reason":"CI regression lane: OPENWOP_WEBHOOK_ALLOW_PRIVATE opens this host egress guard because every suite fixture is a loopback listener"}]'
           OPENWOP_A2A_FAKE_PEER: 'true'
           OPENWOP_A2A_FAKE_PEER_VERSIONS: '1.0,0.3'
           OPENWOP_MCP_FAKE_SERVER: 'true'
