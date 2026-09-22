@@ -6,7 +6,8 @@
  *
  * Node types: core.noop, core.delay, core.fail, core.approvalGate,
  * core.clarificationGate, core.interrupt, core.httpFetch, core.conversationGate
- * (the conformance mock), conformance.artifact.emit (RFC 0205). Anything else fails
+ * (the conformance mock), conformance.artifact.emit (RFC 0205), and (RFC 0204,
+ * when `mcp.client` is advertised) core.conformance.mcp-client. Anything else fails
  * the node (and the run) closed.
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
@@ -14,6 +15,7 @@ import { buildCompensationPlan, compensationState, performHttpFetch, recordAttem
 import { err } from './errors.js';
 import { mintInterrupt, payloadOf, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
+import { McpClientError, createCtxMcp } from './mcp-client.js';
 import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
@@ -175,6 +177,35 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       } catch (e) {
         const code = (e as { code?: string }).code;
         throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'http_fetch_failed', (e as Error).message);
+      }
+    }
+    case 'core.conformance.mcp-client': {
+      // RFC 0204 fixture node (conformance/fixtures.md §"The ctx.mcp fixture"):
+      // call this host's own ctx.mcp with the run's inputs and record the
+      // resolved value VERBATIM as outputs.result; a rejection fails the node
+      // with the rejection's code. Nothing between the call and the output.
+      const mcp = createCtxMcp(host, run);
+      const method = String(resolveInput(node, 'method', run, def) ?? '');
+      const serverId = resolveInput(node, 'serverId', run, def) as string;
+      try {
+        let result: unknown;
+        if (method === 'callTool') {
+          const args = resolveInput(node, 'arguments', run, def);
+          result = await mcp.callTool({ serverId, name: String(resolveInput(node, 'name', run, def) ?? ''), ...(args && typeof args === 'object' ? { arguments: args as Record<string, unknown> } : {}), idempotencyKey: `${run.run_id}:${node.id}:${attempt}` });
+        } else if (method === 'listTools') {
+          const cursor = resolveInput(node, 'cursor', run, def);
+          result = await mcp.listTools({ serverId, ...(typeof cursor === 'string' ? { cursor } : {}) });
+        } else if (method === 'readResource') {
+          result = await mcp.readResource({ serverId, uri: String(resolveInput(node, 'uri', run, def) ?? '') });
+        } else if (method === 'serverHealth') {
+          result = await mcp.serverHealth({ serverId });
+        } else {
+          throw new NodeFailure('validation_error', `unknown ctx.mcp method ${JSON.stringify(method)}`);
+        }
+        return { outputs: { result } };
+      } catch (e) {
+        if (e instanceof McpClientError) throw new NodeFailure(e.code, e.message, e.details);
+        throw e;
       }
     }
     case ARTIFACT_EMIT_TYPE: {

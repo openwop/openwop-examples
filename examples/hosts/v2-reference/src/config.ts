@@ -161,6 +161,23 @@ export interface HostConfig {
   readonly oauthCredentialInterrupt: boolean;
   /** An operator relaxation of the egress guard for the OAuth client's own requests (token, metadata, PRM) — recorded as host.relaxations[] when a bundle is cut under it. */
   readonly oauthAllowPrivate: boolean;
+  /** RFC 0202 §B.2 — the HMAC key per-agent routing values (`a2aTenant`) are minted under; fixed by default so a value is stable across restarts of one host version. */
+  readonly agentCardSecret: string;
+  /** RFC 0204 — the MCP servers `ctx.mcp` may address, by `serverId` (`OPENWOP_MCP_SERVERS=id=url,…`). */
+  readonly mcpServers: ReadonlyMap<string, string>;
+}
+
+/** `id=url,id=url` → a map; a malformed entry is refused at boot rather than dropped. */
+function parseMcpServers(raw: string): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const part of raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0)) {
+    const eq = part.indexOf('=');
+    const id = eq > 0 ? part.slice(0, eq).trim() : '';
+    const url = eq > 0 ? part.slice(eq + 1).trim() : '';
+    if (!/^[A-Za-z0-9._-]+$/.test(id) || !/^https?:\/\//.test(url)) throw new Error(`OPENWOP_MCP_SERVERS entry ${JSON.stringify(part)} is not id=http(s)://url`);
+    out.set(id, url);
+  }
+  return out;
 }
 
 export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
@@ -218,6 +235,8 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     publicBaseUrl: process.env['OPENWOP_PUBLIC_BASE_URL']?.trim() || null,
     oauthCredentialInterrupt: envBool('OPENWOP_OAUTH_CREDENTIAL_INTERRUPT', true),
     oauthAllowPrivate: envBool('OPENWOP_OAUTH_ALLOW_PRIVATE', false),
+    agentCardSecret: env('OPENWOP_AGENT_CARD_SECRET', 'v2-reference-agent-card-routing-dev-secret'),
+    mcpServers: parseMcpServers(env('OPENWOP_MCP_SERVERS', '')),
     ...overrides,
   };
 }

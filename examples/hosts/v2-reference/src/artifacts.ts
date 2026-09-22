@@ -39,6 +39,12 @@ export interface SpecArtifacts {
    */
   readonly registeredOrgs: ReadonlySet<string>;
   readonly peerAliases: ReadonlyMap<string, AliasRow>;
+  /** RFC 0204: the installed `mcp` facet defines `client` (`ctx.mcp` is part of the contract this host ships). */
+  readonly mcpClientFacet: boolean;
+  /** RFC 0204: the installed `ToolDescriptor` defines `annotations` (the MCP ToolAnnotations projection). */
+  readonly toolAnnotations: boolean;
+  /** RFC 0202: the installed `a2a` facet defines `agentCards` (per-agent A2A cards over the agent inventory). */
+  readonly agentCardsFacet: boolean;
 }
 
 function resolveRoot(): string {
@@ -89,6 +95,8 @@ export function loadArtifacts(): SpecArtifacts {
     ?? '^(?!openwop\\.)[a-z][a-z0-9]*(-[a-z0-9]+)*\\.[a-z][a-z0-9]*(-[a-z0-9]+)*(\\.[a-z][a-z0-9]*(-[a-z0-9]+)*)?$';
   const familyKeys = new Set<string>(declaration.families.filter((f) => f.anchor !== 'deleted').map((f) => f.key));
   const metadataKeys = new Set<string>(declaration.metadata.filter((m) => m.disposition !== 'deleted').map((m) => m.key));
+  const caps = readJson<{ properties: Record<string, { properties?: Record<string, unknown> }> }>(join(root, 'schemas', 'v2', 'capabilities.schema.json'));
+  const descriptor = readJson<{ properties: Record<string, unknown> }>(join(root, 'schemas', 'v2', 'tool-descriptor.schema.json'));
   const peerAliases = new Map<string, AliasRow>();
   for (const a of aliases) peerAliases.set(a.alias, a);
 
@@ -107,6 +115,9 @@ export function loadArtifacts(): SpecArtifacts {
     metadataKeys,
     registeredOrgs: new Set<string>(Object.keys(declaration.extensions ?? {})),
     peerAliases,
+    mcpClientFacet: caps.properties['mcp']?.properties?.['client'] !== undefined,
+    toolAnnotations: descriptor.properties['annotations'] !== undefined,
+    agentCardsFacet: caps.properties['a2a']?.properties?.['agentCards'] !== undefined,
   };
   return cached;
 }

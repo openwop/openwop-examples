@@ -21,6 +21,8 @@ import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-
 import { secretRotation, signatureAlgorithms } from './webhooks.js';
 import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
 import { CATALOG, credentialInterruptAdvertised, oauthSupported } from './oauth.js';
+import { mcpClientAdvertised } from './mcp-client.js';
+import { agentCardsAdvertised } from './agents.js';
 
 const SINCE = '2.0';
 /**
@@ -110,8 +112,12 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // SERVER (profile mcp-2026-07-28, a streamable-HTTP mount at serverUrls[0] —
     // mcp-server.ts). The URLs are absolute and derived from the request, so the
     // document names the origin the caller actually reached.
-    a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions], profiles: [...A2A_SERVER_PROFILES], agentCardUrl: `${baseUrl}${AGENT_CARD_PATH}` }),
-    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr }, profiles: [...MCP_SERVER_PROFILES], features: [...MCP_SERVER_FEATURES], serverMount: { transports: ['streamable-http'] }, serverUrls: [`${baseUrl}${MCP_MOUNT_PATH}`] }),
+    // RFC 0202: `agentCards` — each GET /agents entry is an A2A card behind its a2aTenant — only when the installed contract defines it.
+    a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions], profiles: [...A2A_SERVER_PROFILES], agentCardUrl: `${baseUrl}${AGENT_CARD_PATH}`, ...(agentCardsAdvertised(host) ? { agentCards: true } : {}) }),
+    // RFC 0204: `client` — pack code gets ctx.mcp (mcp-client.ts) — only when the installed contract defines it and a server is bound.
+    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr }, profiles: [...MCP_SERVER_PROFILES], features: [...MCP_SERVER_FEATURES], serverMount: { transports: ['streamable-http'] }, serverUrls: [`${baseUrl}${MCP_MOUNT_PATH}`], ...(mcpClientAdvertised(host) ? { client: true } : {}) }),
+    // tool-catalog.md (RFC 0204): the executor's node types, classified by hand, plus every bound MCP server's tools (unclassified ⇒ write).
+    toolCatalog: record('witnessable-gated', { sources: mcpClientAdvertised(host) ? ['node-pack', 'mcp'] : ['node-pack'] }),
     // workflow-chain-packs.md: registering, expanding and bounding chains is the
     // obligation; the advertised maxDepth IS the enforced one (chains.ts).
     workflowChainPacks: record('witnessable-gated', { subChains: { maxDepth: c.chainMaxDepth } }),
@@ -147,6 +153,9 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
       ...(credentialInterruptAdvertised(host) ? { credentialInterrupt: true } : {}),
     });
   }
+  // RFC 0072 §A / 0074 (agents.ts): the manifest-agent inventory, tenant-scoped, with the host's bundled
+  // agent pack; shipped with RFC 0202's per-agent cards, so advertised on the same contract gate.
+  if (agentCardsAdvertised(host)) doc['agents'] = record('witnessable-gated', { manifestRuntime: { installScope: 'tenant', handoffValidation: false } });
   if (host.a2ui !== null) {
     // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2
     // (a2ui.ts is the one admission path). declaration.json marks the first two families stable.

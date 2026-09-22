@@ -16,21 +16,36 @@
  * routes one skill — the workflow `OPENWOP_A2A_WORKFLOW_ID` names (default
  * conformance-approval). The card lists exactly that skill.
  *
- * Advertised: streaming false, pushNotifications false, durableTasks false,
- * extendedAgentCard false — so SendStreamingMessage / SubscribeToTask /
- * returnImmediately are -32004, push-config methods -32003, and
- * GetExtendedAgentCard -32007 (the rows' own errors).
+ * Advertised: streaming false, pushNotifications false, durableTasks false —
+ * so SendStreamingMessage / SubscribeToTask / returnImmediately are -32004 and
+ * push-config methods -32003 (the rows' own errors).
+ *
+ * RFC 0202 (only when the installed contract defines `a2a.agentCards`):
+ * `extendedAgentCard: true`, and every request's `tenant` is read. Absent, the
+ * request addresses the host interface (the host's own extended card is the
+ * public one: this host has no skill a caller cannot use). Present, it MUST be
+ * a per-agent routing value in the CALLER's inventory (agents.ts): the request
+ * then addresses that agent — `GetExtendedAgentCard` returns its card,
+ * `SendMessage` starts a run of its routed workflow in the caller's tenant with
+ * the agent on `RunSnapshot.agent`, `ListTasks` lists its tasks. Any other value
+ * — another tenant's agent or one never minted — is the ONE refusal
+ * `UNROUTED_TENANT`, byte-identical apart from the JSON-RPC id. The router
+ * authenticates before this module runs, so nothing is resolved for an
+ * unauthenticated caller. Without the facet (older contract), `tenant` is not
+ * read and GetExtendedAgentCard is -32007.
  */
 import { HOST_NAME, HOST_VENDOR, HOST_VERSION } from './config.js';
 import { HostError } from './errors.js';
 import { requestCancel, resolveAndResume, scheduleRun, applyPinDisposition } from './executor.js';
 import { principalRef } from './identity.js';
 import { nowIso, opaque } from './ids.js';
+import { inboundTraceContext, type TraceContext } from './trace-context.js';
 import { acceptRun } from './runs.js';
 import { route, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host, type Subject } from './host.js';
 import type { RunRow } from './store.js';
 import { A2A_FACET } from './interop.js';
+import { agentCardsAdvertised, agentRefOf, resolveRoutingValue, type InventoryEntry } from './agents.js';
 
 export const A2A_SERVER_PROFILES = ['a2a-1.0'] as const;
 export const AGENT_CARD_PATH = '/.well-known/agent-card.json';
@@ -97,6 +112,7 @@ function routedWorkflow(host: Host): { id: string; name: string; description: st
 }
 
 export function agentCard(host: Host, baseUrl: string): Record<string, unknown> {
+  const extended = agentCardsAdvertised(host);
   const skill = routedWorkflow(host);
   return {
     name: HOST_NAME,
@@ -105,8 +121,8 @@ export function agentCard(host: Host, baseUrl: string): Record<string, unknown> 
     // a2a.card supportedInterfaces[]: only interfaces the host routes; the protocolVersion set equals a2a.versions.
     supportedInterfaces: [{ url: `${baseUrl}${A2A_JSONRPC_PATH}`, protocolBinding: 'JSONRPC', protocolVersion: A2A_VERSION }],
     provider: { organization: HOST_VENDOR, url: 'https://openwop.dev' },
-    // a2a.card capabilities: equal to the a2a facets; GetExtendedAgentCard is not served.
-    capabilities: { streaming: A2A_FACET.streaming, pushNotifications: A2A_FACET.pushNotifications, extendedAgentCard: false },
+    // a2a.card capabilities: equal to the a2a facets; extendedAgentCard is true iff GetExtendedAgentCard is served (RFC 0202).
+    capabilities: { streaming: A2A_FACET.streaming, pushNotifications: A2A_FACET.pushNotifications, extendedAgentCard: extended },
     // a2a.card securitySchemes | securityRequirements: exactly the authentication the endpoint enforces.
     securitySchemes: { bearer: { httpAuthSecurityScheme: { scheme: 'Bearer', description: 'An OpenWOP api-key or session credential (Authorization: Bearer <credential>); the Subject it resolves to owns the task.' } } },
     securityRequirements: [{ schemes: { bearer: { list: [] } } }],
@@ -114,6 +130,23 @@ export function agentCard(host: Host, baseUrl: string): Record<string, unknown> 
     defaultOutputModes: ['text/plain', 'application/json'],
     // a2a.card skills[]: skills[].id is the routed workflowId; no skill the host does not route.
     skills: skill === null ? [] : [skill],
+  };
+}
+
+/**
+ * RFC 0202 §C.4 — one inventory entry's card: identity from the entry, never the
+ * manifest (SR-1); interfaces, capabilities and security from the host card,
+ * each interface carrying `tenant: R`; one skill per routed workflow.
+ */
+export function perAgentCard(host: Host, baseUrl: string, e: InventoryEntry): Record<string, unknown> {
+  const hostCard = agentCard(host, baseUrl);
+  const r = e.a2aTenant as string;
+  return {
+    ...hostCard,
+    name: e.persona,
+    description: e.description ?? e.label,
+    version: e.packVersion,
+    supportedInterfaces: (hostCard['supportedInterfaces'] as Array<Record<string, unknown>>).map((i) => ({ ...i, tenant: r })),
   };
 }
 
@@ -211,7 +244,7 @@ const BLOCK_CAP_MS = 3000;
 
 // ── the methods ────────────────────────────────────────────────────────────
 
-async function sendMessage(host: Host, subject: Subject, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function sendMessage(host: Host, subject: Subject, params: Record<string, unknown>, agent: InventoryEntry | null, trace: TraceContext | null): Promise<Record<string, unknown>> {
   const m = parseMessage(params['message']);
   const configuration = params['configuration'];
   if (configuration !== undefined && !isObject(configuration)) throw new RpcError(A2A_ERR.INVALID_PARAMS, 'configuration MUST be an object');
@@ -230,7 +263,8 @@ async function sendMessage(host: Host, subject: Subject, params: Record<string, 
     const def = host.workflows.get(host.config.a2aWorkflowId);
     if (!def) throw new RpcError(A2A_ERR.UNSUPPORTED_OPERATION, 'the interface routes no skill on this host');
     const inputs = Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue]));
-    const run = acceptRun(host, subject, def.id, inputs, { transport: 'a2a' }, null);
+    // RFC 0202 §D.9: a run started through R is created in the CALLER'S tenant of record, the agent pinned.
+    const run = acceptRun(host, subject, def.id, inputs, { transport: 'a2a', ...(agent !== null ? { agent: agentRefOf(agent) } : {}), ...(trace !== null ? { traceContext: trace } : {}) }, null);
     const contextId = m.contextId ?? `ctx-${opaque()}`;
     host.store.insertA2ATask({ run_id: run.run_id, tenant: subject.tenant, context_id: contextId, history_json: '[]', created_at: nowIso() });
     appendHistory(host, run, m);
@@ -279,9 +313,12 @@ const WIRE_STATES = new Set(Object.values(TASK_STATE));
 /**
  * a2a.operations ListTasks: exactly the set listRuns returns to this Subject
  * (tenant is a WHERE clause there), filtered by contextId and status; the
- * `tenant` parameter never selects — it is not read.
+ * `tenant` parameter never selects a tenant — at most it narrows to one agent
+ * of the caller's own inventory (RFC 0202; resolved in dispatch).
  */
-function listTasks(host: Host, subject: Subject, params: Record<string, unknown>): Record<string, unknown> {
+const agentIdOf = (r: RunRow): string | undefined => (JSON.parse(r.options_json) as { agent?: { agentId?: string } }).agent?.agentId;
+
+function listTasks(host: Host, subject: Subject, params: Record<string, unknown>, agent: InventoryEntry | null): Record<string, unknown> {
   const contextId = params['contextId'];
   if (contextId !== undefined && typeof contextId !== 'string') throw new RpcError(A2A_ERR.INVALID_PARAMS, 'contextId MUST be a string');
   const status = params['status'];
@@ -302,6 +339,7 @@ function listTasks(host: Host, subject: Subject, params: Record<string, unknown>
   const historyLength = historyLengthOf(params);
   const runs = host.store.listRuns(subject.tenant, { limit: 100_000 })
     .filter((r) => contextId === undefined || contextOf(host, r) === contextId)
+    .filter((r) => agent === null || agentIdOf(r) === agent.agentId)
     .filter((r) => status === undefined || TASK_STATE[r.status] === status)
     // ordered by status timestamp, newest first
     .sort((a, b) => (a.updated_at === b.updated_at ? (a.run_id < b.run_id ? 1 : -1) : a.updated_at < b.updated_at ? 1 : -1));
@@ -322,11 +360,20 @@ function cancelTask(host: Host, subject: Subject, params: Record<string, unknown
   return taskOf(host, host.store.getRun(run.run_id) ?? run);
 }
 
-async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+/** RFC 0202 §D.7 — the one refusal for a `tenant` that is not a routing value in the caller's inventory. */
+const UNROUTED_TENANT = (): RpcError => new RpcError(A2A_ERR.INVALID_PARAMS, 'tenant does not name an agent this caller can address');
+
+async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, baseUrl: string, trace: TraceContext | null): Promise<Record<string, unknown>> {
+  let agent: InventoryEntry | null = null;
+  if (agentCardsAdvertised(host) && params['tenant'] !== undefined && params['tenant'] !== '') {
+    if (typeof params['tenant'] !== 'string') throw UNROUTED_TENANT();
+    agent = resolveRoutingValue(host, subject, params['tenant']);
+    if (agent === null) throw UNROUTED_TENANT();
+  }
   switch (method) {
-    case 'SendMessage': return sendMessage(host, subject, params);
+    case 'SendMessage': return sendMessage(host, subject, params, agent, trace);
     case 'GetTask': return getTask(host, subject, params);
-    case 'ListTasks': return listTasks(host, subject, params);
+    case 'ListTasks': return listTasks(host, subject, params, agent);
     case 'CancelTask': return cancelTask(host, subject, params);
     case 'SendStreamingMessage':
     case 'SubscribeToTask':
@@ -337,7 +384,8 @@ async function dispatch(host: Host, subject: Subject, method: string, params: Re
     case 'DeleteTaskPushNotificationConfig':
       throw new RpcError(A2A_ERR.PUSH_NOT_SUPPORTED, `${method} requires a2a.pushNotifications, which this host does not advertise`);
     case 'GetExtendedAgentCard':
-      throw new RpcError(A2A_ERR.EXTENDED_CARD_NOT_CONFIGURED, 'capabilities.extendedAgentCard is false on this host');
+      if (!agentCardsAdvertised(host)) throw new RpcError(A2A_ERR.EXTENDED_CARD_NOT_CONFIGURED, 'capabilities.extendedAgentCard is false on this host');
+      return agent === null ? agentCard(host, baseUrl) : perAgentCard(host, baseUrl, agent);
     default:
       throw new RpcError(A2A_ERR.METHOD_NOT_FOUND, `method ${method} is not served`);
   }
@@ -361,7 +409,11 @@ async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
   const params = parsed['params'] === undefined ? {} : parsed['params'];
   if (!isObject(params)) return rpcError(id, A2A_ERR.INVALID_PARAMS, 'params MUST be an object');
   try {
-    const result = await dispatch(ctx.host, subject, parsed['method'], params);
+    // interop.md §Trace context (RFC 0207): Message.metadata.openwop.traceparent, when valid, is the parent — else the header; malformed is ignored.
+    const message = isObject(params['message']) ? params['message'] : {};
+    const openwop = isObject(message['metadata']) && isObject(message['metadata']['openwop']) ? message['metadata']['openwop'] : null;
+    const trace = inboundTraceContext(openwop, (n) => ctx.header(n));
+    const result = await dispatch(ctx.host, subject, parsed['method'], params, ctx.baseUrl, trace);
     return { status: 200, body: { jsonrpc: '2.0', id, result }, headers: { 'A2A-Version': A2A_VERSION } };
   } catch (e) {
     if (e instanceof RpcError) return rpcError(id, e.code, e.message);

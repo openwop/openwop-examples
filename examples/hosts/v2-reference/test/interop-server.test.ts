@@ -82,7 +82,8 @@ describe('discovery + the Agent Card', () => {
     expect(r.status).toBe(200);
     const card = await r.json() as any;
     expect(card.supportedInterfaces).toEqual([{ url: `${B}/a2a/jsonrpc`, protocolBinding: 'JSONRPC', protocolVersion: '1.0' }]);
-    expect(card.capabilities).toEqual({ streaming: false, pushNotifications: false, extendedAgentCard: false });
+    // RFC 0202: extendedAgentCard is true iff the installed contract defines a2a.agentCards (GetExtendedAgentCard served).
+    expect(card.capabilities).toEqual({ streaming: false, pushNotifications: false, extendedAgentCard: running.host.artifacts.agentCardsFacet });
     expect(card.skills.map((s: { id: string }) => s.id)).toEqual(['conformance-approval']);
     expect(card.securitySchemes.bearer.httpAuthSecurityScheme.scheme).toBe('Bearer');
     expect(card.securityRequirements).toEqual([{ schemes: { bearer: { list: [] } } }]);
@@ -154,7 +155,9 @@ describe('A2A JSON-RPC', () => {
     expect(own.result.tasks.map((t: { id: string }) => t.id)).toEqual([mine.id]);
     expect(own.result.nextPageToken).toBe('');
     const theirs = await a2a('ListTasks', { tenant: 'openwop-reference-tenant', contextId: mine.contextId }, { key: KB });
-    expect(theirs.result.tasks).toEqual([]);
+    // Without RFC 0202 tenant is not read; with it, a value that is no routing value in B's inventory is refused.
+    expect(theirs.result?.tasks ?? []).toEqual([]);
+    if (running.host.artifacts.agentCardsFacet) expect(theirs.error?.code).toBe(-32602);
     const all = await a2a('ListTasks', {}, { key: KB });
     expect(all.result.tasks.every((t: { id: string }) => t.id.startsWith('openwop-reference-tenant-b/'))).toBe(true);
     await a2a('CancelTask', { id: mine.id });
@@ -164,7 +167,7 @@ describe('A2A JSON-RPC', () => {
     expect((await a2a('SendStreamingMessage', { message: msg() })).error?.code).toBe(-32004);
     expect((await a2a('SendMessage', { message: msg(), configuration: { returnImmediately: true } })).error?.code).toBe(-32004);
     expect((await a2a('CreateTaskPushNotificationConfig', {})).error?.code).toBe(-32003);
-    expect((await a2a('GetExtendedAgentCard', {})).error?.code).toBe(-32007);
+    if (!running.host.artifacts.agentCardsFacet) expect((await a2a('GetExtendedAgentCard', {})).error?.code).toBe(-32007);
     expect((await a2a('NoSuchMethod', {})).error?.code).toBe(-32601);
     expect((await a2a('GetTask', { id: 'x' }, { version: '0.3' })).error?.code).toBe(-32009);
     const anon = await fetch(`${B}/a2a/jsonrpc`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
