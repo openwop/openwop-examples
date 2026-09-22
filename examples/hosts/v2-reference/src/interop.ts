@@ -76,7 +76,7 @@ function auditRun(host: Host, tenant: string, subject: Subject | null): RunRow {
   return run;
 }
 
-function audit(host: Host, run: RunRow, protocol: Protocol, peerUrl: string, floor: string, d: Decision): void {
+export function audit(host: Host, run: RunRow, protocol: Protocol, peerUrl: string, floor: string, d: Decision): void {
   appendEvent(host, run, 'negotiation.decided', { protocol, outcome: d.outcome, ...(d.outcome === 'accepted' ? { version: d.version, reason: 'ok' } : { reason: d.reason }), floor, peerDigest: originDigest(peerUrl), at: nowIso() });
 }
 
