@@ -29,17 +29,20 @@ import { Store } from './store.js';
 import { createValidator } from './validate.js';
 import { deadLetterProjection, registerWebhook, rotateWebhookSecret, startDeliveryWorker, subscribeFanout, unregisterWebhook } from './webhooks.js';
 import { installedPacks } from './packs.js';
+import { getTool, listTools } from './tool-catalog.js';
 import { withIdempotency } from './router.js';
 import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
-export function loadWorkflows(config: HostConfig): Map<string, WorkflowDefinition> {
+export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
   const executable = new Set(['core.noop', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
     // semantics (open → one auto-resumed exchange → close) this host honours end to end.
     'conformance-artifact-emit', 'conformance-conversation-lifecycle']);
+  // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
+  if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];
   if (config.fixturesDir) dirs.push(config.fixturesDir);
   try {
@@ -89,7 +92,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   const store = new Store(config.dbPath);
   const validate = await createValidator(artifacts.schemasDir, config.devValidate);
   const a2ui = await createA2uiAdmission(artifacts.schemasDir, config.envelopeStrictness);
-  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config), startedAt: new Date().toISOString(), validate, a2ui };
+  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0), startedAt: new Date().toISOString(), validate, a2ui };
   host.bus.setMaxListeners(0);
   ensureDefaultCredential(host);
 
@@ -147,6 +150,13 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     // RFC 0208: the A2A 1.0 interface + Agent Card and the MCP 2026-07-28 mount.
     ...a2aServerRoutes(),
     ...mcpServerRoutes(),
+    // RFC 0204 — spec/v2/core/tool-catalog.md (tool-catalog.ts). Read-only, authenticated, v2 only.
+    route('GET', '/tools', true, async (ctx) => {
+      const tools = await listTools(ctx.host);
+      for (const t of tools) ctx.host.validate('tool-descriptor', t, `tool ${t.toolId}`);
+      return { status: 200, body: tools };
+    }),
+    route('GET', '/tools/{toolId}', true, async (ctx) => ({ status: 200, body: await getTool(ctx.host, ctx.params['toolId'] as string) })),
     ...seamRoutes(host),
     ...durabilityRoutes(host),
   );

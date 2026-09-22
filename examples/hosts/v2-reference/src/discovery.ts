@@ -20,6 +20,7 @@ import { A2A_SERVER_PROFILES, AGENT_CARD_PATH } from './a2a-server.js';
 import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-server.js';
 import { secretRotation, signatureAlgorithms } from './webhooks.js';
 import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
+import { mcpClientAdvertised } from './mcp-client.js';
 
 const SINCE = '2.0';
 /**
@@ -110,7 +111,10 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // mcp-server.ts). The URLs are absolute and derived from the request, so the
     // document names the origin the caller actually reached.
     a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions], profiles: [...A2A_SERVER_PROFILES], agentCardUrl: `${baseUrl}${AGENT_CARD_PATH}` }),
-    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr }, profiles: [...MCP_SERVER_PROFILES], features: [...MCP_SERVER_FEATURES], serverMount: { transports: ['streamable-http'] }, serverUrls: [`${baseUrl}${MCP_MOUNT_PATH}`] }),
+    // RFC 0204: `client` — pack code gets ctx.mcp (mcp-client.ts) — only when the installed contract defines it and a server is bound.
+    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr }, profiles: [...MCP_SERVER_PROFILES], features: [...MCP_SERVER_FEATURES], serverMount: { transports: ['streamable-http'] }, serverUrls: [`${baseUrl}${MCP_MOUNT_PATH}`], ...(mcpClientAdvertised(host) ? { client: true } : {}) }),
+    // tool-catalog.md (RFC 0204): the executor's node types, classified by hand, plus every bound MCP server's tools (unclassified ⇒ write).
+    toolCatalog: record('witnessable-gated', { sources: mcpClientAdvertised(host) ? ['node-pack', 'mcp'] : ['node-pack'] }),
     // workflow-chain-packs.md: registering, expanding and bounding chains is the
     // obligation; the advertised maxDepth IS the enforced one (chains.ts).
     workflowChainPacks: record('witnessable-gated', { subChains: { maxDepth: c.chainMaxDepth } }),

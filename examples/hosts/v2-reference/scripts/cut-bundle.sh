@@ -61,6 +61,15 @@ else
 fi
 SHA="$(git rev-parse HEAD)"
 
+# RFC 0204 — ctx.mcp's server bindings (conformance/fixtures.md §"The ctx.mcp
+# fixture"): `conformance` is the suite's in-process fake MCP server, which the
+# host must know BEFORE it boots, so its port is pinned; `conformance.down` is an
+# address nothing answers (under PUBLIC the closed guard refuses it outright,
+# which is the same transport failure).
+MCP_FAKE_PORT="${OPENWOP_MCP_FAKE_SERVER_PORT:-3841}"
+MCP_FOR_HOST="${OPENWOP_MCP_FAKE_SERVER_URL:-http://127.0.0.1:${MCP_FAKE_PORT}}"
+MCP_SERVERS="conformance=${MCP_FOR_HOST},conformance.down=http://127.0.0.1:9"
+
 cleanup() { [ -n "${HOST_PID:-}" ] && kill "$HOST_PID" 2>/dev/null; [ -n "${IDP_PID:-}" ] && kill "$IDP_PID" 2>/dev/null; true; }
 trap cleanup EXIT
 
@@ -82,6 +91,7 @@ SUP_LOG="$(mktemp -t v2ref-supervisor.XXXXXX)"
 CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 \
 OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
+OPENWOP_MCP_SERVERS="$MCP_SERVERS" \
   node scripts/supervisor.mjs --restart-ms 1000 --log "$SUP_LOG" >/tmp/cut-host.log 2>&1 &
 HOST_PID=$!
 # `< /dev/null` would end the IdP's stdin at once; it exits with its parent ONLY
@@ -152,7 +162,7 @@ if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture ans
 # An opt-out is a CLAIM, not a hiding place: it appears in the bundle.
 OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported \
 OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 \
-OPENWOP_MCP_FAKE_SERVER=true \
+OPENWOP_MCP_FAKE_SERVER=true OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_FAKE_PORT" \
 OPENWOP_TEST_SAML_IDP_URL="$IDP_FOR_HOST" \
 OPENWOP_HOST_RELAXATIONS="$RELAXATIONS" \
 OPENWOP_TEST_SCIM_URL="urn:openwop:conformance:scim" \

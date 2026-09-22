@@ -152,6 +152,21 @@ export interface HostConfig {
   readonly a2aWorkflowId: string;
   /** RFC 0208 — the HMAC key MCP `requestState` tokens are integrity-protected under. */
   readonly mcpStateSecret: string;
+  /** RFC 0204 — the MCP servers `ctx.mcp` may address, by `serverId` (`OPENWOP_MCP_SERVERS=id=url,…`). */
+  readonly mcpServers: ReadonlyMap<string, string>;
+}
+
+/** `id=url,id=url` → a map; a malformed entry is refused at boot rather than dropped. */
+function parseMcpServers(raw: string): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const part of raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0)) {
+    const eq = part.indexOf('=');
+    const id = eq > 0 ? part.slice(0, eq).trim() : '';
+    const url = eq > 0 ? part.slice(eq + 1).trim() : '';
+    if (!/^[A-Za-z0-9._-]+$/.test(id) || !/^https?:\/\//.test(url)) throw new Error(`OPENWOP_MCP_SERVERS entry ${JSON.stringify(part)} is not id=http(s)://url`);
+    out.set(id, url);
+  }
+  return out;
 }
 
 export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
@@ -206,6 +221,7 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     tenantB: env('OPENWOP_TENANT_B', DEFAULT_TENANT_B),
     a2aWorkflowId: env('OPENWOP_A2A_WORKFLOW_ID', 'conformance-approval'),
     mcpStateSecret: env('OPENWOP_MCP_STATE_SECRET', randomBytes(32).toString('hex')),
+    mcpServers: parseMcpServers(env('OPENWOP_MCP_SERVERS', '')),
     ...overrides,
   };
 }
