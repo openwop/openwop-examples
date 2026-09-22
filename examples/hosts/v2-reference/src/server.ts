@@ -20,6 +20,7 @@ import { err } from './errors.js';
 import { ensureDefaultCredential } from './identity.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
+import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
 import { a2aServerRoutes } from './a2a-server.js';
 import { mcpServerRoutes } from './mcp-server.js';
 import { seamRoutes } from './seams.js';
@@ -34,9 +35,12 @@ import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
 export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
-  const executable = new Set(['core.noop', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch']);
+  const executable = new Set(['core.noop', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
-  const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event']);
+  const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
+    // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
+    // semantics (open → one auto-resumed exchange → close) this host honours end to end.
+    'conformance-artifact-emit', 'conformance-conversation-lifecycle']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];
@@ -141,6 +145,8 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     }, 1),
     route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, ctx.url.searchParams) })),
     ...runRoutes(),
+    // RFC 0205: getArtifact, negotiated by Accept (application/json | application/a2a+json).
+    ...artifactRoutes(),
     // RFC 0208: the A2A 1.0 interface + Agent Card and the MCP 2026-07-28 mount.
     ...a2aServerRoutes(),
     ...mcpServerRoutes(),

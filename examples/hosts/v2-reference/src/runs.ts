@@ -185,6 +185,9 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     const def = ctx.host.workflows.get(workflowId);
     if (!def) throw err('not_found', `workflow ${workflowId} is not registered on this host`, { workflowId });
     // A workflow naming a node type this host does not execute is refused at create (runs.md §Create).
+    // runs.md §Conversation: core.conversationGate needs conversationPrimitive, which only the v2
+    // root advertises (the v1 document does not), so the v1 contract refuses it here.
+    if (ctx.major === 1 && def.nodes.some((n) => n.typeId === 'core.conversationGate')) throw err('capability_required', 'core.conversationGate needs conversationPrimitive, which this host does not advertise on the 1.x contract', { requiredCapability: 'conversationPrimitive' });
     const scopeId = typeof body['scopeId'] === 'string' ? body['scopeId'] : null;
     if (ctx.header('openwop-dedup') === 'enforce' && scopeId !== null) {
       const activeRun = ctx.host.store.activeRunForScope(subject.tenant, scopeId);

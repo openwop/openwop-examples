@@ -33,8 +33,15 @@ const SINCE = '2.0';
  */
 const EXPERIMENTAL_UNTIL = '2.1';
 
-export function advertisedFixtures(host: Host): string[] {
-  return [...host.workflows.keys()].sort();
+export function advertisedFixtures(host: Host, major: 1 | 2 = 2): string[] {
+  // The v1 contract refuses core.conversationGate (conversationPrimitive is a v2-root claim here),
+  // so a fixture that needs it is not advertised on the v1 document.
+  return [...host.workflows.entries()].filter(([, d]) => major === 2 || !d.nodes.some((n) => n.typeId === 'core.conversationGate')).map(([id]) => id).sort();
+}
+
+/** runs.md §Conversation — presence is the claim; made only when a fixture exercises the gate. */
+function conversationAdvertised(host: Host): boolean {
+  return [...host.workflows.values()].some((d) => d.nodes.some((n) => n.typeId === 'core.conversationGate'));
 }
 
 
@@ -127,6 +134,10 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
       subjectLinkKey: SUBJECT_LINK_KEY,
     }),
   };
+  // runs.md §"Conversation and residency capabilities": the conformance mock conversation
+  // (open → one auto-resumed exchange → close, executor.ts runConversation). RFC 0205 §B: its
+  // turn carries A2A `parts` when the installed contract declares them.
+  if (conversationAdvertised(host)) doc['conversationPrimitive'] = record('claims-check');
   if (host.a2ui !== null) {
     // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2
     // (a2ui.ts is the one admission path). declaration.json marks the first two families stable.
@@ -162,7 +173,7 @@ export function v1Document(host: Host): Record<string, unknown> {
     supportedEnvelopes: [],
     schemaVersions: {},
     limits: { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000 },
-    fixtures: advertisedFixtures(host),
+    fixtures: advertisedFixtures(host, 1),
     // v1 readers: the surfaces this host serves under /v1/ keys through the overlap.
     interrupt: { supported: true, tokenAlgs: ['hs256'] },
     replay: { supported: true, fork: true, modes: ['replay', 'branch'] },

@@ -5,8 +5,9 @@
  * event with a payload from the registry (events.md §Payloads).
  *
  * Node types: core.noop, core.delay, core.fail, core.approvalGate,
- * core.clarificationGate, core.interrupt, core.httpFetch, and (RFC 0204, when
- * `mcp.client` is advertised) core.conformance.mcp-client. Anything else fails
+ * core.clarificationGate, core.interrupt, core.httpFetch, core.conversationGate
+ * (the conformance mock), conformance.artifact.emit (RFC 0205), and (RFC 0204,
+ * when `mcp.client` is advertised) core.conformance.mcp-client. Anything else fails
  * the node (and the run) closed.
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
@@ -15,6 +16,7 @@ import { err } from './errors.js';
 import { mintInterrupt, payloadOf, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
 import { McpClientError, createCtxMcp } from './mcp-client.js';
+import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 
@@ -100,6 +102,29 @@ function interruptFor(node: WorkflowNode, run: RunRow): InterruptPayload {
   return payload;
 }
 
+/**
+ * `core.conversationGate` with `lifecycle: open-exchange-close` and `mockAutoResume`
+ * (fixture conformance-conversation-lifecycle): open, one exchange whose agent turn the
+ * host's conformance mock supplies, close — `conversation.opened` → `.exchanged` →
+ * `.closed` under one conversationId. RFC 0205 §B: the turn carries `parts` (one `text`
+ * Part, with `content` the same text so a pre-0205 reader still renders it) only when the
+ * installed contract declares the property on the closed v2 turn def.
+ */
+function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<string, unknown> {
+  const c = node.config;
+  if (c['lifecycle'] !== 'open-exchange-close' || c['mockAutoResume'] !== true) {
+    throw new NodeFailure('unsupported_node_type', 'core.conversationGate is executed only as open-exchange-close with mockAutoResume (the conformance mock)', { typeId: node.typeId });
+  }
+  const conversationId = `${run.run_id.split('/')[1] ?? run.run_id}:${node.id}`;
+  appendEvent(host, run, 'conversation.opened', { conversationId }, { nodeId: node.id });
+  const text = 'Conformance mock reply.';
+  const turn: Record<string, unknown> = { messageId: `${conversationId}:1:agent`, from: 'host:conformance-mock', content: text, ts: Date.now(), role: 'agent', turnIndex: 1, speakerId: 'host:conformance-mock' };
+  if (corpusHasParts(host)) turn['parts'] = [{ text }];
+  appendEvent(host, run, 'conversation.exchanged', { conversationId, turnIndex: 1, turn }, { nodeId: node.id });
+  appendEvent(host, run, 'conversation.closed', { conversationId, reason: 'goal-reached', turnCount: 1 }, { nodeId: node.id });
+  return { conversationId, turnCount: 1 };
+}
+
 type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload };
 
 async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number): Promise<NodeResult | 'cancelled' | 'paused'> {
@@ -155,6 +180,18 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         throw e;
       }
     }
+    case ARTIFACT_EMIT_TYPE: {
+      // RFC 0205 (fixture conformance-artifact-emit): one artifact, announced by
+      // artifact.created and readable through getArtifact (run-artifacts.ts), which
+      // resolves it from this event and the node's config — nothing is stored twice.
+      const artifactId = artifactIdFor(node.id);
+      const payload: Record<string, unknown> = { artifactId, artifactType: String(node.config['artifactType'] ?? 'conformance.artifact.brief'), nodeId: node.id, registered: false };
+      if (typeof node.config['summary'] === 'string') payload['summary'] = node.config['summary'];
+      appendEvent(host, run, 'artifact.created', payload, { nodeId: node.id });
+      return { outputs: { artifactId } };
+    }
+    case 'core.conversationGate':
+      return { outputs: runConversation(host, run, node) };
     default:
       throw new NodeFailure('unsupported_node_type', `${node.typeId} is not executed by this host (capability not provided)`, { typeId: node.typeId });
   }
@@ -264,7 +301,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   for (const node of orderNodes(def)) {
     if (completed.includes(node.id)) continue;
     run = host.store.getRun(runId) as RunRow;
-    if (run.cancel_requested === 1) { terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
+    if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (run.pause_requested === 1) {
       // Between nodes: the requested policy is echoed verbatim (runs.md §Pause
       // and resume); under `drain-current-node` this is where a drained node's
@@ -293,7 +330,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
       return;
     }
-    if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
+    if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (result === 'paused') {
       // `immediate` cut the attempt between events: no terminal node event is
       // recorded for it (runs.md §Pause and resume); the payload names the
@@ -331,10 +368,22 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   }
   run = host.store.getRun(runId) as RunRow;
   if (TERMINAL.has(run.status)) return; // the other delivery of this work already ended it
-  if (run.cancel_requested === 1) { terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
+  if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
   appendEvent(host, run, 'run.completed', { outputs: {}, durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
   host.store.invalidateInterruptsForRun(run.run_id);
   setStatus(host, run, 'completed', { completed_at: nowIso(), current_node_id: null });
+}
+
+/**
+ * The reason a `cancelling` run's cancel was requested with, consumed by the
+ * loop that records `run.cancelled`. In memory beside the loop, like
+ * `pausePolicy`: a restart re-enters the run and the default is recorded.
+ */
+const cancelReasons = new Map<string, string>();
+function takeCancelReason(runId: string): string {
+  const r = cancelReasons.get(runId) ?? 'caller-requested';
+  cancelReasons.delete(runId);
+  return r;
 }
 
 /** runs.md §Cancel — accepted immediately; the cascade completes in the loop when a node is executing. */
@@ -351,6 +400,9 @@ export function requestCancel(host: Host, run: RunRow, reason: string | undefine
     terminalCancel(host, run, reason ?? 'caller-requested', 'caller', state.startedAt);
     return { status: 'cancelled' };
   }
+  // The reason travels with the request to the loop that completes the cascade
+  // (e.g. RFC 0198 `mcp-request-cancelled`), instead of being replaced there.
+  if (!cancelReasons.has(run.run_id)) cancelReasons.set(run.run_id, reason ?? 'caller-requested');
   setStatus(host, run, 'cancelling', { cancel_requested: 1 });
   return { status: 'cancelling' };
 }
