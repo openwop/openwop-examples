@@ -6,6 +6,7 @@
  *   npm start            → http://127.0.0.1:3838
  *   OPENWOP_API_KEY      → the default api-key credential (openwop-v2-dev-key)
  */
+import { createA2uiAdmission } from './a2ui.js';
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -81,7 +82,8 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   const artifacts = loadArtifacts();
   const store = new Store(config.dbPath);
   const validate = await createValidator(artifacts.schemasDir, config.devValidate);
-  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config), startedAt: new Date().toISOString(), validate };
+  const a2ui = await createA2uiAdmission(artifacts.schemasDir, config.envelopeStrictness);
+  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config), startedAt: new Date().toISOString(), validate, a2ui };
   host.bus.setMaxListeners(0);
   ensureDefaultCredential(host);
 
