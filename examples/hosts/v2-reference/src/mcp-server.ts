@@ -40,9 +40,9 @@
  *     `subscriptions/listen` stream on its own); a cancelled blocking call is
  *     answered `CallToolResult { isError: true }`.
  */
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { HOST_NAME, HOST_VERSION } from './config.js';
-import { HostError } from './errors.js';
+import { HostError, err } from './errors.js';
 import { requestCancel, resolveAndResume, scheduleRun } from './executor.js';
 import { principalRef } from './identity.js';
 import { opaque } from './ids.js';
@@ -55,6 +55,8 @@ import { route, STREAMED, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 import { waitForSettle } from './a2a-server.js';
+import { OAUTH_USE_TYPE, credentialResolves, publicBase, subjectKey } from './oauth.js';
+import { ownerOf } from './events.js';
 
 export const MCP_SERVER_PROFILES = ['mcp-2026-07-28'] as const;
 /** Every feature interop-map.json mcp.features requires for mcp-2026-07-28. */
@@ -87,7 +89,7 @@ const CALL_CAP_MS = 5000;
 const SSE_CALL_CAP_MS = 60_000;
 const TASK_POLL_INTERVAL_MS = 500;
 const REQUEST_STATE_TTL_MS = 10 * 60_000;
-const SUSPENDING = new Set(['core.approvalGate', 'core.clarificationGate', 'core.interrupt']);
+const SUSPENDING = new Set(['core.approvalGate', 'core.clarificationGate', 'core.interrupt', OAUTH_USE_TYPE]);
 
 type RpcId = string | number | null;
 class McpError extends Error {
@@ -171,10 +173,40 @@ function openInterrupt(host: Host, run: RunRow): InterruptRow | undefined {
   return host.store.pendingInterruptForNode(run.run_id, run.current_node_id);
 }
 
-/** The interop-map.json mcp.mrtr InputRequiredResult projection of one open interrupt (form mode, flat primitive schema). */
-function elicitationFor(pending: InterruptRow): Record<string, unknown> {
+const PRIMITIVE = new Set(['string', 'number', 'integer', 'boolean']);
+/**
+ * RFC 0199 §D.2(d) / MCP Elicitation §Requested Schema: form mode carries only a
+ * flat object of primitive properties, and never a sensitive one (writeOnly or
+ * format password — invariant elicitation-form-no-secret).
+ */
+export function formEligible(schema: Record<string, unknown>): boolean {
+  if (schema['type'] !== 'object' || !isObject(schema['properties'])) return false;
+  return Object.values(schema['properties']).every((p) => isObject(p) && PRIMITIVE.has(String(p['type'])) && p['writeOnly'] !== true && p['format'] !== 'password' && !('properties' in p) && !('items' in p));
+}
+const declaresUrlMode = (caps: Record<string, unknown>): boolean => isObject(caps['elicitation']) && isObject(caps['elicitation']['url']);
+
+/** A host-owned page that resolves one interrupt for its Subject (the URL-mode target for a schema form mode may not carry). */
+function interruptPageFor(host: Host, run: RunRow, pending: InterruptRow): string {
+  const id = randomBytes(24).toString('base64url');
+  host.store.db.prepare('INSERT INTO interrupt_pages (page_id, run_id, node_id, subject_key) VALUES (?, ?, ?, ?)').run(id, run.run_id, pending.node_id, subjectKey(ownerOf(host, run).subject));
+  return `${publicBase(host)}/interrupt-pages/${id}`;
+}
+
+/**
+ * The interop-map.json mcp.mrtr InputRequiredResult projection of one open
+ * interrupt (RFC 0199 §D.2). Form mode only for a flat, non-sensitive schema;
+ * a `credential` interrupt and any other schema go to URL mode when the
+ * request declared `elicitation.url`; otherwise `null` — the caller answers
+ * CallToolResult isError and never falls back to form mode.
+ */
+function elicitationFor(host: Host, run: RunRow, pending: InterruptRow, caps: Record<string, unknown>): Record<string, unknown> | null {
   const payload = payloadOf(pending);
   const data = payload.data ?? {};
+  if (payload.kind === 'credential') {
+    if (!declaresUrlMode(caps)) return null;
+    const scopes = Array.isArray(data['scopes']) ? (data['scopes'] as unknown[]).map(String).join(' ') : '';
+    return { method: 'elicitation/create', params: { mode: 'url', message: `Authorize ${String(data['provider'])}${scopes ? ` (${scopes})` : ''}`, url: String(data['connectUrl']) } };
+  }
   let requestedSchema: Record<string, unknown>;
   let message: string;
   if (payload.kind === 'approval') {
@@ -182,13 +214,17 @@ function elicitationFor(pending: InterruptRow): Record<string, unknown> {
     requestedSchema = { type: 'object', properties: { action: { type: 'string', enum: actions } }, required: ['action'] };
     message = [data['title'], data['description']].filter((s) => typeof s === 'string').join(' — ') || `Approve ${pending.node_id}`;
   } else {
-    const questions = Array.isArray(data['questions']) ? (data['questions'] as Array<{ id?: unknown; question?: unknown }>) : [];
+    const questions = Array.isArray(data['questions']) ? (data['questions'] as Array<{ id?: unknown; question?: unknown; schema?: unknown }>) : [];
     const properties: Record<string, unknown> = {};
-    for (const q of questions) if (typeof q.id === 'string') properties[q.id] = { type: 'string', description: String(q.question ?? q.id) };
+    // The question's own answer schema is carried as-is — never flattened to a string,
+    // which would put a password (or a nested object) into a plain form field.
+    for (const q of questions) if (typeof q.id === 'string') properties[q.id] = isObject(q.schema) ? { ...q.schema, description: String(q.question ?? q.id) } : { type: 'string', description: String(q.question ?? q.id) };
     requestedSchema = { type: 'object', properties, required: Object.keys(properties) };
     message = questions.map((q) => String(q.question ?? '')).filter((s) => s.length > 0).join(' ') || `Input for ${pending.node_id}`;
   }
-  return { method: 'elicitation/create', params: { mode: 'form', message, requestedSchema } };
+  if (formEligible(requestedSchema)) return { method: 'elicitation/create', params: { mode: 'form', message, requestedSchema } };
+  if (!declaresUrlMode(caps)) return null;
+  return { method: 'elicitation/create', params: { mode: 'url', message, url: interruptPageFor(host, run, pending) } };
 }
 
 /**
@@ -207,16 +243,25 @@ function applyElicitResult(host: Host, subject: Subject, run: RunRow, pending: I
 }
 
 /** The run's state at answer time, as MCP sees it (interop-map.json mcp.methods tools/call). */
-function outcome(host: Host, subject: Subject | null, name: string, args: Record<string, unknown>, run: RunRow): Record<string, unknown> {
+function outcome(host: Host, subject: Subject | null, name: string, args: Record<string, unknown>, run: RunRow, caps: Record<string, unknown> = {}): Record<string, unknown> {
   if (run.status === 'completed') return textResult(false, { runId: run.run_id, status: run.status, variables: JSON.parse(run.inputs_json) as unknown });
   if (run.status === 'failed' || run.status === 'cancelled') {
     return textResult(true, { runId: run.run_id, status: run.status, ...(run.error_json !== null ? { error: JSON.parse(run.error_json) as unknown } : {}) });
   }
   const pending = openInterrupt(host, run);
   if (pending) {
+    const request = elicitationFor(host, run, pending, caps);
+    if (request === null) {
+      // RFC 0199 §D.2(b)/(d): no form fallback. The run stays suspended and resolvable over REST and the token surface.
+      const p = payloadOf(pending);
+      const why = p.kind === 'credential'
+        ? `authorization for ${String((p.data ?? {})['provider'])} is required out of band; this client declared no elicitation.url`
+        : 'this input cannot be collected in form mode (not a flat, non-sensitive schema) and this client declared no elicitation.url';
+      return textResult(true, { runId: run.run_id, status: run.status, interruptKind: p.kind, message: `${why}; the run is suspended — resolve it at POST /runs/{runId}/interrupts/${pending.node_id}` });
+    }
     return {
       resultType: 'input_required',
-      inputRequests: { [pending.node_id]: elicitationFor(pending) },
+      inputRequests: { [pending.node_id]: request },
       requestState: mintState(host, subject as Subject, name, args, run.run_id, pending.node_id),
     };
   }
@@ -252,9 +297,9 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
     // resolves — answer the handle now unless the run is somehow terminal.
     if (tasked) {
       const now = host.store.getRun(run.run_id) ?? run;
-      return TERMINAL.has(now.status) ? outcome(host, subject, name, rawArgs, now) : { resultType: 'task', ...taskOf(host, now, false) };
+      return TERMINAL.has(now.status) ? outcome(host, subject, name, rawArgs, now, caps) : { resultType: 'task', ...taskOf(host, now, false) };
     }
-    return outcome(host, subject, name, rawArgs, (await waitForSettle(host, run.run_id, own.capMs)) ?? run);
+    return outcome(host, subject, name, rawArgs, (await waitForSettle(host, run.run_id, own.capMs)) ?? run, caps);
   }
 
   const claims = verifyState(host, subject, params['requestState'], name, rawArgs);
@@ -266,18 +311,31 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
   if (!host.store.consumeMcpRequestState(claims.j)) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: already used');
   const run = host.store.getRun(claims.r);
   if (!run || run.tenant !== subject.tenant) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: its run is not readable');
-  if (TERMINAL.has(run.status)) return outcome(host, subject, name, rawArgs, run);
+  if (TERMINAL.has(run.status)) return outcome(host, subject, name, rawArgs, run, caps);
   // "Continues" (RFC 0198 §G.12): the retry owns the run until it is answered.
   own.runId = run.run_id;
   if (response['action'] === 'cancel') requestCancel(host, run, 'mcp-elicitation-cancelled');
   else {
     const pending = host.store.pendingInterruptForNode(run.run_id, claims.n);
     if (!pending) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: its interrupt is no longer open');
-    applyElicitResult(host, subject, run, pending, response);
+    const kind = payloadOf(pending).kind;
+    if (kind === 'credential' && response['action'] === 'accept') {
+      // RFC 0199 §D.2(c): URL mode carries no content; an accept is the §C.4 re-check. A credential
+      // that now resolves resolves the interrupt; otherwise the answer below is input_required again.
+      const data = payloadOf(pending).data ?? {};
+      const scopes = Array.isArray(data['scopes']) ? (data['scopes'] as unknown[]).map(String) : [];
+      if (credentialResolves(host, subjectKey(ownerOf(host, run).subject), String(data['provider'] ?? ''), scopes)) resolveAndResume(host, run, pending, { outcome: 'authorized' }, subject);
+    } else if (kind === 'credential' && response['action'] === 'decline') {
+      resolveAndResume(host, run, pending, { outcome: 'declined' }, subject);
+    } else if (response['action'] === 'accept' && response['content'] === undefined) {
+      // A URL-mode accept for a page-resolved interrupt: the page resolves it; nothing to apply here.
+    } else {
+      applyElicitResult(host, subject, run, pending, response);
+    }
   }
   const settled = (await waitForSettle(host, run.run_id, own.capMs)) ?? run;
   if (tasked && !TERMINAL.has(settled.status)) return { resultType: 'task', ...taskOf(host, settled, false) };
-  return outcome(host, subject, name, rawArgs, settled);
+  return outcome(host, subject, name, rawArgs, settled, caps);
 }
 
 // ── tasks (RFC 0198) ───────────────────────────────────────────────────────
@@ -306,7 +364,7 @@ function taskRun(host: Host, subject: Subject, raw: unknown): RunRow {
 }
 
 /** interop-map.json mcp.tasks.status — the run projected as an MCP Task (DetailedTask when `detailed`). */
-function taskOf(host: Host, run: RunRow, detailed: boolean): Record<string, unknown> {
+function taskOf(host: Host, run: RunRow, detailed: boolean, caps: Record<string, unknown> = {}): Record<string, unknown> {
   const base = { taskId: projectBoundId(run.run_id), createdAt: run.created_at, lastUpdatedAt: run.updated_at, ttlMs: null, pollIntervalMs: TASK_POLL_INTERVAL_MS, statusMessage: `the run is ${run.status}` };
   if (run.status === 'completed' || run.status === 'failed') {
     // A failed run is a tool outcome: completed + isError true; `failed` is reserved for a JSON-RPC error.
@@ -318,14 +376,15 @@ function taskOf(host: Host, run: RunRow, detailed: boolean): Record<string, unkn
   const pending = openInterrupt(host, run);
   if (pending) {
     // One inputRequests entry per open interrupt, keyed by interruptId (unique over the task's lifetime by construction).
-    return detailed ? { ...base, status: 'input_required', inputRequests: { [pending.interrupt_id]: elicitationFor(pending) } } : { ...base, status: 'input_required' };
+    const request = detailed ? elicitationFor(host, run, pending, caps) : null;
+    return request !== null ? { ...base, status: 'input_required', inputRequests: { [pending.interrupt_id]: request } } : { ...base, status: 'input_required' };
   }
   return { ...base, status: 'working' };
 }
 
-function tasksGet(host: Host, subject: Subject, params: Record<string, unknown>): Record<string, unknown> {
+function tasksGet(host: Host, subject: Subject, params: Record<string, unknown>, caps: Record<string, unknown> = {}): Record<string, unknown> {
   // A read: nothing is appended to the run's log.
-  return { resultType: 'complete', ...taskOf(host, taskRun(host, subject, params['taskId']), true) };
+  return { resultType: 'complete', ...taskOf(host, taskRun(host, subject, params['taskId']), true, caps) };
 }
 
 function tasksUpdate(host: Host, subject: Subject, params: Record<string, unknown>): Record<string, unknown> {
@@ -400,7 +459,7 @@ async function dispatch(host: Host, subject: Subject, method: string, params: Re
       return toolsCall(host, subject, params, caps, own, trace);
     case 'tasks/get':
       requireTasks(caps);
-      return tasksGet(host, subject, params);
+      return tasksGet(host, subject, params, caps);
     case 'tasks/update':
       requireTasks(caps);
       return tasksUpdate(host, subject, params);
@@ -496,6 +555,38 @@ async function mcpHandler(ctx: Ctx): Promise<Reply | typeof STREAMED> {
   return STREAMED;
 }
 
+/**
+ * RFC 0199 §D.2(d) — the host-owned page a URL-mode elicitation points at for
+ * an interrupt form mode may not carry. It follows the connectUrl rules: it
+ * requires the user to authenticate, serves only the interrupt's own Subject,
+ * and resolves through the one resolve path (validation, eligibility, the log).
+ */
+interface PageRow { page_id: string; run_id: string; node_id: string; subject_key: string }
+function pageTarget(ctx: Ctx): { run: RunRow; pending: InterruptRow } {
+  const row = ctx.host.store.db.prepare('SELECT * FROM interrupt_pages WHERE page_id = ?').get(ctx.params['pageId']) as PageRow | undefined;
+  if (!row) throw err('not_found', 'no such interrupt page');
+  if (row.subject_key !== subjectKey(ctx.subject as Subject)) throw err('forbidden', 'this interrupt page belongs to another Subject');
+  const run = ctx.host.store.getRun(row.run_id);
+  const pending = run ? ctx.host.store.pendingInterruptForNode(row.run_id, row.node_id) : undefined;
+  if (!run || !pending) throw err('interrupt_already_resolved', 'the interrupt this page resolves is no longer open');
+  return { run, pending };
+}
+async function pageGet(ctx: Ctx): Promise<Reply> {
+  const { pending } = pageTarget(ctx);
+  const p = payloadOf(pending);
+  return { status: 200, body: { interruptId: pending.interrupt_id, kind: p.kind, data: p.data }, headers: { 'Cache-Control': 'no-store' } };
+}
+async function pagePost(ctx: Ctx): Promise<Reply> {
+  const { run, pending } = pageTarget(ctx);
+  const body = await ctx.json<{ resumeValue?: unknown }>();
+  if (!('resumeValue' in body)) throw err('validation_error', 'resumeValue is REQUIRED');
+  return { status: 200, body: resolveAndResume(ctx.host, run, pending, body.resumeValue, ctx.subject) };
+}
+
 export function mcpServerRoutes(): Route[] {
-  return [route('POST', MCP_MOUNT_PATH, true, mcpHandler, 'both')];
+  return [
+    route('POST', MCP_MOUNT_PATH, true, mcpHandler, 'both'),
+    route('GET', '/interrupt-pages/{pageId}', true, pageGet),
+    route('POST', '/interrupt-pages/{pageId}', true, pagePost),
+  ];
 }

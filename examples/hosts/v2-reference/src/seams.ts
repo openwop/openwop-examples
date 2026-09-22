@@ -12,6 +12,7 @@
  *   POST sample/auth/{saml/validate,scim/provision} + GET sample/auth/subject-links   RFC 0050 seams; the link record (RFC 0159/0163; saml-scim.ts)
  *   PUT/GET/DELETE packs-test/{name}/-/{version}[.tgz|.sig]   the isolated pack catalog
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
+ *   POST sample/oauth/{authorize-start,expire-refresh}   RFC 0199 — point a provider at the suite's AS double, then the PRODUCTION builder (oauth.ts)
  */
 import { inboundTraceContext } from './trace-context.js';
 import { createHash } from 'node:crypto';
@@ -33,6 +34,7 @@ import { a2aInvoke, mcpInvoke } from './interop.js';
 import { unregisterChainPack } from './chains.js';
 import { admitSurface } from './a2ui.js';
 import { loadRun } from './runs.js';
+import { beginGrant, configureProvider, expireAccessToken, oauthSupported, registerReachProvider } from './oauth.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
 /** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
@@ -274,6 +276,43 @@ async function a2aInvokeRoute(ctx: Ctx): Promise<Reply> { return a2aInvoke(ctx.h
 async function mcpInvokeRoute(ctx: Ctx): Promise<Reply> { return mcpInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>(), inboundTraceContext(null, (n) => ctx.header(n))); }
 
 /**
+ * `startOAuthAuthorization` (RFC 0199 §A/§B). The seam's only job is to point a
+ * provider at the suite's authorization-server double — a catalog provider's
+ * endpoints, or a connection pack through the production registration path
+ * (which verifies and pins) — and then call `beginGrant`, the ONE builder
+ * connectUrl uses too. `redirectUri` is accepted and ignored: the redirect
+ * URI is fixed per provider.
+ */
+async function authorizeStartRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<Record<string, unknown>>();
+  const allowed = new Set(['provider', 'authUrl', 'tokenUrl', 'issuer', 'pkce', 'scopes', 'connection', 'redirectUri']);
+  for (const k of Object.keys(body)) if (!allowed.has(k)) throw err('validation_error', `unknown key ${k}`);
+  if (typeof body['provider'] !== 'string' || body['provider'].length === 0) throw err('validation_error', 'provider is REQUIRED');
+  const str = (k: string): string | undefined => (typeof body[k] === 'string' ? (body[k] as string) : undefined);
+  const scopes = Array.isArray(body['scopes']) ? (body['scopes'] as unknown[]).map(String) : ['openwop.read'];
+  if (body['connection'] !== undefined) {
+    const pack = body['connection'];
+    if (pack === null || typeof pack !== 'object' || Array.isArray(pack)) throw err('validation_error', 'connection MUST be a connection-pack manifest');
+    const row = await registerReachProvider(ctx.host, pack as Record<string, unknown>);
+    if (row.id !== body['provider']) throw err('validation_error', 'provider MUST be the connection pack\'s provider.id');
+  } else {
+    const v: { authUrl?: string; tokenUrl?: string; issuer?: string; pkce?: string } = {};
+    for (const k of ['authUrl', 'tokenUrl', 'issuer', 'pkce'] as const) { const x = str(k); if (x !== undefined) v[k] = x; }
+    await configureProvider(ctx.host, body['provider'], v);
+  }
+  const authorizationUrl = await beginGrant(ctx.host, ctx.subject as NonNullable<Ctx['subject']>, body['provider'], scopes, null);
+  return { status: 201, body: { authorizationUrl } };
+}
+
+/** `expireOAuthAccessToken` (RFC 0199 §C.2(b)): expire the stored access token; the next use takes the production refresh path. */
+async function expireRefreshRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ provider?: unknown }>();
+  if (typeof body.provider !== 'string') throw err('validation_error', 'provider is REQUIRED');
+  if (!expireAccessToken(ctx.host, ctx.subject as NonNullable<Ctx['subject']>, body.provider)) throw err('not_found', 'the caller holds no credential for that provider');
+  return { status: 204 };
+}
+
+/**
  * `emitA2uiSurface` (RFC 0209) — supplies the envelope a model would have emitted and
  * nothing else: admission is a2ui.ts, the one path production uses. Not mounted when
  * the host cannot enforce the profile (no validator ⇒ the kind is not advertised).
@@ -305,6 +344,7 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/a2a/invoke`, true, a2aInvokeRoute),
     route('POST', `${p}/sample/mcp/invoke`, true, mcpInvokeRoute),
     ...(host.a2ui !== null ? [route('POST', `${p}/sample/a2ui/emit-surface`, true, emitSurfaceRoute)] : []),
+    ...(oauthSupported(host) ? [route('POST', `${p}/sample/oauth/authorize-start`, true, authorizeStartRoute), route('POST', `${p}/sample/oauth/expire-refresh`, true, expireRefreshRoute)] : []),
     route('POST', `${p}/sample/test/sandbox-load`, true, sandboxLoad),
     route('POST', `${p}/sample/test/sandbox-invoke`, true, sandboxInvoke),
     route('PUT', `${p}/packs-test/{name}/-/{version}.tgz`, true, packPut),

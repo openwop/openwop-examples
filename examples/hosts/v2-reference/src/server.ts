@@ -24,6 +24,7 @@ import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
 import { a2aServerRoutes } from './a2a-server.js';
 import { agentRoutes } from './agents.js';
 import { mcpServerRoutes } from './mcp-server.js';
+import { OAUTH_DDL, OAUTH_USE_TYPE, oauthRoutes, oauthSupported } from './oauth.js';
 import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { Store } from './store.js';
@@ -36,12 +37,15 @@ import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
 export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
-  const executable = new Set(['core.noop', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE]);
+  const executable = new Set(['core.noop', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
     // semantics (open → one auto-resumed exchange → close) this host honours end to end.
-    'conformance-artifact-emit', 'conformance-conversation-lifecycle']);
+    'conformance-artifact-emit', 'conformance-conversation-lifecycle',
+    // RFC 0199: the credential fixture (advertised only when oauth is — see below) and the two §D.2(d)
+    // clarifications whose answer schema form mode may not carry (nested; format password).
+    'conformance-credential', 'conformance-clarification-nested', 'conformance-clarification-sensitive']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];
@@ -93,7 +97,10 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   const store = new Store(config.dbPath);
   const validate = await createValidator(artifacts.schemasDir, config.devValidate);
   const a2ui = await createA2uiAdmission(artifacts.schemasDir, config.envelopeStrictness);
+  store.db.exec(OAUTH_DDL);
   const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0), startedAt: new Date().toISOString(), validate, a2ui };
+  // conformance-credential needs `oauth` (RFC 0199), which needs a contract that carries it.
+  if (!oauthSupported(host)) (host.workflows as Map<string, WorkflowDefinition>).delete('conformance-credential');
   host.bus.setMaxListeners(0);
   ensureDefaultCredential(host);
 
@@ -153,6 +160,8 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     // RFC 0072 §A / 0074 — the tenant-scoped manifest-agent inventory RFC 0202's cards are published from.
     ...agentRoutes(),
     ...mcpServerRoutes(),
+    // RFC 0199: connectUrl and the one production callback.
+    ...(oauthSupported(host) ? oauthRoutes() : []),
     // RFC 0204 — spec/v2/core/tool-catalog.md (tool-catalog.ts). Read-only, authenticated, v2 only.
     route('GET', '/tools', true, async (ctx) => {
       const tools = await listTools(ctx.host);

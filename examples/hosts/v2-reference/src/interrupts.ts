@@ -17,6 +17,8 @@ import { TERMINAL, type Host, type Subject } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 import { principalRef } from './identity.js';
 import { taintedSurfaces } from './a2ui.js';
+import { credentialResolves, subjectKey } from './oauth.js';
+import { ownerOf } from './events.js';
 
 export interface InterruptPayload {
   kind: string;
@@ -141,6 +143,21 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
     if (action === 'refine' && (rv as { refineFeedback?: unknown })?.refineFeedback === undefined) throw err('validation_error', 'refine requires refineFeedback');
     if (action === 'edit-accept' && (rv as { editedArtifactData?: unknown })?.editedArtifactData === undefined) throw err('validation_error', 'edit-accept requires editedArtifactData');
     return { payload, decision: action === 'reject' ? 'rejected' : 'granted', exitsSuspend: action !== 'ask' };
+  }
+  if (payload.kind === 'credential') {
+    // RFC 0199 §C.4 — the resume value is closed { outcome } and carries no credential;
+    // `authorized` is re-checked host-side, never trusted.
+    const rv = resumeValue as Record<string, unknown> | null;
+    if (rv === null || typeof rv !== 'object' || Array.isArray(rv) || Object.keys(rv).some((k) => k !== 'outcome') || (rv['outcome'] !== 'authorized' && rv['outcome'] !== 'declined')) {
+      throw err('validation_error', 'resumeValue fails resumeSchema: a credential interrupt resolves with exactly { outcome: authorized | declined }', { field: 'resumeValue' });
+    }
+    if (rv['outcome'] === 'authorized') {
+      const scopes = Array.isArray(data['scopes']) ? (data['scopes'] as unknown[]).map(String) : [];
+      if (!credentialResolves(host, subjectKey(ownerOf(host, run).subject), String(data['provider'] ?? ''), scopes)) {
+        throw err('validation_error', 'outcome authorized is refused: no credential for the run\'s Subject, provider and scopes resolves (the host re-checks; it does not trust the caller)', { field: 'resumeValue' });
+      }
+    }
+    return { payload, exitsSuspend: true };
   }
   const schema = payload.resumeSchema;
   if (schema !== undefined) {
