@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { loadArtifacts } from './artifacts.js';
 import { loadConfig, type HostConfig, PKG_ROOT, V1_VERSION, V2_VERSION, SERVED_VERSIONS, V1_RETIRED } from './config.js';
 import { etagOf, v1Document, v2Document } from './discovery.js';
+import { PRM_PATH, prmDocument } from './protected-resource.js';
 import { err } from './errors.js';
 import { ensureDefaultCredential } from './identity.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
@@ -116,6 +117,10 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     route('GET', '/.well-known/openwop', false, discovery, 'both'),
     route('GET', '/.well-known/wop', false, discovery, 'both'),
     route('GET', '/openapi.json', false, openapi, 'both'),
+    // RFC 0200 §A — served unauthenticated, at both majors, and whether or not an
+    // oauth2/oidc lane is advertised: the document is a truthful projection of the lanes
+    // either way, and a generic OAuth client has nowhere else to look.
+    route('GET', PRM_PATH, false, async (ctx) => ({ status: 200, body: prmDocument(ctx.host, ctx.baseUrl), headers: { 'Cache-Control': 'public, max-age=60' } }), 'both'),
     route('GET', '/v1/openapi.json', false, openapi, 1),
     route('GET', '/host/events', true, hostEvents),
     route('GET', '/packs', true, async (ctx) => ({ status: 200, body: installedPacks(ctx.host, 'prod') })),
