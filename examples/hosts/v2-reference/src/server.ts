@@ -22,6 +22,7 @@ import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
 import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
 import { a2aServerRoutes } from './a2a-server.js';
+import { agentRoutes } from './agents.js';
 import { mcpServerRoutes } from './mcp-server.js';
 import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
@@ -149,6 +150,8 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     ...artifactRoutes(),
     // RFC 0208: the A2A 1.0 interface + Agent Card and the MCP 2026-07-28 mount.
     ...a2aServerRoutes(),
+    // RFC 0072 §A / 0074 — the tenant-scoped manifest-agent inventory RFC 0202's cards are published from.
+    ...agentRoutes(),
     ...mcpServerRoutes(),
     // RFC 0204 — spec/v2/core/tool-catalog.md (tool-catalog.ts). Read-only, authenticated, v2 only.
     route('GET', '/tools', true, async (ctx) => {
