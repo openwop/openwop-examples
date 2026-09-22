@@ -39,6 +39,7 @@ import { HostError } from './errors.js';
 import { requestCancel, resolveAndResume, scheduleRun, applyPinDisposition } from './executor.js';
 import { principalRef } from './identity.js';
 import { nowIso, opaque } from './ids.js';
+import { inboundTraceContext, type TraceContext } from './trace-context.js';
 import { acceptRun } from './runs.js';
 import { route, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host, type Subject } from './host.js';
@@ -235,7 +236,7 @@ const BLOCK_CAP_MS = 3000;
 
 // ── the methods ────────────────────────────────────────────────────────────
 
-async function sendMessage(host: Host, subject: Subject, params: Record<string, unknown>, agent: InventoryEntry | null): Promise<Record<string, unknown>> {
+async function sendMessage(host: Host, subject: Subject, params: Record<string, unknown>, agent: InventoryEntry | null, trace: TraceContext | null): Promise<Record<string, unknown>> {
   const m = parseMessage(params['message']);
   const configuration = params['configuration'];
   if (configuration !== undefined && !isObject(configuration)) throw new RpcError(A2A_ERR.INVALID_PARAMS, 'configuration MUST be an object');
@@ -255,7 +256,7 @@ async function sendMessage(host: Host, subject: Subject, params: Record<string, 
     if (!def) throw new RpcError(A2A_ERR.UNSUPPORTED_OPERATION, 'the interface routes no skill on this host');
     const inputs = Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue]));
     // RFC 0202 §D.9: a run started through R is created in the CALLER'S tenant of record, the agent pinned.
-    const run = acceptRun(host, subject, def.id, inputs, agent === null ? { transport: 'a2a' } : { transport: 'a2a', agent: agentRefOf(agent) }, null);
+    const run = acceptRun(host, subject, def.id, inputs, { transport: 'a2a', ...(agent !== null ? { agent: agentRefOf(agent) } : {}), ...(trace !== null ? { traceContext: trace } : {}) }, null);
     const contextId = m.contextId ?? `ctx-${opaque()}`;
     host.store.insertA2ATask({ run_id: run.run_id, tenant: subject.tenant, context_id: contextId, history_json: '[]', created_at: nowIso() });
     appendHistory(host, run, m);
@@ -354,7 +355,7 @@ function cancelTask(host: Host, subject: Subject, params: Record<string, unknown
 /** RFC 0202 §D.7 — the one refusal for a `tenant` that is not a routing value in the caller's inventory. */
 const UNROUTED_TENANT = (): RpcError => new RpcError(A2A_ERR.INVALID_PARAMS, 'tenant does not name an agent this caller can address');
 
-async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, baseUrl: string): Promise<Record<string, unknown>> {
+async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, baseUrl: string, trace: TraceContext | null): Promise<Record<string, unknown>> {
   let agent: InventoryEntry | null = null;
   if (agentCardsAdvertised(host) && params['tenant'] !== undefined && params['tenant'] !== '') {
     if (typeof params['tenant'] !== 'string') throw UNROUTED_TENANT();
@@ -362,7 +363,7 @@ async function dispatch(host: Host, subject: Subject, method: string, params: Re
     if (agent === null) throw UNROUTED_TENANT();
   }
   switch (method) {
-    case 'SendMessage': return sendMessage(host, subject, params, agent);
+    case 'SendMessage': return sendMessage(host, subject, params, agent, trace);
     case 'GetTask': return getTask(host, subject, params);
     case 'ListTasks': return listTasks(host, subject, params, agent);
     case 'CancelTask': return cancelTask(host, subject, params);
@@ -400,7 +401,11 @@ async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
   const params = parsed['params'] === undefined ? {} : parsed['params'];
   if (!isObject(params)) return rpcError(id, A2A_ERR.INVALID_PARAMS, 'params MUST be an object');
   try {
-    const result = await dispatch(ctx.host, subject, parsed['method'], params, ctx.baseUrl);
+    // interop.md §Trace context (RFC 0207): Message.metadata.openwop.traceparent, when valid, is the parent — else the header; malformed is ignored.
+    const message = isObject(params['message']) ? params['message'] : {};
+    const openwop = isObject(message['metadata']) && isObject(message['metadata']['openwop']) ? message['metadata']['openwop'] : null;
+    const trace = inboundTraceContext(openwop, (n) => ctx.header(n));
+    const result = await dispatch(ctx.host, subject, parsed['method'], params, ctx.baseUrl, trace);
     return { status: 200, body: { jsonrpc: '2.0', id, result }, headers: { 'A2A-Version': A2A_VERSION } };
   } catch (e) {
     if (e instanceof RpcError) return rpcError(id, e.code, e.message);

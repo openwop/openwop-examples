@@ -3,6 +3,7 @@
  * keeps through the overlap (versioning.md §1.2). Handlers only; the loop is
  * executor.ts, the fork is replay.ts, the projections are effects.ts.
  */
+import { inboundTraceContext } from './trace-context.js';
 import { EVENT_LOG_SCHEMA_VERSION, ENGINE_VERSION, HOST_ID, V1_RETIRED } from './config.js';
 import { compensationProjection, compensationStatusOf, effectsProjection, effectSeamManifest } from './effects.js';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -199,6 +200,9 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     if (body['configurable'] !== undefined) options['configurable'] = body['configurable'];
     if (tags !== undefined) options['tags'] = tags;
     if (body['metadata'] !== undefined) options['metadata'] = body['metadata'];
+    // observability.md §Trace context propagation: the run continues the caller's trace (RFC 0207 — ctx.mcp carries it outbound).
+    const trace = inboundTraceContext(null, (n) => ctx.header(n));
+    if (trace !== null) options['traceContext'] = trace;
     const inputs = { ...Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue])), ...((body['inputs'] as Record<string, unknown> | undefined) ?? {}) };
     for (const v of def.variables) if (v.required === true && inputs[v.name] === undefined) throw err('validation_error', `input ${v.name} is required by the workflow`, { variable: v.name });
     const run = acceptRun(ctx.host, subject, workflowId, inputs, options, scopeId);

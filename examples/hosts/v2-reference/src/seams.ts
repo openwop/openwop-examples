@@ -13,6 +13,7 @@
  *   PUT/GET/DELETE packs-test/{name}/-/{version}[.tgz|.sig]   the isolated pack catalog
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
  */
+import { inboundTraceContext } from './trace-context.js';
 import { createHash } from 'node:crypto';
 import { EVENT_SCHEMA_VERSION, SEAMS_PREFIX } from './config.js';
 import { err } from './errors.js';
@@ -268,8 +269,9 @@ async function subjectLinksRoute(ctx: Ctx): Promise<Reply> {
 }
 
 /** host-sample-test-seams.md §22/§23 — the host's real A2A / MCP client path, driven once. */
-async function a2aInvokeRoute(ctx: Ctx): Promise<Reply> { return a2aInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>()); }
-async function mcpInvokeRoute(ctx: Ctx): Promise<Reply> { return mcpInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>()); }
+// The seam request's own trace context is the caller's (observability.md §Trace context propagation): the client path continues it (RFC 0207).
+async function a2aInvokeRoute(ctx: Ctx): Promise<Reply> { return a2aInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>(), inboundTraceContext(null, (n) => ctx.header(n))); }
+async function mcpInvokeRoute(ctx: Ctx): Promise<Reply> { return mcpInvoke(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, ctx.subject ?? null, await ctx.json<Record<string, unknown>>(), inboundTraceContext(null, (n) => ctx.header(n))); }
 
 /**
  * `emitA2uiSurface` (RFC 0209) — supplies the envelope a model would have emitted and

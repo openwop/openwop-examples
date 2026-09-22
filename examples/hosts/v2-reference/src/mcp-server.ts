@@ -48,6 +48,7 @@ import { principalRef } from './identity.js';
 import { opaque } from './ids.js';
 import { payloadOf } from './interrupts.js';
 import { MCP_FACET } from './interop.js';
+import { inboundTraceContext, type TraceContext } from './trace-context.js';
 import { acceptRun } from './runs.js';
 import { projectBoundId, TENANT_BOUND, unprojectBoundId } from './ids.js';
 import { route, STREAMED, type Ctx, type Reply, type Route } from './router.js';
@@ -228,7 +229,7 @@ interface RequestOwnership { runId: string | null; capMs: number }
 
 const declaresTasks = (caps: Record<string, unknown>): boolean => isObject(caps['extensions']) && isObject(caps['extensions'][MCP_TASKS_EXTENSION]);
 
-async function toolsCall(host: Host, subject: Subject, params: Record<string, unknown>, caps: Record<string, unknown>, own: RequestOwnership): Promise<Record<string, unknown>> {
+async function toolsCall(host: Host, subject: Subject, params: Record<string, unknown>, caps: Record<string, unknown>, own: RequestOwnership, trace: TraceContext | null): Promise<Record<string, unknown>> {
   const tasked = declaresTasks(caps);
   const name = params['name'];
   if (typeof name !== 'string' || !host.workflows.has(name)) throw new McpError(ERR.INVALID_PARAMS, `unknown tool ${String(name)}`);
@@ -244,7 +245,7 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
 
   if (params['requestState'] === undefined) {
     const inputs = { ...Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue])), ...rawArgs };
-    const run = acceptRun(host, subject, name, inputs, { transport: 'mcp' }, null);
+    const run = acceptRun(host, subject, name, inputs, { transport: 'mcp', ...(trace !== null ? { traceContext: trace } : {}) }, null);
     own.runId = run.run_id;
     scheduleRun(host, run.run_id);
     // RFC 0198 §B.3: the run row is durable (acceptRun), so tasks/get already
@@ -389,14 +390,14 @@ function subscriptionsListen(ctx: Ctx, subject: Subject, id: RpcId, params: Reco
 
 // ── the mount ──────────────────────────────────────────────────────────────
 
-async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, caps: Record<string, unknown>, own: RequestOwnership): Promise<Record<string, unknown>> {
+async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, caps: Record<string, unknown>, own: RequestOwnership, trace: TraceContext | null): Promise<Record<string, unknown>> {
   switch (method) {
     case 'server/discover':
       return { resultType: 'complete', supportedVersions: [...MCP_FACET.revisions], capabilities: { tools: {}, extensions: { [MCP_TASKS_EXTENSION]: {} } }, serverInfo: serverInfo(), ttlMs: TTL_MS, cacheScope: 'private', _meta: { [META_SERVER_INFO]: serverInfo() } };
     case 'tools/list':
       return toolsList(host);
     case 'tools/call':
-      return toolsCall(host, subject, params, caps, own);
+      return toolsCall(host, subject, params, caps, own, trace);
     case 'tasks/get':
       requireTasks(caps);
       return tasksGet(host, subject, params);
@@ -453,6 +454,8 @@ async function mcpHandler(ctx: Ctx): Promise<Reply | typeof STREAMED> {
   if (rawId === undefined && method.startsWith('notifications/')) return { status: 202 };
   // Unknown _meta keys and clientCapabilities.extensions are opaque: never refused, never honoured.
   const caps = isObject(meta[META_CLIENT_CAPS]) ? meta[META_CLIENT_CAPS] : {};
+  // interop.md §Trace context (RFC 0207): _meta.traceparent, when valid, is the parent — else the transport header; a malformed value is ignored, never refused.
+  const trace = inboundTraceContext(meta, (n) => ctx.header(n));
 
   if (method === 'subscriptions/listen') {
     const filter = isObject(params['notifications']) ? params['notifications'] : {};
@@ -475,7 +478,7 @@ async function mcpHandler(ctx: Ctx): Promise<Reply | typeof STREAMED> {
 
   const answer = async (): Promise<Reply> => {
     try {
-      const result = await dispatch(ctx.host, subject, method, params, caps, own);
+      const result = await dispatch(ctx.host, subject, method, params, caps, own, trace);
       return { status: 200, body: { jsonrpc: '2.0', id, result } };
     } catch (e) {
       if (e instanceof McpError) return reply(id, e);
