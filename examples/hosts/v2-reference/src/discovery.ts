@@ -20,6 +20,7 @@ import { A2A_SERVER_PROFILES, AGENT_CARD_PATH } from './a2a-server.js';
 import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-server.js';
 import { secretRotation, signatureAlgorithms } from './webhooks.js';
 import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
+import { CATALOG, credentialInterruptAdvertised, oauthSupported } from './oauth.js';
 
 const SINCE = '2.0';
 /**
@@ -134,6 +135,18 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
   // (open → one auto-resumed exchange → close, executor.ts runConversation). RFC 0205 §B: its
   // turn carries A2A `parts` when the installed contract declares them.
   if (conversationAdvertised(host)) doc['conversationPrimitive'] = record('claims-check');
+  // RFC 0199 (oauth.md): the host is an OAuth authorization-code client for the suite's synthetic
+  // providers (oauth.ts). Advertised only when the installed contract carries RFC 0199. Every
+  // provider sends PKCE S256 (so no `pkce` member is needed); none has a static issuer — the seam
+  // points them at an authorization-server double, and an issuer-less one gets its own redirect URI.
+  // `credentialInterrupt` needs an https connectUrl, so it appears only with an https public base.
+  if (oauthSupported(host)) {
+    doc['oauth'] = record('witnessable-gated', {
+      grants: ['authorization_code', 'refresh_token'],
+      providers: CATALOG.map((p) => ({ id: p.id, scopesSupported: [...p.scopesSupported], pkce: 'S256' })),
+      ...(credentialInterruptAdvertised(host) ? { credentialInterrupt: true } : {}),
+    });
+  }
   if (host.a2ui !== null) {
     // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2
     // (a2ui.ts is the one admission path). declaration.json marks the first two families stable.

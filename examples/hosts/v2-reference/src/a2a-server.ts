@@ -147,6 +147,14 @@ export function taskOf(host: Host, run: RunRow, historyLength?: number): Record<
   if (isSuspended(run.status) && run.current_node_id !== null) {
     const pending = host.store.pendingInterruptForNode(run.run_id, run.current_node_id);
     if (pending) task['metadata'] = { openwop: { interrupt: { kind: pending.kind, nodeId: pending.node_id } } };
+    if (pending?.kind === 'credential') {
+      // RFC 0199 §D.1 (interop-map.json a2a.taskState override (waiting-input, credential)):
+      // TASK_STATE_AUTH_REQUIRED, with a status message naming the provider and carrying connectUrl —
+      // A2A §7.6.1's out-of-band means. The message carries no credential and no interrupt token.
+      const data = (JSON.parse(pending.payload_json) as { data?: { provider?: string; scopes?: string[]; connectUrl?: string } }).data ?? {};
+      const scopes = Array.isArray(data.scopes) && data.scopes.length > 0 ? ` (${data.scopes.join(' ')})` : '';
+      task['status'] = { state: 'TASK_STATE_AUTH_REQUIRED', timestamp: run.updated_at, message: { messageId: `auth-${pending.interrupt_id.split('/')[1] ?? pending.interrupt_id}`, role: 'ROLE_AGENT', parts: [{ text: `Authorize ${String(data.provider)}${scopes}: ${String(data.connectUrl)}` }], taskId: run.run_id, contextId: contextOf(host, run) } };
+    }
   }
   return task;
 }

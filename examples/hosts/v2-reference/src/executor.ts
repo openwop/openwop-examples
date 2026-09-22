@@ -17,6 +17,7 @@ import { nowIso } from './ids.js';
 import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
+import { CREDENTIAL_RESUME_SCHEMA, OAUTH_USE_TYPE, acquireForNode, connectUrlFor, credentialInterruptAdvertised, oauthSupported, provider as oauthProvider, setGrantCompletedHandler } from './oauth.js';
 
 const active = new Set<string>();
 
@@ -26,7 +27,7 @@ class NodeFailure extends Error {
 
 function waitingStatusFor(kind: string): string {
   if (kind === 'external-event') return 'waiting-external';
-  if (kind === 'clarification' || kind.startsWith('conversation.')) return 'waiting-input';
+  if (kind === 'clarification' || kind === 'credential' || kind.startsWith('conversation.')) return 'waiting-input';
   return 'waiting-approval';
 }
 
@@ -125,6 +126,33 @@ function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<st
 
 type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload };
 
+/**
+ * RFC 0199 / oauth.md — a node declaring `auth { type: oauth2, provider, scopes }`
+ * (fixture conformance-credential). The host resolves the credential host-side
+ * (refreshing it through the provider's token endpoint); the node sees a
+ * credential REFERENCE only. When none resolves: under `oauth.credentialInterrupt`
+ * the node suspends on a `credential` interrupt; otherwise RFC 0047 §C.3 —
+ * `connector_auth_expired` after a terminal refresh failure, `credential_required`
+ * when there never was one.
+ */
+async function useCredential(host: Host, run: RunRow, node: WorkflowNode): Promise<NodeResult> {
+  const auth = (node.config['auth'] ?? {}) as { type?: unknown; provider?: unknown; scopes?: unknown };
+  const providerId = typeof auth.provider === 'string' ? auth.provider : '';
+  const scopes = Array.isArray(auth.scopes) ? auth.scopes.map(String) : [];
+  if (!oauthSupported(host) || auth.type !== 'oauth2' || oauthProvider(host, providerId) === undefined) {
+    throw new NodeFailure('oauth_provider_unsupported', `provider ${providerId} is not in oauth.providers`, { provider: providerId });
+  }
+  const got = await acquireForNode(host, run, providerId, scopes, node.id);
+  if (got.ok) return { outputs: { provider: providerId, credentialRef: got.credentialRef } };
+  if (!credentialInterruptAdvertised(host)) {
+    if (got.reason === 'expired') throw new NodeFailure('connector_auth_expired', `the ${providerId} credential's refresh failed terminally`, { provider: providerId });
+    throw new NodeFailure('credential_required', `no ${providerId} credential with scopes [${scopes.join(', ')}] resolves for the run's Subject`, { provider: providerId });
+  }
+  const data: Record<string, unknown> = { provider: providerId, scopes, reason: got.reason, connectUrl: connectUrlFor(host, run, node.id, providerId, scopes) };
+  if (got.credentialRef !== undefined) data['credentialRef'] = { ref: got.credentialRef, scope: 'user' };
+  return { suspend: { kind: 'credential', key: `${run.run_id}:${node.id}:0`, data, resumeSchema: { ...CREDENTIAL_RESUME_SCHEMA } as unknown as Record<string, unknown> } };
+}
+
 async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number): Promise<NodeResult | 'cancelled' | 'paused'> {
   switch (node.typeId) {
     case 'core.noop':
@@ -161,6 +189,8 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
     }
     case 'core.conversationGate':
       return { outputs: runConversation(host, run, node) };
+    case OAUTH_USE_TYPE:
+      return useCredential(host, run, node);
     default:
       throw new NodeFailure('unsupported_node_type', `${node.typeId} is not executed by this host (capability not provided)`, { typeId: node.typeId });
   }
@@ -418,6 +448,15 @@ export function resolveAndResume(host: Host, run: RunRow, row: InterruptRow, res
   if (subject !== null) resolved['resolvedBy'] = subject;
   if (outcome.decision !== undefined) resolved['decision'] = outcome.decision;
   appendEvent(host, run, 'interrupt.resolved', resolved, { nodeId: row.node_id });
+  // RFC 0199 §C.4 — `declined` fails the node with connector_auth_declined.
+  if (payload.kind === 'credential' && (resumeValue as { outcome?: unknown } | null)?.outcome === 'declined') {
+    const error = { code: 'connector_auth_declined', message: 'the user declined the credential interrupt' };
+    appendEvent(host, run, 'node.failed', { nodeId: row.node_id, error, attempts: 1 }, { nodeId: row.node_id });
+    appendEvent(host, run, 'run.failed', { error, failedNodeId: row.node_id });
+    host.store.invalidateInterruptsForRun(run.run_id);
+    setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
+    return { runId: run.run_id, nodeId: row.node_id, status: 'failed' };
+  }
   if (outcome.decision === 'rejected') {
     const error = { code: 'approval_rejected', message: 'the approval was rejected' };
     appendEvent(host, run, 'node.failed', { nodeId: row.node_id, error, attempts: 1 }, { nodeId: row.node_id });
@@ -452,3 +491,17 @@ export function applyPinDisposition(host: Host, run: RunRow): RunRow {
 export function isActive(runId: string): boolean {
   return active.has(runId);
 }
+
+/**
+ * RFC 0199 §C.4 — the host resolves a credential interrupt ITSELF once the grant
+ * its connectUrl began has completed (oauth.ts callback). The same resolve path
+ * a caller uses, so the re-check runs and the log records
+ * `interrupt.resolved { resumeValue: { outcome: authorized } }`.
+ */
+setGrantCompletedHandler((host, runId, nodeId, subject) => {
+  const run = host.store.getRun(runId);
+  if (!run || TERMINAL.has(run.status)) return;
+  const row = host.store.pendingInterruptForNode(runId, nodeId);
+  if (!row || row.kind !== 'credential') return;
+  try { resolveAndResume(host, run, row, { outcome: 'authorized' }, subject); } catch { /* a concurrent resolve won, or the credential no longer covers the scopes */ }
+});

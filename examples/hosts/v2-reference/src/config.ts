@@ -152,6 +152,15 @@ export interface HostConfig {
   readonly a2aWorkflowId: string;
   /** RFC 0208 — the HMAC key MCP `requestState` tokens are integrity-protected under. */
   readonly mcpStateSecret: string;
+  /**
+   * RFC 0199 — the origin a user agent reaches this host at (redirect URIs, connectUrl).
+   * connectUrl MUST be https, so `oauth.credentialInterrupt` is advertised only when this is https.
+   */
+  readonly publicBaseUrl: string | null;
+  /** RFC 0199 — advertise and honour `oauth.credentialInterrupt` (default on when publicBaseUrl is https). */
+  readonly oauthCredentialInterrupt: boolean;
+  /** An operator relaxation of the egress guard for the OAuth client's own requests (token, metadata, PRM) — recorded as host.relaxations[] when a bundle is cut under it. */
+  readonly oauthAllowPrivate: boolean;
 }
 
 export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
@@ -206,6 +215,9 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     tenantB: env('OPENWOP_TENANT_B', DEFAULT_TENANT_B),
     a2aWorkflowId: env('OPENWOP_A2A_WORKFLOW_ID', 'conformance-approval'),
     mcpStateSecret: env('OPENWOP_MCP_STATE_SECRET', randomBytes(32).toString('hex')),
+    publicBaseUrl: process.env['OPENWOP_PUBLIC_BASE_URL']?.trim() || null,
+    oauthCredentialInterrupt: envBool('OPENWOP_OAUTH_CREDENTIAL_INTERRUPT', true),
+    oauthAllowPrivate: envBool('OPENWOP_OAUTH_ALLOW_PRIVATE', false),
     ...overrides,
   };
 }
