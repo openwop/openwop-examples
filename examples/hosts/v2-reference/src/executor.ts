@@ -186,6 +186,17 @@ function unwind(host: Host, run: RunRow, def: WorkflowDefinition, completed: str
     : { compensationId: `c-${run.run_id.split('/')[1] ?? ''}`, orderingModel: 'reverse-completion', reason: 'operator-terminated' });
 }
 
+/**
+ * runs.md `run.started.transport` — the surface that ACCEPTED the run. REST is
+ * the default; the A2A interface and the MCP mount (RFC 0208) record theirs in
+ * the run's options at acceptance, so a re-entered loop (restart, fork) still
+ * reports the surface the run actually came in through.
+ */
+const TRANSPORTS = new Set(['rest', 'mcp', 'a2a', 'ui']);
+function runTransport(t: unknown): string {
+  return typeof t === 'string' && TRANSPORTS.has(t) ? t : 'rest';
+}
+
 /** Enter (or re-enter) the loop for a run. Idempotent: one loop per run at a time. */
 export function scheduleRun(host: Host, runId: string): void {
   if (active.has(runId)) return;
@@ -205,11 +216,11 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     setStatus(host, run, 'failed', { completed_at: nowIso(), error_json: JSON.stringify({ code: 'not_found', message: `workflow ${run.workflow_id} is not registered` }) });
     return;
   }
-  const options = JSON.parse(run.options_json) as { tags?: string[]; metadata?: Record<string, unknown> };
+  const options = JSON.parse(run.options_json) as { tags?: string[]; metadata?: Record<string, unknown>; transport?: unknown };
   let startedAt = state.startedAt;
   if (!state.started) {
     const owner = ownerOf(host, run);
-    const payload: Record<string, unknown> = { workflowId: run.workflow_id, inputs: JSON.parse(run.inputs_json), transport: 'rest', engineVersion: 1, owner };
+    const payload: Record<string, unknown> = { workflowId: run.workflow_id, inputs: JSON.parse(run.inputs_json), transport: runTransport(options.transport), engineVersion: 1, owner };
     if (options.tags) payload['tags'] = options.tags;
     if (options.metadata) payload['metadata'] = options.metadata;
     const doc = appendEvent(host, run, 'run.started', payload);

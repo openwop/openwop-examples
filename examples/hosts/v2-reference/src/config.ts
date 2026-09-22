@@ -79,6 +79,7 @@ export const LEGACY_ISSUER = 'urn:openwop:legacy';
 export const API_KEY_ISSUER = `urn:${HOST_NAME}:api-key`;
 export const SESSION_ISSUER = `urn:${HOST_NAME}:session`;
 export const DEFAULT_TENANT = 'openwop-reference-tenant';
+export const DEFAULT_TENANT_B = 'openwop-reference-tenant-b';
 
 /**
  * RFC 0168 §E.2 — the bundle-signing key this host publishes.
@@ -144,6 +145,13 @@ export interface HostConfig {
   readonly chainMaxDepth: number;
   readonly sandboxMemoryLimitBytes: number;
   readonly sandboxWallClockLimitMs: number;
+  /** A credential bound to a SECOND tenant (the cross-tenant conformance legs); null = none provisioned. */
+  readonly tenantBApiKey: string | null;
+  readonly tenantB: string;
+  /** RFC 0208 — the one workflow the A2A interface routes (A2A 1.0 Message carries no skill selector). */
+  readonly a2aWorkflowId: string;
+  /** RFC 0208 — the HMAC key MCP `requestState` tokens are integrity-protected under. */
+  readonly mcpStateSecret: string;
 }
 
 export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
@@ -194,6 +202,10 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     chainMaxDepth: envInt('OPENWOP_CHAIN_MAX_DEPTH', 8),
     sandboxMemoryLimitBytes: envInt('OPENWOP_SANDBOX_MEMORY_LIMIT_BYTES', 48 * 1024 * 1024),
     sandboxWallClockLimitMs: envInt('OPENWOP_SANDBOX_WALL_CLOCK_LIMIT_MS', 2000),
+    tenantBApiKey: process.env['OPENWOP_TENANT_B_API_KEY']?.trim() || null,
+    tenantB: env('OPENWOP_TENANT_B', DEFAULT_TENANT_B),
+    a2aWorkflowId: env('OPENWOP_A2A_WORKFLOW_ID', 'conformance-approval'),
+    mcpStateSecret: env('OPENWOP_MCP_STATE_SECRET', randomBytes(32).toString('hex')),
     ...overrides,
   };
 }

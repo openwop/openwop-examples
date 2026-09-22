@@ -10,6 +10,8 @@
  *   credentials           host-internal   — api-key / session lanes (next-request revocation)
  *   annotations           host-internal   — a side-store, never the event log (runs.md §Annotations)
  *   workspace_files       host-internal   — the minimal RFC 0059 seam
+ *   a2a_tasks/a2a_messages host-internal  — A2ATaskState per run served over A2A (RFC 0208)
+ *   mcp_request_states    host-internal   — consumed MCP requestState nonces (single use)
  *
  * `better-sqlite3` is the one runtime dependency; every read that crosses the
  * storage boundary for era-2 rows goes through `codemap.ts`, not through this file.
@@ -155,6 +157,14 @@ export interface AnnotationRow {
   annotation_id: string;
   run_id: string;
   json: string;
+  created_at: string;
+}
+
+export interface A2ATaskRow {
+  run_id: string;
+  tenant: string;
+  context_id: string;
+  history_json: string;
   created_at: string;
 }
 
@@ -324,6 +334,28 @@ CREATE TABLE IF NOT EXISTS workspace_files (
   etag TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (tenant, workspace, path)
+);
+-- RFC 0208: the persisted A2A task state of a run served over the A2A interface.
+-- history = the A2A Messages exchanged on the task, never run internals.
+CREATE TABLE IF NOT EXISTS a2a_tasks (
+  run_id TEXT PRIMARY KEY,
+  tenant TEXT NOT NULL,
+  context_id TEXT NOT NULL,
+  history_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+-- message.messageId is the idempotency seed: one row per (principal, messageId).
+CREATE TABLE IF NOT EXISTS a2a_messages (
+  principal TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (principal, message_id)
+);
+-- RFC 0208 mcp.mrtr: a requestState is single use; its nonce is recorded when consumed.
+CREATE TABLE IF NOT EXISTS mcp_request_states (
+  nonce TEXT PRIMARY KEY,
+  consumed_at TEXT NOT NULL
 );
 `;
 
@@ -580,6 +612,34 @@ export class Store {
   }
   annotationsForRun(runId: string): AnnotationRow[] {
     return this.db.prepare('SELECT * FROM annotations WHERE run_id = ? ORDER BY created_at ASC').all(runId) as AnnotationRow[];
+  }
+
+  // ── A2A task state (RFC 0208) ─────────────────────────────────────────────
+  insertA2ATask(row: A2ATaskRow): void {
+    this.db.prepare('INSERT INTO a2a_tasks (run_id, tenant, context_id, history_json, created_at) VALUES (@run_id, @tenant, @context_id, @history_json, @created_at)').run(row);
+  }
+  a2aTask(runId: string): A2ATaskRow | undefined {
+    return this.db.prepare('SELECT * FROM a2a_tasks WHERE run_id = ?').get(runId) as A2ATaskRow | undefined;
+  }
+  setA2AHistory(runId: string, historyJson: string): void {
+    this.db.prepare('UPDATE a2a_tasks SET history_json = ? WHERE run_id = ?').run(historyJson, runId);
+  }
+  a2aMessageRun(principal: string, messageId: string): string | undefined {
+    return (this.db.prepare('SELECT run_id FROM a2a_messages WHERE principal = ? AND message_id = ?').get(principal, messageId) as { run_id: string } | undefined)?.run_id;
+  }
+  recordA2AMessage(principal: string, messageId: string, runId: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO a2a_messages (principal, message_id, run_id, created_at) VALUES (?, ?, ?, ?)').run(principal, messageId, runId, new Date().toISOString());
+  }
+
+  // ── MCP requestState (RFC 0208) ───────────────────────────────────────────
+  /** Atomic single-use claim: true exactly once per nonce. */
+  consumeMcpRequestState(nonce: string): boolean {
+    try {
+      this.db.prepare('INSERT INTO mcp_request_states (nonce, consumed_at) VALUES (?, ?)').run(nonce, new Date().toISOString());
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ── workspace files ───────────────────────────────────────────────────────

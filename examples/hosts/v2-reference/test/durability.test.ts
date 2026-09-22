@@ -75,7 +75,8 @@ describe('the gate (RFC 0158 §E item 12): deployment-time, fail-closed', () => 
   });
   it('advertises nothing (§E.10): discovery is byte-identical with the seam mounted and unmounted', async () => {
     const off = await boot({}); const on = await boot({ durabilitySeam: true });
-    const d = async (B: string): Promise<unknown> => { const j = await (await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0' } })).json() as Record<string, unknown>; delete j['host']; return j; };
+    // The RFC 0208 facet URLs (agentCardUrl, serverUrls) are absolute and name the origin the caller reached; the two hosts differ only in port, so the origin is normalised out.
+    const d = async (B: string): Promise<unknown> => { const text = (await (await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0' } })).text()).split(B).join('<origin>'); const j = JSON.parse(text) as Record<string, unknown>; delete j['host']; return j; };
     expect(await d(on.B)).toEqual(await d(off.B));
   });
   it('refuses an unknown mode and an unknown key before doing anything', async () => {

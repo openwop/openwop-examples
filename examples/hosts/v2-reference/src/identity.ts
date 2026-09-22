@@ -32,8 +32,20 @@ export function bearerOf(req: IncomingMessage): string | null {
 
 export function ensureDefaultCredential(host: Host): void {
   const hash = sha256(host.config.apiKey);
-  if (host.store.credentialByHash(hash) !== undefined) return;
-  host.store.insertCredential({ id: 'default', secret_hash: hash, tenant: host.config.tenant, lane: 'api-key', subject_id: 'default', created_at: nowIso(), revoked_at: null });
+  if (host.store.credentialByHash(hash) === undefined) {
+    host.store.insertCredential({ id: 'default', secret_hash: hash, tenant: host.config.tenant, lane: 'api-key', subject_id: 'default', created_at: nowIso(), revoked_at: null });
+  }
+  // OPENWOP_TENANT_B_API_KEY: a second api-key credential bound to a SECOND
+  // tenant, so the cross-tenant legs (isolation, ListTasks scoping, per-caller
+  // cache scope) have a real other caller rather than a soft-skip.
+  const b = host.config.tenantBApiKey;
+  if (b !== null && b !== host.config.apiKey) {
+    if (host.config.tenantB === host.config.tenant) throw new Error('OPENWOP_TENANT_B MUST differ from OPENWOP_TENANT: the second credential exists to be another tenant');
+    const bHash = sha256(b);
+    if (host.store.credentialByHash(bHash) === undefined) {
+      host.store.insertCredential({ id: 'tenant-b', secret_hash: bHash, tenant: host.config.tenantB, lane: 'api-key', subject_id: 'tenant-b', created_at: nowIso(), revoked_at: null });
+    }
+  }
 }
 
 /** identity.md §2 — resolve the presented credential to a Subject or fail closed. */
