@@ -5,7 +5,8 @@
  * event with a payload from the registry (events.md §Payloads).
  *
  * Node types: core.noop, core.delay, core.fail, core.approvalGate,
- * core.clarificationGate, core.interrupt, core.httpFetch. Anything else fails
+ * core.clarificationGate, core.interrupt, core.httpFetch, core.conversationGate
+ * (the conformance mock), conformance.artifact.emit (RFC 0205). Anything else fails
  * the node (and the run) closed.
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
@@ -13,6 +14,7 @@ import { buildCompensationPlan, compensationState, performHttpFetch, recordAttem
 import { err } from './errors.js';
 import { mintInterrupt, payloadOf, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
+import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 
@@ -98,6 +100,29 @@ function interruptFor(node: WorkflowNode, run: RunRow): InterruptPayload {
   return payload;
 }
 
+/**
+ * `core.conversationGate` with `lifecycle: open-exchange-close` and `mockAutoResume`
+ * (fixture conformance-conversation-lifecycle): open, one exchange whose agent turn the
+ * host's conformance mock supplies, close — `conversation.opened` → `.exchanged` →
+ * `.closed` under one conversationId. RFC 0205 §B: the turn carries `parts` (one `text`
+ * Part, with `content` the same text so a pre-0205 reader still renders it) only when the
+ * installed contract declares the property on the closed v2 turn def.
+ */
+function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<string, unknown> {
+  const c = node.config;
+  if (c['lifecycle'] !== 'open-exchange-close' || c['mockAutoResume'] !== true) {
+    throw new NodeFailure('unsupported_node_type', 'core.conversationGate is executed only as open-exchange-close with mockAutoResume (the conformance mock)', { typeId: node.typeId });
+  }
+  const conversationId = `${run.run_id.split('/')[1] ?? run.run_id}:${node.id}`;
+  appendEvent(host, run, 'conversation.opened', { conversationId }, { nodeId: node.id });
+  const text = 'Conformance mock reply.';
+  const turn: Record<string, unknown> = { messageId: `${conversationId}:1:agent`, from: 'host:conformance-mock', content: text, ts: Date.now(), role: 'agent', turnIndex: 1, speakerId: 'host:conformance-mock' };
+  if (corpusHasParts(host)) turn['parts'] = [{ text }];
+  appendEvent(host, run, 'conversation.exchanged', { conversationId, turnIndex: 1, turn }, { nodeId: node.id });
+  appendEvent(host, run, 'conversation.closed', { conversationId, reason: 'goal-reached', turnCount: 1 }, { nodeId: node.id });
+  return { conversationId, turnCount: 1 };
+}
+
 type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload };
 
 async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number): Promise<NodeResult | 'cancelled' | 'paused'> {
@@ -124,6 +149,18 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'http_fetch_failed', (e as Error).message);
       }
     }
+    case ARTIFACT_EMIT_TYPE: {
+      // RFC 0205 (fixture conformance-artifact-emit): one artifact, announced by
+      // artifact.created and readable through getArtifact (run-artifacts.ts), which
+      // resolves it from this event and the node's config — nothing is stored twice.
+      const artifactId = artifactIdFor(node.id);
+      const payload: Record<string, unknown> = { artifactId, artifactType: String(node.config['artifactType'] ?? 'conformance.artifact.brief'), nodeId: node.id, registered: false };
+      if (typeof node.config['summary'] === 'string') payload['summary'] = node.config['summary'];
+      appendEvent(host, run, 'artifact.created', payload, { nodeId: node.id });
+      return { outputs: { artifactId } };
+    }
+    case 'core.conversationGate':
+      return { outputs: runConversation(host, run, node) };
     default:
       throw new NodeFailure('unsupported_node_type', `${node.typeId} is not executed by this host (capability not provided)`, { typeId: node.typeId });
   }
