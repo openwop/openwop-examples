@@ -16,6 +16,7 @@ import { nowIso, tenantBound } from './ids.js';
 import { TERMINAL, type Host, type Subject } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 import { principalRef } from './identity.js';
+import { taintedSurfaces } from './a2ui.js';
 
 export interface InterruptPayload {
   kind: string;
@@ -130,6 +131,12 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
     const approvers = Array.isArray(data['approversList']) ? (data['approversList'] as unknown[]) : [];
     if (approvers.length > 0 && subject !== null && !listed(approvers, subject)) {
       throw err('forbidden', 'the resolver is not in approversList (interrupt.md §Approver enforcement)');
+    }
+    // RFC 0209 §C.12 / a2ui-untrusted-blocks-approval: a surface bound to this gate whose fold holds an
+    // untrusted envelope cannot advance it — whatever trusted updates followed.
+    const tainted = taintedSurfaces(host, run, row.node_id);
+    if (tainted.length > 0) {
+      throw err('forbidden', 'an untrusted ui.a2ui-surface is bound to this approval gate (untrusted_content_blocks_approval)', { reason: 'untrusted_content_blocks_approval', surfaceIds: tainted });
     }
     if (action === 'refine' && (rv as { refineFeedback?: unknown })?.refineFeedback === undefined) throw err('validation_error', 'refine requires refineFeedback');
     if (action === 'edit-accept' && (rv as { editedArtifactData?: unknown })?.editedArtifactData === undefined) throw err('validation_error', 'edit-accept requires editedArtifactData');
