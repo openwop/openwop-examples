@@ -31,6 +31,7 @@ import { nowIso, tenantBound } from './ids.js';
 import { EVENT_LOG_SCHEMA_VERSION } from './config.js';
 import type { Host, Subject } from './host.js';
 import type { RunRow } from './store.js';
+import { childOf, traceFields, traceHeaders, type TraceContext } from './trace-context.js';
 
 /** The date this host's advertised versions were last re-evaluated against the upstream registries (interop.md §The refresh SLA: ≤ 90 days). */
 export const INTEROP_REFRESHED_AT = '2026-09-18';
@@ -98,7 +99,7 @@ function refuse(protocol: Protocol, requested: string, supported: readonly strin
 }
 
 /** §22 — the A2A client path, once, against `peerUrl`. */
-export async function a2aInvoke(host: Host, tenant: string, subject: Subject | null, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+export async function a2aInvoke(host: Host, tenant: string, subject: Subject | null, body: Record<string, unknown>, trace: TraceContext | null = null): Promise<{ status: number; body: Record<string, unknown> }> {
   const peerUrl = typeof body['peerUrl'] === 'string' ? body['peerUrl'] : null;
   if (!peerUrl) throw err('validation_error', 'peerUrl is REQUIRED');
   const authenticated = body['authenticated'] !== false;
@@ -119,14 +120,17 @@ export async function a2aInvoke(host: Host, tenant: string, subject: Subject | n
   const d = decide(A2A_FACET.versions, A2A_FACET.preferredVersion, A2A_FACET.minimumVersion, offers, requested, authenticated);
   audit(host, run, 'a2a', peerUrl, A2A_FACET.minimumVersion, d);
   if (d.outcome === 'refused') refuse('a2a', requested ?? A2A_FACET.preferredVersion, A2A_FACET.versions, run.run_id, d.reason);
-  const rpc = await post(host, rpcUrl, { 'A2A-Version': d.version }, { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: { role: 'user', parts: [{ text: 'ping' }] } } });
+  // interop.md §Trace context (RFC 0207): the caller's trace, as a child span, in Message.metadata.openwop (SHOULD) AND the header.
+  const tc = trace !== null ? childOf(trace) : null;
+  const message: Record<string, unknown> = { role: 'user', parts: [{ text: 'ping' }], ...(tc !== null ? { metadata: { openwop: traceFields(tc) } } : {}) };
+  const rpc = await post(host, rpcUrl, { 'A2A-Version': d.version, ...traceHeaders(tc) }, { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message } });
   const rpcError = rpc.json?.['error'];
   if (rpc.status >= 400 || rpcError) throw err('validation_error', `the peer refused SendMessage under A2A-Version ${d.version}`, { peerStatus: rpc.status, error: rpcError ?? null, runId: run.run_id });
   return { status: 200, body: { negotiatedVersion: d.version, protocol: 'a2a', runId: run.run_id, peerDigest: originDigest(peerUrl), result: rpc.json?.['result'] ?? null } };
 }
 
 /** §23 — the MCP client path, once, against `serverUrl`; MRTR rounds capped by the advertised ceiling. */
-export async function mcpInvoke(host: Host, tenant: string, subject: Subject | null, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+export async function mcpInvoke(host: Host, tenant: string, subject: Subject | null, body: Record<string, unknown>, trace: TraceContext | null = null): Promise<{ status: number; body: Record<string, unknown> }> {
   const serverUrl = typeof body['serverUrl'] === 'string' ? body['serverUrl'] : null;
   if (!serverUrl) throw err('validation_error', 'serverUrl is REQUIRED');
   const authenticated = body['authenticated'] !== false;
@@ -146,8 +150,10 @@ export async function mcpInvoke(host: Host, tenant: string, subject: Subject | n
   const d = decide(MCP_FACET.revisions, MCP_FACET.preferredVersion, MCP_FACET.minimumRevision, offers, requested, authenticated);
   audit(host, run, 'mcp', serverUrl, MCP_FACET.minimumRevision, d);
   if (d.outcome === 'refused') refuse('mcp', requested ?? MCP_FACET.preferredVersion, MCP_FACET.revisions, run.run_id, d.reason);
-  const headers = { 'MCP-Protocol-Version': d.version };
-  const meta = { [META_VERSION]: d.version, [META_CLIENT_CAPS]: clientCaps };
+  // interop.md §Trace context (RFC 0207): the caller's trace, as a child span, in _meta (SHOULD) AND the header.
+  const tc = trace !== null ? childOf(trace) : null;
+  const headers = { 'MCP-Protocol-Version': d.version, ...traceHeaders(tc) };
+  const meta = { [META_VERSION]: d.version, [META_CLIENT_CAPS]: clientCaps, ...traceFields(tc) };
   let rounds = 0; let inputRequiredSeen = false; let retried = false; let requestStateEchoed = false;
   let params: Record<string, unknown> = { name: tool, arguments: args, _meta: meta };
   for (;;) {
