@@ -61,7 +61,7 @@ function snapshotForMajor(ctx: Ctx, run: RunRow): Record<string, unknown> {
 }
 
 export function snapshot(host: Host, run: RunRow): Record<string, unknown> {
-  const options = JSON.parse(run.options_json) as { configurable?: unknown; tags?: unknown; metadata?: unknown };
+  const options = JSON.parse(run.options_json) as { configurable?: unknown; tags?: unknown; metadata?: unknown; agent?: unknown };
   const snap: Record<string, unknown> = {
     runId: run.run_id,
     workflowId: run.workflow_id,
@@ -79,6 +79,8 @@ export function snapshot(host: Host, run: RunRow): Record<string, unknown> {
   if (options.configurable !== undefined) snap['configurable'] = options.configurable;
   if (options.tags !== undefined) snap['tags'] = options.tags;
   if (options.metadata !== undefined) snap['metadata'] = options.metadata;
+  // RFC 0072 §B / RFC 0202: a run started through an agent's routing value carries that agent.
+  if (options.agent !== undefined) snap['agent'] = options.agent;
   host.validate('run-snapshot', snap, `snapshot ${run.run_id}`);
   return snap;
 }

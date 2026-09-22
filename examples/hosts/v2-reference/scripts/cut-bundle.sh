@@ -20,6 +20,9 @@ OUT="${1:-bundle-v3.json.new}"
 PORT=3838
 BASE="http://127.0.0.1:${PORT}"
 KEY="openwop-v2-dev-key"
+# The second tenant (RFC 0202 identical-refusal / tenant-of-record, RFC 0208 a2a-list-scoped, RFC 0198
+# and 0205 cross-tenant legs): the host binds it, the suite presents it. Without it those rows are `blocked`.
+KEY_B="${OPENWOP_TENANT_B_API_KEY:-openwop-v2-dev-key-tenant-b}"
 IDP_PORT="${IDP_PORT:-3839}"
 IDP="http://127.0.0.1:${IDP_PORT}"   # where THIS SCRIPT reaches the IdP; the HOST is told $IDP_FOR_HOST
 
@@ -91,7 +94,7 @@ SUP_LOG="$(mktemp -t v2ref-supervisor.XXXXXX)"
 CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 \
 OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
-OPENWOP_MCP_SERVERS="$MCP_SERVERS" \
+OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" \
   node scripts/supervisor.mjs --restart-ms 1000 --log "$SUP_LOG" >/tmp/cut-host.log 2>&1 &
 HOST_PID=$!
 # `< /dev/null` would end the IdP's stdin at once; it exits with its parent ONLY
@@ -167,6 +170,7 @@ OPENWOP_TEST_SAML_IDP_URL="$IDP_FOR_HOST" \
 OPENWOP_HOST_RELAXATIONS="$RELAXATIONS" \
 OPENWOP_TEST_SCIM_URL="urn:openwop:conformance:scim" \
 OPENWOP_TEST_IMPLEMENTED_CHANGE_ID="rfc-0176-witness" \
+OPENWOP_TEST_TENANT_B_API_KEY="$KEY_B" \
 npx openwop-conformance --base-url "$BASE" --api-key "$KEY" \
   --target-major 2 --require-behavior --max-workers 1 \
   --certify "$OUT" --bundle-version 3 --host-build "commit:$SHA" \

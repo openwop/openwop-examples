@@ -152,6 +152,8 @@ export interface HostConfig {
   readonly a2aWorkflowId: string;
   /** RFC 0208 — the HMAC key MCP `requestState` tokens are integrity-protected under. */
   readonly mcpStateSecret: string;
+  /** RFC 0202 §B.2 — the HMAC key per-agent routing values (`a2aTenant`) are minted under; fixed by default so a value is stable across restarts of one host version. */
+  readonly agentCardSecret: string;
   /** RFC 0204 — the MCP servers `ctx.mcp` may address, by `serverId` (`OPENWOP_MCP_SERVERS=id=url,…`). */
   readonly mcpServers: ReadonlyMap<string, string>;
 }
@@ -221,6 +223,7 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     tenantB: env('OPENWOP_TENANT_B', DEFAULT_TENANT_B),
     a2aWorkflowId: env('OPENWOP_A2A_WORKFLOW_ID', 'conformance-approval'),
     mcpStateSecret: env('OPENWOP_MCP_STATE_SECRET', randomBytes(32).toString('hex')),
+    agentCardSecret: env('OPENWOP_AGENT_CARD_SECRET', 'v2-reference-agent-card-routing-dev-secret'),
     mcpServers: parseMcpServers(env('OPENWOP_MCP_SERVERS', '')),
     ...overrides,
   };

@@ -43,6 +43,8 @@ export interface SpecArtifacts {
   readonly mcpClientFacet: boolean;
   /** RFC 0204: the installed `ToolDescriptor` defines `annotations` (the MCP ToolAnnotations projection). */
   readonly toolAnnotations: boolean;
+  /** RFC 0202: the installed `a2a` facet defines `agentCards` (per-agent A2A cards over the agent inventory). */
+  readonly agentCardsFacet: boolean;
 }
 
 function resolveRoot(): string {
@@ -115,6 +117,7 @@ export function loadArtifacts(): SpecArtifacts {
     peerAliases,
     mcpClientFacet: caps.properties['mcp']?.properties?.['client'] !== undefined,
     toolAnnotations: descriptor.properties['annotations'] !== undefined,
+    agentCardsFacet: caps.properties['a2a']?.properties?.['agentCards'] !== undefined,
   };
   return cached;
 }
