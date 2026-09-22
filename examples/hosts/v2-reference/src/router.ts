@@ -8,8 +8,10 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { MIN_CLIENT_VERSION, SERVED_VERSIONS, V1_RETIRED, V1_VERSION, V2_VERSION } from './config.js';
 import { HostError, err } from './errors.js';
-import { authenticate } from './identity.js';
+import { authenticate, bearerOf } from './identity.js';
 import { IDEMPOTENCY_KEY, unprojectBoundId } from './ids.js';
+import { challengeFor } from './protected-resource.js';
+import { scopeForRoute } from './scopes.js';
 import type { Host, Subject } from './host.js';
 
 export interface Reply {
@@ -49,6 +51,8 @@ export interface Route {
   readonly handler: Handler;
   /** `v1` routes serve the 1.x contract; everything else is the 2.x surface. */
   readonly contract?: 1 | 2 | 'both';
+  /** RFC 0200 §B.1 — the ONE scope this operation requires, or null where none is specified (`scopes.ts`). */
+  readonly scope?: string | null;
 }
 
 /** The path parameters that carry a tenant-bound id (identity.md §5 table) — the only ones the `~` projection applies to; `nodeId` admits a literal `~`. */
@@ -58,7 +62,10 @@ export function route(method: string, pattern: string, auth: boolean, handler: H
   // A tenant-bound id (`<tenantId>/<opaque>`) may arrive with its slash raw or
   // percent-encoded; every other parameter is one path segment.
   const re = new RegExp(`^${pattern.replace(/\{(runId|webhookId)\}/g, '(?<$1>[^/]+(?:/[A-Za-z0-9._~-]{16,128})?)').replace(/\{(\w+)\}/g, '(?<$1>[^/]+)')}$`);
-  return contract === undefined ? { method, pattern: re, auth, handler } : { method, pattern: re, auth, handler, contract };
+  // RFC 0200: the scope is resolved HERE, from the literal pattern, so a route and its
+  // scope cannot drift — `scopeForRoute` throws at boot for an unlisted, non-exempt route.
+  const scope = auth ? scopeForRoute(method, pattern) : null;
+  return contract === undefined ? { method, pattern: re, auth, handler, scope } : { method, pattern: re, auth, handler, contract, scope };
 }
 
 function versionMajor(raw: string | null): { major: number | null; malformed: boolean } {
@@ -128,8 +135,19 @@ export class Router {
     const version = major === 1 ? V1_VERSION : V2_VERSION;
     const responseHeaders: Record<string, string> = { 'OpenWOP-Version': version };
 
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
+    const hostHeader = (req.headers['host'] as string | undefined) ?? `${this.host.config.host}:${this.host.config.port}`;
+    const baseUrl = `${proto}://${hostHeader}`;
+    // RFC 0200 §B — the refusal the caller is ALREADY getting is what carries the
+    // challenge. `scopeRequired` is set only where a scope would cure the 403.
+    let scopeRequired: string | null = null;
     const send = (reply: Reply): void => {
       const headers: Record<string, string> = { ...responseHeaders, ...(reply.headers ?? {}) };
+      if ((reply.status === 401 || reply.status === 403) && headers['WWW-Authenticate'] === undefined) {
+        const code = typeof (reply.body as { error?: unknown } | undefined)?.error === 'string' ? String((reply.body as { error: string }).error) : '';
+        const challenge = challengeFor(this.host, baseUrl, reply.status, code, scopeRequired, bearerOf(req) !== null);
+        if (challenge !== null) headers['WWW-Authenticate'] = challenge;
+      }
       if (reply.raw !== undefined) {
         headers['Content-Type'] = reply.contentType ?? 'application/octet-stream';
         res.writeHead(reply.status, headers);
@@ -210,12 +228,18 @@ export class Router {
         bodyBuf = Buffer.concat(chunks);
         return bodyBuf;
       };
-      const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
-      const hostHeader = (req.headers['host'] as string | undefined) ?? `${this.host.config.host}:${this.host.config.port}`;
+      const authed = matched.auth ? await authenticate(this.host, req) : null;
+      // RFC 0200 §B.1 / auth.md §Scopes — the endpoint-level scope check, before the
+      // handler runs and therefore before any resource is looked up: a caller that lacks
+      // the scope learns nothing about whether the resource exists.
+      if (authed !== null && matched.scope !== null && matched.scope !== undefined && !authed.scopes.has(matched.scope)) {
+        scopeRequired = matched.scope;
+        throw err('forbidden', `the credential does not hold ${matched.scope}`, { scopeRequired: matched.scope });
+      }
       const ctx: Ctx = {
         req, res, url, params, major, version, host: this.host, responseHeaders,
-        subject: matched.auth ? authenticate(this.host, req) : null,
-        baseUrl: `${proto}://${hostHeader}`,
+        subject: authed?.subject ?? null,
+        baseUrl,
         raw,
         text: async () => (await raw()).toString('utf8'),
         json: async <T,>() => {

@@ -7,6 +7,10 @@
  *   session   trust root `urn:<host>:session`; revocation next-request
  *   workload  trust root = the configured SPIFFE trust domains; key-bound floor;
  *             delegation-expiry; resolved through the §20 seam (seam-gated witness)
+ *   oidc      trust root = OPENWOP_OIDC_ISSUER_URL, when the operator configures one
+ *             (RFC 0200); a compact-JWS bearer is verified against its JWKS, its `aud`
+ *             MUST equal the configured audience (§D), and the lane is advertised only
+ *             while the issuer is configured
  *
  * A credential is bound to the request by being presented on it, never by an
  * asserted header; a revoked credential is refused on the very next request
@@ -17,6 +21,8 @@ import type { IncomingMessage } from 'node:http';
 import { API_KEY_ISSUER, SESSION_ISSUER } from './config.js';
 import { err } from './errors.js';
 import { nowIso, opaque } from './ids.js';
+import { JWT_SHAPE, verifyOidcBearer } from './oidc-lane.js';
+import { scopesEnforced, scopesOfCredential } from './scopes.js';
 import type { Host, Subject } from './host.js';
 
 function sha256(s: string): string {
@@ -38,6 +44,15 @@ export function ensureDefaultCredential(host: Host): void {
   // OPENWOP_TENANT_B_API_KEY: a second api-key credential bound to a SECOND
   // tenant, so the cross-tenant legs (isolation, ListTasks scoping, per-caller
   // cache scope) have a real other caller rather than a soft-skip.
+  // RFC 0200 §B.1 — a real credential that holds only `lowScopeScopes`, so the
+  // insufficient_scope challenge has a caller that can provoke it on the wire.
+  const low = host.config.lowScopeApiKey;
+  if (low !== null && low !== host.config.apiKey) {
+    const lowHash = sha256(low);
+    if (host.store.credentialByHash(lowHash) === undefined) {
+      host.store.insertCredential({ id: 'low-scope', secret_hash: lowHash, tenant: host.config.tenant, lane: 'api-key', subject_id: 'low-scope', created_at: nowIso(), revoked_at: null });
+    }
+  }
   const b = host.config.tenantBApiKey;
   if (b !== null && b !== host.config.apiKey) {
     if (host.config.tenantB === host.config.tenant) throw new Error('OPENWOP_TENANT_B MUST differ from OPENWOP_TENANT: the second credential exists to be another tenant');
@@ -48,10 +63,20 @@ export function ensureDefaultCredential(host: Host): void {
   }
 }
 
-/** identity.md §2 — resolve the presented credential to a Subject or fail closed. */
-export function authenticate(host: Host, req: IncomingMessage): Subject {
+/**
+ * identity.md §2 — resolve the presented credential to a Subject or fail closed, and
+ * report the scopes it holds (RFC 0200 §B.1: `runs:cancel` does not imply `runs:read`,
+ * so the scope set travels with the Subject and the router checks it per operation).
+ */
+export async function authenticate(host: Host, req: IncomingMessage): Promise<{ subject: Subject; scopes: ReadonlySet<string> }> {
   const token = bearerOf(req);
   if (token === null) throw err('unauthenticated', 'Authorization: Bearer <credential> is required');
+  // RFC 0200: a compact JWS is a claim on the `oidc` lane, and is only ever tried there.
+  // An unconfigured lane means no JWT verifies — a bearer that is not a stored credential
+  // is refused with the same 401 as before, never with a hint that a lane exists.
+  if (host.config.oidcIssuerUrl !== null && JWT_SHAPE.test(token)) {
+    return { subject: await verifyOidcBearer(host, token), scopes: scopesOfCredential(ALL_SCOPES(), host.config.lowScopeScopes, false) };
+  }
   const hash = sha256(token);
   const row = host.store.credentialByHash(hash);
   if (row === undefined) throw err('unauthenticated', 'the credential does not verify against any lane trust root');
@@ -59,8 +84,13 @@ export function authenticate(host: Host, req: IncomingMessage): Subject {
   if (!timingSafeEqual(Buffer.from(row.secret_hash), Buffer.from(hash))) throw err('unauthenticated', 'credential mismatch');
   if (row.revoked_at !== null) throw err('credential_revoked', `the ${row.lane} credential was revoked at ${row.revoked_at}`);
   const lane = row.lane === 'session' ? 'session' : 'api-key';
-  return { issuer: lane === 'session' ? SESSION_ISSUER : API_KEY_ISSUER, subjectId: row.subject_id, tenant: row.tenant, lane, kind: 'user' };
+  const subject: Subject = { issuer: lane === 'session' ? SESSION_ISSUER : API_KEY_ISSUER, subjectId: row.subject_id, tenant: row.tenant, lane, kind: 'user' };
+  const low = host.config.lowScopeApiKey !== null && host.config.lowScopeApiKey !== host.config.apiKey && sha256(host.config.lowScopeApiKey) === hash;
+  return { subject, scopes: scopesOfCredential(ALL_SCOPES(), host.config.lowScopeScopes, low) };
 }
+
+/** The full scope vocabulary this host enforces — what a normal credential holds. */
+function ALL_SCOPES(): readonly string[] { return scopesEnforced(); }
 
 export function principalRef(subject: Subject): string {
   return `${subject.issuer}#${subject.subjectId}`;

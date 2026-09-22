@@ -133,6 +133,13 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
         { lane: 'saml', issuers: [SAML_LANE_ISSUER], revocation: 'not-on-or-after', minimumAssurance: 'bearer' },
         { lane: 'scim', issuers: [SAML_LANE_ISSUER], revocation: 'bound-connection', minimumAssurance: 'bearer' },
         { lane: 'workload', issuers: [...c.workloadTrustRoots], revocation: 'delegation-expiry', minimumAssurance: 'key-bound', delegationProofs: ['svid-chain', 'mtls-key-binding'] },
+        // RFC 0200: the `oidc` lane exists only when an issuer is configured, because
+        // advertising it BINDS this host to identity.md §2.5 (protected-resource metadata
+        // and challenges) — and because a lane whose trust root the host cannot reach
+        // would be a shape it never honours. Configured, the host really verifies against
+        // that issuer's JWKS (oidc-lane.ts), exactly as the `saml` lane really verifies
+        // against `urn:openwop:conformance:idp`.
+        ...(c.oidcIssuerUrl === null ? [] : [{ lane: 'oidc', issuers: [c.oidcIssuerUrl], revocation: 'exp-and-recheck', revocationWindowSeconds: 300, minimumAssurance: 'bearer' }]),
       ],
       subjectLinkKey: SUBJECT_LINK_KEY,
     }),

@@ -165,6 +165,22 @@ export interface HostConfig {
   readonly agentCardSecret: string;
   /** RFC 0204 — the MCP servers `ctx.mcp` may address, by `serverId` (`OPENWOP_MCP_SERVERS=id=url,…`). */
   readonly mcpServers: ReadonlyMap<string, string>;
+  /**
+   * RFC 0200 — the OIDC issuer this host trusts as a lane trust root. When set, the
+   * host advertises an `oidc` lane naming it, verifies `Authorization: Bearer <JWT>`
+   * against its JWKS, and is therefore bound by identity.md §2.5 (PRM + challenges).
+   * Unset, the host advertises no oauth2/oidc lane and §2.5's MUSTs do not bind it —
+   * so the lane is a real trust root, never an advertisement the host cannot honour.
+   * The conformance harness's synthetic issuer (`OPENWOP_TEST_OIDC_ISSUER_URL`) is the
+   * intended value, exactly as the `saml` lane trusts `urn:openwop:conformance:idp`.
+   */
+  readonly oidcIssuerUrl: string | null;
+  /** RFC 0200 §D — the audience an ID token's `aud` MUST equal to be admissible on the `oidc` lane. */
+  readonly oidcAudience: string;
+  /** RFC 0200 §B — an api-key credential holding only `lowScopeScopes`, so the insufficient_scope challenge has a caller that can provoke it. */
+  readonly lowScopeApiKey: string | null;
+  /** The scopes `lowScopeApiKey` holds (`OPENWOP_LOW_SCOPE_SCOPES`, comma-separated). */
+  readonly lowScopeScopes: readonly string[];
 }
 
 /** `id=url,id=url` → a map; a malformed entry is refused at boot rather than dropped. */
@@ -237,6 +253,10 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     oauthAllowPrivate: envBool('OPENWOP_OAUTH_ALLOW_PRIVATE', false),
     agentCardSecret: env('OPENWOP_AGENT_CARD_SECRET', 'v2-reference-agent-card-routing-dev-secret'),
     mcpServers: parseMcpServers(env('OPENWOP_MCP_SERVERS', '')),
+    oidcIssuerUrl: process.env['OPENWOP_OIDC_ISSUER_URL']?.trim().replace(/\/$/, '') || null,
+    oidcAudience: env('OPENWOP_OIDC_AUDIENCE', HOST_ID),
+    lowScopeApiKey: process.env['OPENWOP_LOW_SCOPE_API_KEY']?.trim() || null,
+    lowScopeScopes: env('OPENWOP_LOW_SCOPE_SCOPES', 'runs:read').split(',').map((x) => x.trim()).filter((x) => x.length > 0),
     ...overrides,
   };
 }
