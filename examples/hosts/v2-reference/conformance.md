@@ -1,6 +1,10 @@
 # Conformance Result: openwop v2 reference host
 
-> **Measurement — 2026-09-21, `@openwop/openwop-conformance@2.34.0` + `@openwop/spec-artifacts@2.34.0` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:2e6e42d`. THE FIRST BUNDLE THAT CARRIES RFC 0158's RUNG AND RECOVERY BOUND.**
+> **Measurement — 2026-09-22, `@openwop/openwop-conformance@2.35.0` + `@openwop/spec-artifacts@2.35.0` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:8477d75`. PUBLIC=1: guard CLOSED, nothing relaxed.**
+>
+> **RFC 0148 §A dispositions (261 rows, 2032 assertions): executed-pass 246 · executed-fail 0 · blocked 0 · inapplicable 8 · skipped 7.** All three profiles certified; rung `durable-single-instance` re-derived; `--verify` with the published 2.35.0 from a clean install: VERIFIED. New rows, all `executed-pass`: `0194.terminal-once` (4 runs: two completed, one failed, one cancelled), `0194.terminal-once.duplicate-delivery`, `0187.bound-id-kinds.webhook-emitted`, and `0171.webhook-egress-refused` now over eleven probes including the hex-mapped forms this host accepted before openwop-examples#67. `0196.callback-url-guarded` is `inapplicable`: this host refuses `callbackUrl` and advertises no callback delivery (openwop-examples#68).
+>
+> **Earlier measurement — 2026-09-21, `@openwop/openwop-conformance@2.34.0` + `@openwop/spec-artifacts@2.34.0` (npm, corpus stamp VERIFIED — 277 vendored files), `--target-major 2 --require-behavior --max-workers 1`, build `commit:2e6e42d`. THE FIRST BUNDLE THAT CARRIES RFC 0158's RUNG AND RECOVERY BOUND.**
 >
 > **RFC 0148 §A dispositions (255 rows, 2014 assertions): executed-pass 242 · executed-fail 0 · blocked 0 · inapplicable 6 · skipped 7.** All three claimed profiles certified. `host.relaxations`: none; guard CLOSED (`PUBLIC=1`, as below). `witnessSha256` **`cb45c96fd815…`**, Ed25519 under key id `v2-reference-4`. Verified in a clean directory with the suite installed from npm, not from this checkout: zero rejections, certified list re-derived, **rung re-derived**.
 >
