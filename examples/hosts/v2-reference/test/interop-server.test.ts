@@ -1,7 +1,7 @@
 /**
  * RFC 0208 — the host as an A2A 1.0 server and an MCP 2026-07-28 server.
  * Route-level regression net under the conformance scenarios
- * (v2-a2a-operation-map, v2-mcp-mount-map): boots the host in-memory with a
+ * (v2-a2a-operation-map, v2-mcp-mount-map, v2-mcp-tasks): boots the host in-memory with a
  * second tenant and strict dev validation.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -73,7 +73,7 @@ describe('discovery + the Agent Card', () => {
     expect(d.a2a.agentCardUrl).toBe(`${B}/.well-known/agent-card.json`);
     expect([d.a2a.streaming, d.a2a.pushNotifications, d.a2a.durableTasks]).toEqual([false, false, false]);
     expect(d.mcp.profiles).toEqual(['mcp-2026-07-28']);
-    expect(d.mcp.features).toEqual(['server-discover', 'mrtr', 'cacheable-lists']);
+    expect(d.mcp.features).toEqual(['server-discover', 'mrtr', 'cacheable-lists', 'extensions']);
     expect(d.mcp.serverMount).toEqual({ transports: ['streamable-http'] });
     expect(d.mcp.serverUrls).toEqual([`${B}/mcp`]);
   });
@@ -235,5 +235,59 @@ describe('MCP mount', () => {
   it('unauthenticated is refused at the boundary (401 envelope), never a 200', async () => {
     const anon = await mcp('tools/list', {}, { key: null });
     expect(anon.status).toBe(401);
+  });
+});
+
+describe('MCP Tasks (RFC 0198)', () => {
+  const TASKS = { elicitation: {}, extensions: { 'io.modelcontextprotocol/tasks': {} } };
+  const unproject = (t: string): string => t.replace(/~2F/g, '/');
+  it('server/discover lists the extension; a declaring tools/call is a task whose id is the projected runId', async () => {
+    expect((await mcp('server/discover', {})).result.capabilities.extensions).toEqual({ 'io.modelcontextprotocol/tasks': {} });
+    const t = await mcp('tools/call', { name: 'conformance-approval', arguments: {} }, { caps: TASKS });
+    expect([t.error, t.result.resultType, t.result.ttlMs]).toEqual([undefined, 'task', null]);
+    const runId = unproject(t.result.taskId as string);
+    expect(runId).toMatch(/^[^/]+\/[A-Za-z0-9._~-]{22,}$/);
+    expect((await rest(`/runs/${enc(runId)}`)).workflowId).toBe('conformance-approval');
+    expect(await waitStatus(runId, ['waiting-approval'])).toBe('waiting-approval');
+    const got = await mcp('tasks/get', { taskId: t.result.taskId }, { caps: TASKS, mcpName: t.result.taskId });
+    const key = Object.keys(got.result.inputRequests)[0] as string;
+    expect([got.result.status, key]).toEqual(['input_required', (await events(runId)).find((e) => e.type === 'node.suspended')?.payload.interruptId]);
+    const answer = { taskId: t.result.taskId, inputResponses: { [key]: { action: 'accept', content: { action: 'accept' } } } };
+    expect((await mcp('tasks/update', answer, { caps: TASKS })).result).toEqual({ resultType: 'complete' });
+    expect((await mcp('tasks/update', answer, { caps: TASKS })).result).toEqual({ resultType: 'complete' });
+    expect(await waitStatus(runId, ['completed'])).toBe('completed');
+    expect((await events(runId)).filter((e) => e.type === 'interrupt.resolved')).toHaveLength(1);
+    const done = await mcp('tasks/get', { taskId: t.result.taskId }, { caps: TASKS });
+    expect([done.result.status, done.result.result.isError]).toEqual(['completed', false]);
+  });
+  it('tasks/* without the extension is -32021; unknown, foreign-tenant and other-tenant reads are the identical -32602', async () => {
+    const t = await mcp('tools/call', { name: 'conformance-approval', arguments: {} }, { caps: TASKS });
+    expect((await mcp('tasks/get', { taskId: t.result.taskId }, { caps: {} })).error?.code).toBe(-32021);
+    const [tenant, opaque] = unproject(t.result.taskId).split('/') as [string, string];
+    const refusals = [
+      await mcp('tasks/get', { taskId: `${tenant}~2F${'Z'.repeat(opaque.length)}` }, { caps: TASKS }),
+      await mcp('tasks/get', { taskId: `elsewhere~2F${opaque}` }, { caps: TASKS }),
+      await mcp('tasks/get', { taskId: t.result.taskId }, { caps: TASKS, key: KB }),
+      await mcp('tasks/cancel', { taskId: t.result.taskId }, { caps: TASKS, key: KB }),
+    ];
+    expect(new Set(refusals.map((r) => JSON.stringify([r.status, r.error]))).size).toBe(1);
+    expect(refusals[0]?.error).toEqual({ code: -32602, message: 'task not found' });
+    expect((await mcp('tasks/cancel', { taskId: t.result.taskId }, { caps: TASKS })).result).toEqual({ resultType: 'complete' });
+    expect(await waitStatus(unproject(t.result.taskId), ['cancelled'])).toBe('cancelled');
+    expect((await mcp('tasks/get', { taskId: t.result.taskId }, { caps: TASKS })).result.status).toBe('cancelled');
+  });
+  it('a disconnect before the answer cancels the run with reason mcp-request-cancelled', async () => {
+    const before = new Set(((await rest('/runs?workflowId=conformance-delay&limit=100')).runs as Array<{ runId: string }>).map((r) => r.runId));
+    const ac = new AbortController();
+    const call = fetch(`${B}/mcp`, { method: 'POST', signal: ac.signal, headers: { 'Content-Type': 'application/json', 'Mcp-Method': 'tools/call', 'MCP-Protocol-Version': REV, Authorization: `Bearer ${K}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'conformance-delay', arguments: { delayMs: 5000 }, _meta: { 'io.modelcontextprotocol/protocolVersion': REV, 'io.modelcontextprotocol/clientCapabilities': {} } } }) }).catch(() => undefined);
+    let runId: string | undefined;
+    for (let i = 0; i < 40 && runId === undefined; i++) {
+      runId = ((await rest('/runs?workflowId=conformance-delay&limit=100')).runs as Array<{ runId: string }>).map((r) => r.runId).find((r) => !before.has(r));
+      if (runId === undefined) await new Promise((ok) => setTimeout(ok, 25));
+    }
+    ac.abort();
+    await call;
+    expect(await waitStatus(runId as string, ['cancelled', 'completed'])).toBe('cancelled');
+    expect((await events(runId as string)).find((e) => e.type === 'run.cancelled')?.payload.reason).toBe('mcp-request-cancelled');
   });
 });

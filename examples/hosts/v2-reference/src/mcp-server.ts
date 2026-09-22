@@ -18,6 +18,27 @@
  * single-use `requestState` bound to the principal, a TTL, the request digest,
  * the run and the interrupt node. The retry resolves the interrupt through the
  * same eligibility-checked path REST `resolveInterruptByRun` uses.
+ *
+ * RFC 0198 — the MCP Tasks extension (`io.modelcontextprotocol/tasks`,
+ * revision 2026-07-28) and the disconnect rule (`interop.md` §"MCP tasks and
+ * cancellation"; interop-map.json `mcp.tasks`):
+ *
+ *   - `server/discover` lists the extension; a `tools/call` that declares it is
+ *     answered `CreateTaskResult` whenever the run is not terminal (never
+ *     `InputRequiredResult`). `taskId` IS the run's projected tenant-bound
+ *     `runId` (144-bit opaque segment) — no second id namespace, never a credential.
+ *   - `tasks/get` / `tasks/update` / `tasks/cancel` are `getRun` /
+ *     `resolveInterruptByRun` / `cancelRun` under the caller's Subject; an
+ *     unreadable task is `-32602` exactly as a nonexistent one (one message, no
+ *     data). `tasks/get` appends nothing. `subscriptions/listen` acknowledges only
+ *     readable task ids and notifies only those.
+ *   - Until the host has sent its WHOLE response to a request that starts or
+ *     continues a run, the run belongs to that request: the connection closing
+ *     first cancels it (`run.cancelled.reason: mcp-request-cancelled`). Once
+ *     the response is sent, no disconnect touches the run.
+ *   - The host never sends `notifications/cancelled` (it never tears down a
+ *     `subscriptions/listen` stream on its own); a cancelled blocking call is
+ *     answered `CallToolResult { isError: true }`.
  */
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { HOST_NAME, HOST_VERSION } from './config.js';
@@ -28,19 +49,25 @@ import { opaque } from './ids.js';
 import { payloadOf } from './interrupts.js';
 import { MCP_FACET } from './interop.js';
 import { acceptRun } from './runs.js';
-import { route, type Ctx, type Reply, type Route } from './router.js';
+import { projectBoundId, TENANT_BOUND, unprojectBoundId } from './ids.js';
+import { route, STREAMED, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition } from './host.js';
-import type { RunRow } from './store.js';
+import type { InterruptRow, RunRow } from './store.js';
 import { waitForSettle } from './a2a-server.js';
 
 export const MCP_SERVER_PROFILES = ['mcp-2026-07-28'] as const;
 /** Every feature interop-map.json mcp.features requires for mcp-2026-07-28. */
-export const MCP_SERVER_FEATURES = ['server-discover', 'mrtr', 'cacheable-lists'] as const;
+export const MCP_SERVER_FEATURES = ['server-discover', 'mrtr', 'cacheable-lists', 'extensions'] as const;
+/** RFC 0198 — the one MCP extension this mount serves; `extensions` in MCP_SERVER_FEATURES says to look at server/discover. */
+export const MCP_TASKS_EXTENSION = 'io.modelcontextprotocol/tasks';
+/** run-event-payloads runCancelled.reason — the MCP request that owned the run was cancelled or disconnected before the host answered it. */
+export const MCP_REQUEST_CANCELLED = 'mcp-request-cancelled';
 export const MCP_MOUNT_PATH = '/mcp';
 
 const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_CLIENT_CAPS = 'io.modelcontextprotocol/clientCapabilities';
 const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
+const META_SUBSCRIPTION = 'io.modelcontextprotocol/subscriptionId';
 
 const ERR = {
   PARSE: -32700,
@@ -55,6 +82,9 @@ const ERR = {
 
 const TTL_MS = 60_000;
 const CALL_CAP_MS = 5000;
+/** A blocking call answered over SSE holds the stream open this long before it answers "still running". */
+const SSE_CALL_CAP_MS = 60_000;
+const TASK_POLL_INTERVAL_MS = 500;
 const REQUEST_STATE_TTL_MS = 10 * 60_000;
 const SUSPENDING = new Set(['core.approvalGate', 'core.clarificationGate', 'core.interrupt']);
 
@@ -134,42 +164,72 @@ function textResult(isError: boolean, value: unknown): Record<string, unknown> {
   return { resultType: 'complete', content: [{ type: 'text', text: JSON.stringify(value) }], isError };
 }
 
+/** The interrupt a waiting run is suspended on, if one is open. */
+function openInterrupt(host: Host, run: RunRow): InterruptRow | undefined {
+  if ((run.status !== 'waiting-approval' && run.status !== 'waiting-input') || run.current_node_id === null) return undefined;
+  return host.store.pendingInterruptForNode(run.run_id, run.current_node_id);
+}
+
+/** The interop-map.json mcp.mrtr InputRequiredResult projection of one open interrupt (form mode, flat primitive schema). */
+function elicitationFor(pending: InterruptRow): Record<string, unknown> {
+  const payload = payloadOf(pending);
+  const data = payload.data ?? {};
+  let requestedSchema: Record<string, unknown>;
+  let message: string;
+  if (payload.kind === 'approval') {
+    const actions = Array.isArray(data['actions']) ? (data['actions'] as unknown[]).map(String) : ['accept', 'reject'];
+    requestedSchema = { type: 'object', properties: { action: { type: 'string', enum: actions } }, required: ['action'] };
+    message = [data['title'], data['description']].filter((s) => typeof s === 'string').join(' — ') || `Approve ${pending.node_id}`;
+  } else {
+    const questions = Array.isArray(data['questions']) ? (data['questions'] as Array<{ id?: unknown; question?: unknown }>) : [];
+    const properties: Record<string, unknown> = {};
+    for (const q of questions) if (typeof q.id === 'string') properties[q.id] = { type: 'string', description: String(q.question ?? q.id) };
+    requestedSchema = { type: 'object', properties, required: Object.keys(properties) };
+    message = questions.map((q) => String(q.question ?? '')).filter((s) => s.length > 0).join(' ') || `Input for ${pending.node_id}`;
+  }
+  return { method: 'elicitation/create', params: { mode: 'form', message, requestedSchema } };
+}
+
+/**
+ * An ElicitResult applied to one open interrupt through the REST resolve path
+ * (validation, approver eligibility, the atomic claim, the log) — shared by the
+ * MRTR retry and `tasks/update`. Content never becomes authority.
+ */
+function applyElicitResult(host: Host, subject: Subject, run: RunRow, pending: InterruptRow, response: Record<string, unknown>): void {
+  const action = response['action'];
+  if (action === 'cancel') { requestCancel(host, run, 'mcp-elicitation-cancelled'); return; }
+  let resumeValue: unknown;
+  if (action === 'accept') resumeValue = response['content'];
+  else if (action === 'decline') resumeValue = pending.kind === 'approval' ? { action: 'reject' } : { declined: true };
+  else throw new McpError(ERR.INVALID_PARAMS, 'ElicitResult.action is accept | decline | cancel');
+  resolveAndResume(host, run, pending, resumeValue, subject);
+}
+
 /** The run's state at answer time, as MCP sees it (interop-map.json mcp.methods tools/call). */
-function outcome(host: Host, subject: Subject, name: string, args: Record<string, unknown>, run: RunRow): Record<string, unknown> {
+function outcome(host: Host, subject: Subject | null, name: string, args: Record<string, unknown>, run: RunRow): Record<string, unknown> {
   if (run.status === 'completed') return textResult(false, { runId: run.run_id, status: run.status, variables: JSON.parse(run.inputs_json) as unknown });
   if (run.status === 'failed' || run.status === 'cancelled') {
     return textResult(true, { runId: run.run_id, status: run.status, ...(run.error_json !== null ? { error: JSON.parse(run.error_json) as unknown } : {}) });
   }
-  if ((run.status === 'waiting-approval' || run.status === 'waiting-input') && run.current_node_id !== null) {
-    const pending = host.store.pendingInterruptForNode(run.run_id, run.current_node_id);
-    if (pending) {
-      const payload = payloadOf(pending);
-      const data = payload.data ?? {};
-      let requestedSchema: Record<string, unknown>;
-      let message: string;
-      if (payload.kind === 'approval') {
-        const actions = Array.isArray(data['actions']) ? (data['actions'] as unknown[]).map(String) : ['accept', 'reject'];
-        requestedSchema = { type: 'object', properties: { action: { type: 'string', enum: actions } }, required: ['action'] };
-        message = [data['title'], data['description']].filter((s) => typeof s === 'string').join(' — ') || `Approve ${pending.node_id}`;
-      } else {
-        const questions = Array.isArray(data['questions']) ? (data['questions'] as Array<{ id?: unknown; question?: unknown }>) : [];
-        const properties: Record<string, unknown> = {};
-        for (const q of questions) if (typeof q.id === 'string') properties[q.id] = { type: 'string', description: String(q.question ?? q.id) };
-        requestedSchema = { type: 'object', properties, required: Object.keys(properties) };
-        message = questions.map((q) => String(q.question ?? '')).filter((s) => s.length > 0).join(' ') || `Input for ${pending.node_id}`;
-      }
-      return {
-        resultType: 'input_required',
-        inputRequests: { [pending.node_id]: { method: 'elicitation/create', params: { mode: 'form', message, requestedSchema } } },
-        requestState: mintState(host, subject, name, args, run.run_id, pending.node_id),
-      };
-    }
+  const pending = openInterrupt(host, run);
+  if (pending) {
+    return {
+      resultType: 'input_required',
+      inputRequests: { [pending.node_id]: elicitationFor(pending) },
+      requestState: mintState(host, subject as Subject, name, args, run.run_id, pending.node_id),
+    };
   }
   // waiting-external, or still moving at the cap: no MRTR form fits; the caller follows the run over REST.
   return textResult(true, { runId: run.run_id, status: run.status, message: `the run is ${run.status}; follow it at GET /runs/{runId}` });
 }
 
-async function toolsCall(host: Host, subject: Subject, params: Record<string, unknown>, caps: Record<string, unknown>): Promise<Record<string, unknown>> {
+/** What one HTTP request owns (RFC 0198 §G.12): the run it started or continued, until its response is sent. */
+interface RequestOwnership { runId: string | null; capMs: number }
+
+const declaresTasks = (caps: Record<string, unknown>): boolean => isObject(caps['extensions']) && isObject(caps['extensions'][MCP_TASKS_EXTENSION]);
+
+async function toolsCall(host: Host, subject: Subject, params: Record<string, unknown>, caps: Record<string, unknown>, own: RequestOwnership): Promise<Record<string, unknown>> {
+  const tasked = declaresTasks(caps);
   const name = params['name'];
   if (typeof name !== 'string' || !host.workflows.has(name)) throw new McpError(ERR.INVALID_PARAMS, `unknown tool ${String(name)}`);
   const def = host.workflows.get(name) as WorkflowDefinition;
@@ -185,8 +245,15 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
   if (params['requestState'] === undefined) {
     const inputs = { ...Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue])), ...rawArgs };
     const run = acceptRun(host, subject, name, inputs, { transport: 'mcp' }, null);
+    own.runId = run.run_id;
     scheduleRun(host, run.run_id);
-    return outcome(host, subject, name, rawArgs, (await waitForSettle(host, run.run_id, CALL_CAP_MS)) ?? run);
+    // RFC 0198 §B.3: the run row is durable (acceptRun), so tasks/get already
+    // resolves — answer the handle now unless the run is somehow terminal.
+    if (tasked) {
+      const now = host.store.getRun(run.run_id) ?? run;
+      return TERMINAL.has(now.status) ? outcome(host, subject, name, rawArgs, now) : { resultType: 'task', ...taskOf(host, now, false) };
+    }
+    return outcome(host, subject, name, rawArgs, (await waitForSettle(host, run.run_id, own.capMs)) ?? run);
   }
 
   const claims = verifyState(host, subject, params['requestState'], name, rawArgs);
@@ -199,39 +266,156 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
   const run = host.store.getRun(claims.r);
   if (!run || run.tenant !== subject.tenant) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: its run is not readable');
   if (TERMINAL.has(run.status)) return outcome(host, subject, name, rawArgs, run);
-  const action = response['action'];
-  if (action === 'cancel') {
-    requestCancel(host, run, 'mcp-elicitation-cancelled');
-  } else {
+  // "Continues" (RFC 0198 §G.12): the retry owns the run until it is answered.
+  own.runId = run.run_id;
+  if (response['action'] === 'cancel') requestCancel(host, run, 'mcp-elicitation-cancelled');
+  else {
     const pending = host.store.pendingInterruptForNode(run.run_id, claims.n);
     if (!pending) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: its interrupt is no longer open');
-    let resumeValue: unknown;
-    if (action === 'accept') resumeValue = response['content'];
-    else if (action === 'decline') resumeValue = pending.kind === 'approval' ? { action: 'reject' } : { declined: true };
-    else throw new McpError(ERR.INVALID_PARAMS, 'ElicitResult.action is accept | decline | cancel');
-    // The REST resolve path: validation, approver eligibility, the atomic claim, the log. Content never becomes authority.
-    resolveAndResume(host, run, pending, resumeValue, subject);
+    applyElicitResult(host, subject, run, pending, response);
   }
-  return outcome(host, subject, name, rawArgs, (await waitForSettle(host, run.run_id, CALL_CAP_MS)) ?? run);
+  const settled = (await waitForSettle(host, run.run_id, own.capMs)) ?? run;
+  if (tasked && !TERMINAL.has(settled.status)) return { resultType: 'task', ...taskOf(host, settled, false) };
+  return outcome(host, subject, name, rawArgs, settled);
+}
+
+// ── tasks (RFC 0198) ───────────────────────────────────────────────────────
+
+const TASK_NOT_FOUND = 'task not found';
+const taskNotFound = (): McpError => new McpError(ERR.INVALID_PARAMS, TASK_NOT_FOUND);
+
+function requireTasks(caps: Record<string, unknown>): void {
+  if (!declaresTasks(caps)) throw new McpError(ERR.MISSING_CAPABILITY, 'Missing required client capability', { requiredCapabilities: { extensions: { [MCP_TASKS_EXTENSION]: {} } } });
+}
+
+/**
+ * The run a taskId names, authorized as getRun is for the caller's Subject.
+ * Malformed, unknown, purged and another tenant's ids all end here the same
+ * way: `-32602 task not found`, no data (RFC 0198 §C.6; mcp-task-tenant-scoped).
+ * The REST 403 id_tenant_mismatch is deliberately NOT projected.
+ */
+function taskRun(host: Host, subject: Subject, raw: unknown): RunRow {
+  if (typeof raw !== 'string') throw taskNotFound();
+  let id: string;
+  try { id = unprojectBoundId(raw); } catch { throw taskNotFound(); }
+  if (!TENANT_BOUND.test(id) || id.slice(0, id.indexOf('/')) !== subject.tenant) throw taskNotFound();
+  const run = host.store.getRun(id);
+  if (!run || run.tenant !== subject.tenant) throw taskNotFound();
+  return run;
+}
+
+/** interop-map.json mcp.tasks.status — the run projected as an MCP Task (DetailedTask when `detailed`). */
+function taskOf(host: Host, run: RunRow, detailed: boolean): Record<string, unknown> {
+  const base = { taskId: projectBoundId(run.run_id), createdAt: run.created_at, lastUpdatedAt: run.updated_at, ttlMs: null, pollIntervalMs: TASK_POLL_INTERVAL_MS, statusMessage: `the run is ${run.status}` };
+  if (run.status === 'completed' || run.status === 'failed') {
+    // A failed run is a tool outcome: completed + isError true; `failed` is reserved for a JSON-RPC error.
+    if (!detailed) return { ...base, status: 'completed' };
+    const { resultType: _discard, ...result } = outcome(host, null, '', {}, run);
+    return { ...base, status: 'completed', result };
+  }
+  if (run.status === 'cancelled') return { ...base, status: 'cancelled' };
+  const pending = openInterrupt(host, run);
+  if (pending) {
+    // One inputRequests entry per open interrupt, keyed by interruptId (unique over the task's lifetime by construction).
+    return detailed ? { ...base, status: 'input_required', inputRequests: { [pending.interrupt_id]: elicitationFor(pending) } } : { ...base, status: 'input_required' };
+  }
+  return { ...base, status: 'working' };
+}
+
+function tasksGet(host: Host, subject: Subject, params: Record<string, unknown>): Record<string, unknown> {
+  // A read: nothing is appended to the run's log.
+  return { resultType: 'complete', ...taskOf(host, taskRun(host, subject, params['taskId']), true) };
+}
+
+function tasksUpdate(host: Host, subject: Subject, params: Record<string, unknown>): Record<string, unknown> {
+  const run = taskRun(host, subject, params['taskId']);
+  const responses = params['inputResponses'];
+  if (!isObject(responses)) throw new McpError(ERR.INVALID_PARAMS, 'tasks/update carries inputResponses');
+  for (const [key, response] of Object.entries(responses)) {
+    const current = host.store.getRun(run.run_id) ?? run;
+    if (TERMINAL.has(current.status)) break;
+    // A key already answered, never issued, or no longer open resolves nothing.
+    const pending = openInterrupt(host, current);
+    if (!pending || pending.interrupt_id !== key || !isObject(response) || typeof response['action'] !== 'string') continue;
+    try {
+      applyElicitResult(host, subject, current, pending, response);
+    } catch (e) {
+      // An ineligible approver, a lost race or an invalid value resolves nothing; the ack is eventually consistent.
+      if (!(e instanceof HostError) && !(e instanceof McpError)) throw e;
+    }
+  }
+  return { resultType: 'complete' };
+}
+
+function tasksCancel(host: Host, subject: Subject, params: Record<string, unknown>): Record<string, unknown> {
+  const run = taskRun(host, subject, params['taskId']);
+  // On a terminal run it is acknowledged and nothing is appended (RFC 0194 §A.2).
+  if (!TERMINAL.has(run.status)) {
+    try { requestCancel(host, run, undefined); } catch (e) { if (!(e instanceof HostError)) throw e; }
+  }
+  return { resultType: 'complete' };
+}
+
+/** subscriptions/listen with `notifications.taskIds`: an SSE stream that acknowledges only readable ids and notifies only those. */
+function subscriptionsListen(ctx: Ctx, subject: Subject, id: RpcId, params: Record<string, unknown>, caps: Record<string, unknown>): typeof STREAMED {
+  const host = ctx.host;
+  const filter = isObject(params['notifications']) ? params['notifications'] : {};
+  const requested = Array.isArray(filter['taskIds']) ? filter['taskIds'] : [];
+  const readable: string[] = [];
+  for (const raw of requested) {
+    try { readable.push(projectBoundId(taskRun(host, subject, raw).run_id)); } catch { /* unreadable ≡ nonexistent: left out */ }
+  }
+  const meta = { [META_SUBSCRIPTION]: id };
+  ctx.res.writeHead(200, { ...ctx.responseHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  const frame = (msg: Record<string, unknown>): void => { ctx.res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`); };
+  frame({ jsonrpc: '2.0', method: 'notifications/subscriptions/acknowledged', params: { _meta: meta, notifications: declaresTasks(caps) ? { taskIds: readable } : {} } });
+  const last = new Map<string, string>();
+  const tick = (): void => {
+    for (const taskId of readable) {
+      const run = host.store.getRun(unprojectBoundId(taskId));
+      if (!run) continue;
+      const task = taskOf(host, run, true);
+      const seen = `${String(task['status'])}|${String(task['lastUpdatedAt'])}`;
+      if (last.get(taskId) === seen) continue;
+      last.set(taskId, seen);
+      frame({ jsonrpc: '2.0', method: 'notifications/tasks', params: { ...task, _meta: meta } });
+    }
+  };
+  tick();
+  const timer = setInterval(tick, TASK_POLL_INTERVAL_MS);
+  ctx.res.on('close', () => clearInterval(timer));
+  return STREAMED;
 }
 
 // ── the mount ──────────────────────────────────────────────────────────────
 
-async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, caps: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function dispatch(host: Host, subject: Subject, method: string, params: Record<string, unknown>, caps: Record<string, unknown>, own: RequestOwnership): Promise<Record<string, unknown>> {
   switch (method) {
     case 'server/discover':
-      return { resultType: 'complete', supportedVersions: [...MCP_FACET.revisions], capabilities: { tools: {} }, serverInfo: serverInfo(), ttlMs: TTL_MS, cacheScope: 'private', _meta: { [META_SERVER_INFO]: serverInfo() } };
+      return { resultType: 'complete', supportedVersions: [...MCP_FACET.revisions], capabilities: { tools: {}, extensions: { [MCP_TASKS_EXTENSION]: {} } }, serverInfo: serverInfo(), ttlMs: TTL_MS, cacheScope: 'private', _meta: { [META_SERVER_INFO]: serverInfo() } };
     case 'tools/list':
       return toolsList(host);
     case 'tools/call':
-      return toolsCall(host, subject, params, caps);
+      return toolsCall(host, subject, params, caps, own);
+    case 'tasks/get':
+      requireTasks(caps);
+      return tasksGet(host, subject, params);
+    case 'tasks/update':
+      requireTasks(caps);
+      return tasksUpdate(host, subject, params);
+    case 'tasks/cancel':
+      requireTasks(caps);
+      return tasksCancel(host, subject, params);
     default:
       // initialize is never required (and not served); prompts/* and resources/* are not offered.
       throw new McpError(ERR.METHOD_NOT_FOUND, `method ${method} is not served on this mount`);
   }
 }
 
-async function mcpHandler(ctx: Ctx): Promise<Reply> {
+/** Streamable HTTP lets the server pick JSON or SSE; this mount answers a blocking call as SSE when the client ranks text/event-stream first. */
+const prefersSse = (accept: string | null): boolean => (accept ?? '').split(',')[0]?.trim().toLowerCase().startsWith('text/event-stream') === true;
+
+async function mcpHandler(ctx: Ctx): Promise<Reply | typeof STREAMED> {
   const subject = ctx.subject;
   if (subject === null) return reply(null, new McpError(ERR.INTERNAL, 'the mount is authenticated'));
   let parsed: unknown;
@@ -260,6 +444,8 @@ async function mcpHandler(ctx: Ctx): Promise<Reply> {
     if ((method === 'tools/call' || method === 'prompts/get' || method === 'resources/read') && mcpName !== named) {
       return reply(id, new McpError(ERR.HEADER_MISMATCH, `Mcp-Name ${mcpName} does not equal the request's ${method === 'resources/read' ? 'uri' : 'name'}`, undefined, 400));
     }
+    // ext-tasks §Streamable HTTP: Routing Headers — Mcp-Name is params.taskId on tasks/*.
+    if (method.startsWith('tasks/') && mcpName !== params['taskId']) return reply(id, new McpError(ERR.HEADER_MISMATCH, `Mcp-Name ${mcpName} does not equal the request's taskId`, undefined, 400));
   }
   // (4) only now: is the (agreed) revision one this mount speaks?
   if (!supported.includes(requested)) return reply(id, new McpError(ERR.UNSUPPORTED_VERSION, `revision ${requested} is not served`, { supported, requested }, 400));
@@ -267,15 +453,44 @@ async function mcpHandler(ctx: Ctx): Promise<Reply> {
   if (rawId === undefined && method.startsWith('notifications/')) return { status: 202 };
   // Unknown _meta keys and clientCapabilities.extensions are opaque: never refused, never honoured.
   const caps = isObject(meta[META_CLIENT_CAPS]) ? meta[META_CLIENT_CAPS] : {};
-  try {
-    const result = await dispatch(ctx.host, subject, method, params, caps);
-    return { status: 200, body: { jsonrpc: '2.0', id, result } };
-  } catch (e) {
-    if (e instanceof McpError) return reply(id, e);
-    if (e instanceof HostError) return reply(id, new McpError(e.status >= 500 ? ERR.INTERNAL : ERR.INVALID_PARAMS, e.message));
-    process.stderr.write(`[mcp] ${String((e as Error)?.stack ?? e)}\n`);
-    return reply(id, new McpError(ERR.INTERNAL, 'the host failed to serve the request'));
+
+  if (method === 'subscriptions/listen') {
+    const filter = isObject(params['notifications']) ? params['notifications'] : {};
+    if (filter['taskIds'] !== undefined && !declaresTasks(caps)) return reply(id, new McpError(ERR.MISSING_CAPABILITY, 'Missing required client capability', { requiredCapabilities: { extensions: { [MCP_TASKS_EXTENSION]: {} } } }));
+    return subscriptionsListen(ctx, subject, id, params, caps);
   }
+
+  // RFC 0198 §G.12–13: until this request's WHOLE response is sent, the run it
+  // started or continued belongs to it — the connection closing first cancels
+  // the run as cancelRun would. After the response is finished, a close is
+  // just the end of a connection and touches nothing.
+  const sse = method === 'tools/call' && prefersSse(ctx.header('accept'));
+  const own: RequestOwnership = { runId: null, capMs: sse ? SSE_CALL_CAP_MS : CALL_CAP_MS };
+  ctx.res.on('close', () => {
+    if (ctx.res.writableFinished || own.runId === null) return;
+    const run = ctx.host.store.getRun(own.runId);
+    if (!run || TERMINAL.has(run.status)) return;
+    try { requestCancel(ctx.host, run, MCP_REQUEST_CANCELLED); } catch (e) { if (!(e instanceof HostError)) process.stderr.write(`[mcp] disconnect cancel: ${String(e)}\n`); }
+  });
+
+  const answer = async (): Promise<Reply> => {
+    try {
+      const result = await dispatch(ctx.host, subject, method, params, caps, own);
+      return { status: 200, body: { jsonrpc: '2.0', id, result } };
+    } catch (e) {
+      if (e instanceof McpError) return reply(id, e);
+      if (e instanceof HostError) return reply(id, new McpError(e.status >= 500 ? ERR.INTERNAL : ERR.INVALID_PARAMS, e.message));
+      process.stderr.write(`[mcp] ${String((e as Error)?.stack ?? e)}\n`);
+      return reply(id, new McpError(ERR.INTERNAL, 'the host failed to serve the request'));
+    }
+  };
+  if (!sse) return answer();
+  // SSE: the stream opens now and carries exactly one message — the response. No notifications/cancelled, ever (RFC 0198 §G.14).
+  ctx.res.writeHead(200, { ...ctx.responseHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  ctx.res.flushHeaders();
+  const r = await answer();
+  if (!ctx.res.destroyed) ctx.res.end(`event: message\ndata: ${JSON.stringify(r.body)}\n\n`);
+  return STREAMED;
 }
 
 export function mcpServerRoutes(): Route[] {
