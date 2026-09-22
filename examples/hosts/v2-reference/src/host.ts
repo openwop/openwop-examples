@@ -36,6 +36,7 @@ export interface WorkflowDefinition {
   id: string;
   name?: string;
   version?: string;
+  description?: string;
   nodes: WorkflowNode[];
   edges: Array<{ from?: string; to?: string; source?: string; target?: string }>;
   variables: Array<{ name: string; defaultValue?: unknown; required?: boolean }>;

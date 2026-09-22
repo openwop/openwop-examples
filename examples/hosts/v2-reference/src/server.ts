@@ -19,6 +19,8 @@ import { err } from './errors.js';
 import { ensureDefaultCredential } from './identity.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
+import { a2aServerRoutes } from './a2a-server.js';
+import { mcpServerRoutes } from './mcp-server.js';
 import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { Store } from './store.js';
@@ -118,6 +120,9 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     route('DELETE', '/v1/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }, 1),
     route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, ctx.url.searchParams) })),
     ...runRoutes(),
+    // RFC 0208: the A2A 1.0 interface + Agent Card and the MCP 2026-07-28 mount.
+    ...a2aServerRoutes(),
+    ...mcpServerRoutes(),
     ...seamRoutes(host),
     ...durabilityRoutes(host),
   );
@@ -145,7 +150,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
 
 async function discovery(ctx: Ctx): Promise<Reply> {
   if (ctx.url.pathname === '/.well-known/wop' && ctx.major === 2) throw err('not_found', 'the /.well-known/wop alias is absent from the v2 surface (deprecation well-known-wop-alias)');
-  const doc = ctx.major === 2 ? v2Document(ctx.host) : v1Document(ctx.host);
+  const doc = ctx.major === 2 ? v2Document(ctx.host, ctx.baseUrl) : v1Document(ctx.host);
   if (ctx.major === 2) ctx.host.validate('capabilities', doc, 'discovery v2');
   const text = JSON.stringify(doc);
   const etag = etagOf(text);

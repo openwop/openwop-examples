@@ -16,6 +16,8 @@ import type { Host } from './host.js';
 import { SANDBOX_FACET } from './sandbox.js';
 import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
 import { A2A_FACET, MCP_FACET } from './interop.js';
+import { A2A_SERVER_PROFILES, AGENT_CARD_PATH } from './a2a-server.js';
+import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-server.js';
 
 const SINCE = '2.0';
 /**
@@ -58,7 +60,7 @@ export function signingKeys(): ReadonlyArray<Record<string, unknown>> {
 }
 
 /** The closed v2 root (schemas/v2/capabilities.schema.json). */
-export function v2Document(host: Host): Record<string, unknown> {
+export function v2Document(host: Host, baseUrl: string): Record<string, unknown> {
   const c = host.config;
   const record = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'experimental', since: SINCE, until: EXPERIMENTAL_UNTIL, witness, ...facets });
   const stable = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'stable', since: SINCE, witness, ...facets });
@@ -92,8 +94,13 @@ export function v2Document(host: Host): Record<string, unknown> {
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
     heartbeat: record('witnessable-gated', { minIntervalSec: 5, maxRuntimeMs: 1000, deliveryChannel: '/host/events' }),
     // interop.md: the facets carry every required field; the seams profile drives the exchange (§22/§23) and the audit event is on the host's own log.
-    a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions] }),
-    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr } }),
+    // RFC 0208: the host is also an A2A 1.0 SERVER (profile a2a-1.0, the card at
+    // agentCardUrl, one JSON-RPC interface — a2a-server.ts) and an MCP 2026-07-28
+    // SERVER (profile mcp-2026-07-28, a streamable-HTTP mount at serverUrls[0] —
+    // mcp-server.ts). The URLs are absolute and derived from the request, so the
+    // document names the origin the caller actually reached.
+    a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions], profiles: [...A2A_SERVER_PROFILES], agentCardUrl: `${baseUrl}${AGENT_CARD_PATH}` }),
+    mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr }, profiles: [...MCP_SERVER_PROFILES], features: [...MCP_SERVER_FEATURES], serverMount: { transports: ['streamable-http'] }, serverUrls: [`${baseUrl}${MCP_MOUNT_PATH}`] }),
     // workflow-chain-packs.md: registering, expanding and bounding chains is the
     // obligation; the advertised maxDepth IS the enforced one (chains.ts).
     workflowChainPacks: record('witnessable-gated', { subChains: { maxDepth: c.chainMaxDepth } }),
