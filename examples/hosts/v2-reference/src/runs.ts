@@ -176,7 +176,11 @@ async function createRun(ctx: Ctx): Promise<Reply> {
       if (!Array.isArray(tags) || tags.length > 100 || !tags.every((t) => typeof t === 'string' && t.length > 0 && t.length <= 256)) throw err('validation_error', 'tags: at most 100 strings of at most 256 characters', { maxItems: 100, maxLength: 256 });
     }
     if (body['metadata'] !== undefined && (body['metadata'] === null || typeof body['metadata'] !== 'object' || Array.isArray(body['metadata']))) throw err('validation_error', 'metadata MUST be an object');
-    if (body['callbackUrl'] !== undefined && typeof body['callbackUrl'] !== 'string') throw err('validation_error', 'callbackUrl MUST be a URI');
+    // RFC 0196 §A.2: this host delivers nothing to callbackUrl (it does not
+    // advertise interrupt.callbackDelivery), so it refuses the member rather
+    // than accept it and do nothing — the success-with-nothing that openwop#1449
+    // found. A caller learns at create time that no callback will come.
+    if (body['callbackUrl'] !== undefined) throw err('validation_error', 'callbackUrl is not supported by this host: it does not advertise interrupt.callbackDelivery, so it delivers nothing to it (interrupt.md §Callback delivery, RFC 0196)', { field: 'callbackUrl' });
     if (ctx.header('openwop-force-engine-version') !== null) throw err('force_engine_version_forbidden', 'OpenWOP-Force-Engine-Version is test-keys-only; this host advertises no forceEngineVersionRange');
     const def = ctx.host.workflows.get(workflowId);
     if (!def) throw err('not_found', `workflow ${workflowId} is not registered on this host`, { workflowId });

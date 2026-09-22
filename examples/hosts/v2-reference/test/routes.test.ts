@@ -105,6 +105,11 @@ describe('runs', () => {
   });
   it('refuses a closed-body violation, a dotted configurable key and a bad Idempotency-Key; replays an idempotent create', async () => {
     expect((await call('POST', '/runs', { workflowId: 'conformance-noop', bogus: 1 })).b.error).toBe('validation_error');
+    // RFC 0196 §A.2: no callback delivery is advertised, so callbackUrl is refused, never accepted and ignored.
+    const cb = await call('POST', '/runs', { workflowId: 'conformance-noop', callbackUrl: 'https://hooks.example.com/approve' });
+    expect(cb.s).toBe(400);
+    expect(cb.b.error).toBe('validation_error');
+    expect(cb.b.details?.field).toBe('callbackUrl');
     expect((await call('POST', '/runs', { workflowId: 'conformance-noop', configurable: { version: 1, ai: { 'ai.provider': 'x' } } })).b.error).toBe('validation_error');
     expect((await call('POST', '/runs', { workflowId: 'conformance-noop' }, { 'Idempotency-Key': 'short' })).b.error).toBe('idempotency_key_invalid');
     const key = 'routes-harness-key-000001';
