@@ -16,6 +16,7 @@ import type { Host } from './host.js';
 import { SANDBOX_FACET } from './sandbox.js';
 import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
 import { A2A_FACET, MCP_FACET } from './interop.js';
+import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
 
 const SINCE = '2.0';
 /**
@@ -113,6 +114,13 @@ export function v2Document(host: Host): Record<string, unknown> {
       subjectLinkKey: SUBJECT_LINK_KEY,
     }),
   };
+  if (host.a2ui !== null) {
+    // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2
+    // (a2ui.ts is the one admission path). declaration.json marks the first two families stable.
+    doc['supportedEnvelopes'] = stable('witnessable-gated', { kinds: [A2UI_KIND] });
+    doc['schemaVersions'] = stable('witnessable-gated', { kinds: { [A2UI_KIND]: A2UI_FLOOR } });
+    doc['envelopeStrictness'] = record('claims-check', { mode: host.a2ui.strictness });
+  }
   if (c.seamsProfile) {
     // RFC 0168 §C.1 reconciliation (suite lib/seams.ts): the seams profile is
     // advertised under the `conformance` METADATA key. NOTE: the generated
