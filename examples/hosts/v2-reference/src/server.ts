@@ -24,7 +24,7 @@ import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { Store } from './store.js';
 import { createValidator } from './validate.js';
-import { deadLetterProjection, registerWebhook, startDeliveryWorker, subscribeFanout, unregisterWebhook } from './webhooks.js';
+import { deadLetterProjection, registerWebhook, rotateWebhookSecret, startDeliveryWorker, subscribeFanout, unregisterWebhook } from './webhooks.js';
 import { installedPacks } from './packs.js';
 import { withIdempotency } from './router.js';
 import type { Host, WorkflowDefinition } from './host.js';
@@ -87,6 +87,13 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   host.bus.setMaxListeners(0);
   ensureDefaultCredential(host);
 
+  /** errors.md (rc.40): a malformed body is 400 validation_error from the host, never a parser 500. */
+  const jsonObject = (text: string): Record<string, unknown> => {
+    let parsed: unknown = {};
+    if (text.trim() !== '') { try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); } }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
+    return parsed as Record<string, unknown>;
+  };
   const router = new Router(host);
   router.add(
     route('GET', '/.well-known/openwop', false, discovery, 'both'),
@@ -102,7 +109,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
         let parsed: unknown = {};
         if (text.trim() !== '') { try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); } }
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
-        return { status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>, ctx.major) };
+        return { status: 201, body: await registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>, ctx.major) };
       });
     }),
     route('DELETE', '/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }),
@@ -114,10 +121,19 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
         let parsed: unknown = {};
         if (text.trim() !== '') { try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); } }
         if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
-        return { status: 201, body: registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>, 1) };
+        return { status: 201, body: await registerWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, parsed as Record<string, unknown>, 1) };
       });
     }, 1),
     route('DELETE', '/v1/webhooks/{webhookId}', true, async (ctx) => { unregisterWebhook(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string); return { status: 204 }; }, 1),
+    // RFC 0201 §E — rotateWebhookSecret (404 unless webhooks.secretRotation is advertised).
+    route('POST', '/webhooks/{webhookId}/rotate-secret', true, async (ctx) => {
+      const text = await ctx.text();
+      return withIdempotency(ctx, 'rotateWebhookSecret', `${ctx.params['webhookId'] as string}|${text}`, async () => ({ status: 200, body: rotateWebhookSecret(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, jsonObject(text)) }));
+    }),
+    route('POST', '/v1/webhooks/{webhookId}/rotate-secret', true, async (ctx) => {
+      const text = await ctx.text();
+      return withIdempotency(ctx, 'rotateWebhookSecret', `${ctx.params['webhookId'] as string}|${text}`, async () => ({ status: 200, body: rotateWebhookSecret(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, jsonObject(text)) }));
+    }, 1),
     route('GET', '/webhooks/{webhookId}/dead-letters', true, async (ctx) => ({ status: 200, body: deadLetterProjection(ctx.host, ctx.subject?.tenant ?? config.tenant, ctx.params['webhookId'] as string, ctx.url.searchParams) })),
     ...runRoutes(),
     ...seamRoutes(host),

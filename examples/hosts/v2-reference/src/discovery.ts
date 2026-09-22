@@ -16,6 +16,7 @@ import type { Host } from './host.js';
 import { SANDBOX_FACET } from './sandbox.js';
 import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
 import { A2A_FACET, MCP_FACET } from './interop.js';
+import { secretRotation, signatureAlgorithms } from './webhooks.js';
 import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
 
 const SINCE = '2.0';
@@ -87,7 +88,8 @@ export function v2Document(host: Host): Record<string, unknown> {
     // read from the same config the purge timer uses and that `expiresAt` is
     // derived from, so the advertisement, the record and the mechanism cannot
     // drift apart into a number that is merely restated.
-    webhooks: record('witnessable-gated', { signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, deadLetter: { retentionDays: c.webhookRetentionDays, maxPageSize: c.webhookDeadLetterMaxPageSize } }),
+    // RFC 0201: `standard-webhooks-1` and `secretRotation` appear only when the installed contract defines them.
+    webhooks: record('witnessable-gated', { signatureAlgorithms: signatureAlgorithms(host), retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, deadLetter: { retentionDays: c.webhookRetentionDays, maxPageSize: c.webhookDeadLetterMaxPageSize }, ...(secretRotation(host) ? { secretRotation: secretRotation(host) } : {}) }),
     idempotency: record('witnessable-gated', { crossRegion: 'single-region' }),
     compensation: record('seam-gated', { profileVersion: '1', orderingModels: ['reverse-completion'], manualIntervention: false }),
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
@@ -153,7 +155,7 @@ export function v1Document(host: Host): Record<string, unknown> {
     // v1 readers: the surfaces this host serves under /v1/ keys through the overlap.
     interrupt: { supported: true, tokenAlgs: ['hs256'] },
     replay: { supported: true, fork: true, modes: ['replay', 'branch'] },
-    webhooks: { supported: true, durable: true, signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' } },
+    webhooks: { supported: true, durable: true, signatureAlgorithms: signatureAlgorithms(host), retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, ...(secretRotation(host) ? { secretRotation: secretRotation(host) } : {}) },
     idempotency: { supported: true, crossRegion: 'single-region' },
   };
 }
