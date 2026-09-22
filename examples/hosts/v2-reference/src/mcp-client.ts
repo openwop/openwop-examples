@@ -34,6 +34,7 @@ import { guardedRequest } from './egress.js';
 import { MCP_FACET, audit, decide } from './interop.js';
 import type { Host } from './host.js';
 import type { RunRow } from './store.js';
+import { childOf, runTraceContext, traceFields, traceHeaders, type TraceContext } from './trace-context.js';
 
 const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_CLIENT_CAPS = 'io.modelcontextprotocol/clientCapabilities';
@@ -109,7 +110,8 @@ async function negotiate(host: Host, run: RunRow | null, serverId: string, url: 
   return d.version;
 }
 
-const meta = (revision: string): Json => ({ [META_VERSION]: revision, [META_CLIENT_CAPS]: {} });
+/** interop.md §Trace context (RFC 0207): the run's trace rides in BOTH carriers — `_meta` (SHOULD) and the header (see `rpc`). */
+const meta = (revision: string, tc: TraceContext | null = null): Json => ({ [META_VERSION]: revision, [META_CLIENT_CAPS]: {}, ...traceFields(tc) });
 function unwrap(a: Answer | Failure): Json { if (!a.ok) throw a.error; return a.result; }
 
 export interface CtxMcp {
@@ -121,32 +123,39 @@ export interface CtxMcp {
 
 /** The `ctx.mcp` a node receives. `run` is the calling run (the audit log); null for host-internal reads such as the tool catalog. */
 export function createCtxMcp(host: Host, run: RunRow | null): CtxMcp {
+  const runTrace = run !== null ? runTraceContext(run.options_json) : null;
+  /** One child span per outbound request, the same one in `_meta` and in the header. */
+  const span = (): TraceContext | null => (runTrace !== null ? childOf(runTrace) : null);
   return {
     async callTool({ serverId, name, arguments: args }) {
       const url = bound(host, serverId);
       const revision = await negotiate(host, run, serverId, url);
-      let params: Json = { name, arguments: args ?? {}, _meta: meta(revision) };
+      let tc = span();
+      let params: Json = { name, arguments: args ?? {}, _meta: meta(revision, tc) };
       // MRTR (interop.md §The MCP round ceiling): the host answers input_required
       // itself. A pack has no elicitation surface here, so every request is
       // declined; a round past maxRounds is refused and never sent.
       for (let rounds = 0; ; rounds++) {
-        const r = unwrap(await rpc(host, url, 'tools/call', params, revision, { 'Mcp-Name': name }));
+        const r = unwrap(await rpc(host, url, 'tools/call', params, revision, { 'Mcp-Name': name, ...traceHeaders(tc) }));
         if (r['resultType'] !== 'input_required') return r;
         if (rounds + 1 > MCP_FACET.mrtr.maxRounds) throw new McpClientError('mcp_mrtr_rounds_exceeded', `MRTR round ${rounds + 1} exceeds mcp.mrtr.maxRounds ${MCP_FACET.mrtr.maxRounds}`, { maxRounds: MCP_FACET.mrtr.maxRounds });
         const requests = (r['inputRequests'] ?? {}) as Json;
         const inputResponses = Object.fromEntries(Object.keys(requests).map((k) => [k, { action: 'decline' }]));
-        params = { name, arguments: args ?? {}, inputResponses, requestState: r['requestState'], _meta: meta(revision) };
+        tc = span();
+        params = { name, arguments: args ?? {}, inputResponses, requestState: r['requestState'], _meta: meta(revision, tc) };
       }
     },
     async listTools({ serverId, cursor }) {
       const url = bound(host, serverId);
       const revision = await negotiate(host, run, serverId, url);
-      return unwrap(await rpc(host, url, 'tools/list', { ...(cursor !== undefined ? { cursor } : {}), _meta: meta(revision) }, revision));
+      const tc = span();
+      return unwrap(await rpc(host, url, 'tools/list', { ...(cursor !== undefined ? { cursor } : {}), _meta: meta(revision, tc) }, revision, traceHeaders(tc)));
     },
     async readResource({ serverId, uri }) {
       const url = bound(host, serverId);
       const revision = await negotiate(host, run, serverId, url);
-      return unwrap(await rpc(host, url, 'resources/read', { uri, _meta: meta(revision) }, revision));
+      const tc = span();
+      return unwrap(await rpc(host, url, 'resources/read', { uri, _meta: meta(revision, tc) }, revision, traceHeaders(tc)));
     },
     async serverHealth({ serverId }) {
       const url = bound(host, serverId);
