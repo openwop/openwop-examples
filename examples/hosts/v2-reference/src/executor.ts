@@ -233,7 +233,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   for (const node of orderNodes(def)) {
     if (completed.includes(node.id)) continue;
     run = host.store.getRun(runId) as RunRow;
-    if (run.cancel_requested === 1) { terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
+    if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (run.pause_requested === 1) {
       // Between nodes: the requested policy is echoed verbatim (runs.md §Pause
       // and resume); under `drain-current-node` this is where a drained node's
@@ -262,7 +262,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
       return;
     }
-    if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
+    if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (result === 'paused') {
       // `immediate` cut the attempt between events: no terminal node event is
       // recorded for it (runs.md §Pause and resume); the payload names the
@@ -300,10 +300,22 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   }
   run = host.store.getRun(runId) as RunRow;
   if (TERMINAL.has(run.status)) return; // the other delivery of this work already ended it
-  if (run.cancel_requested === 1) { terminalCancel(host, run, 'caller-requested', 'caller', startedAt); return; }
+  if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
   appendEvent(host, run, 'run.completed', { outputs: {}, durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
   host.store.invalidateInterruptsForRun(run.run_id);
   setStatus(host, run, 'completed', { completed_at: nowIso(), current_node_id: null });
+}
+
+/**
+ * The reason a `cancelling` run's cancel was requested with, consumed by the
+ * loop that records `run.cancelled`. In memory beside the loop, like
+ * `pausePolicy`: a restart re-enters the run and the default is recorded.
+ */
+const cancelReasons = new Map<string, string>();
+function takeCancelReason(runId: string): string {
+  const r = cancelReasons.get(runId) ?? 'caller-requested';
+  cancelReasons.delete(runId);
+  return r;
 }
 
 /** runs.md §Cancel — accepted immediately; the cascade completes in the loop when a node is executing. */
@@ -320,6 +332,9 @@ export function requestCancel(host: Host, run: RunRow, reason: string | undefine
     terminalCancel(host, run, reason ?? 'caller-requested', 'caller', state.startedAt);
     return { status: 'cancelled' };
   }
+  // The reason travels with the request to the loop that completes the cascade
+  // (e.g. RFC 0198 `mcp-request-cancelled`), instead of being replaced there.
+  if (!cancelReasons.has(run.run_id)) cancelReasons.set(run.run_id, reason ?? 'caller-requested');
   setStatus(host, run, 'cancelling', { cancel_requested: 1 });
   return { status: 'cancelling' };
 }
