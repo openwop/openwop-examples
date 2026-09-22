@@ -5,6 +5,7 @@
  */
 import { EventEmitter } from 'node:events';
 import type { SpecArtifacts } from './artifacts.js';
+import type { A2uiAdmission } from './a2ui.js';
 import type { HostConfig } from './config.js';
 import type { Store } from './store.js';
 import type { RunEventDoc } from './codemap.js';
@@ -53,6 +54,8 @@ export interface Host {
   readonly startedAt: string;
   /** dev-mode schema validation hook (validate.ts); a no-op when off. */
   validate(schemaName: string, doc: unknown, context: string): void;
+  /** RFC 0209 envelope admission for `ui.a2ui-surface` (a2ui.ts); null ⇒ the kind is not advertised. */
+  readonly a2ui: A2uiAdmission | null;
 }
 
 export interface AppendedEvent {

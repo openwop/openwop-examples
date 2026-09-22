@@ -18,6 +18,8 @@ import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
 import { A2A_FACET, MCP_FACET } from './interop.js';
 import { A2A_SERVER_PROFILES, AGENT_CARD_PATH } from './a2a-server.js';
 import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-server.js';
+import { secretRotation, signatureAlgorithms } from './webhooks.js';
+import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
 
 const SINCE = '2.0';
 /**
@@ -88,7 +90,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // read from the same config the purge timer uses and that `expiresAt` is
     // derived from, so the advertisement, the record and the mechanism cannot
     // drift apart into a number that is merely restated.
-    webhooks: record('witnessable-gated', { signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, deadLetter: { retentionDays: c.webhookRetentionDays, maxPageSize: c.webhookDeadLetterMaxPageSize } }),
+    // RFC 0201: `standard-webhooks-1` and `secretRotation` appear only when the installed contract defines them.
+    webhooks: record('witnessable-gated', { signatureAlgorithms: signatureAlgorithms(host), retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, deadLetter: { retentionDays: c.webhookRetentionDays, maxPageSize: c.webhookDeadLetterMaxPageSize }, ...(secretRotation(host) ? { secretRotation: secretRotation(host) } : {}) }),
     idempotency: record('witnessable-gated', { crossRegion: 'single-region' }),
     compensation: record('seam-gated', { profileVersion: '1', orderingModels: ['reverse-completion'], manualIntervention: false }),
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
@@ -120,6 +123,13 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
       subjectLinkKey: SUBJECT_LINK_KEY,
     }),
   };
+  if (host.a2ui !== null) {
+    // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2
+    // (a2ui.ts is the one admission path). declaration.json marks the first two families stable.
+    doc['supportedEnvelopes'] = stable('witnessable-gated', { kinds: [A2UI_KIND] });
+    doc['schemaVersions'] = stable('witnessable-gated', { kinds: { [A2UI_KIND]: A2UI_FLOOR } });
+    doc['envelopeStrictness'] = record('claims-check', { mode: host.a2ui.strictness });
+  }
   if (c.seamsProfile) {
     // RFC 0168 §C.1 reconciliation (suite lib/seams.ts): the seams profile is
     // advertised under the `conformance` METADATA key. NOTE: the generated
@@ -152,7 +162,7 @@ export function v1Document(host: Host): Record<string, unknown> {
     // v1 readers: the surfaces this host serves under /v1/ keys through the overlap.
     interrupt: { supported: true, tokenAlgs: ['hs256'] },
     replay: { supported: true, fork: true, modes: ['replay', 'branch'] },
-    webhooks: { supported: true, durable: true, signatureAlgorithms: ['v1'], retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' } },
+    webhooks: { supported: true, durable: true, signatureAlgorithms: signatureAlgorithms(host), retryPolicy: { maxAttempts: c.webhookMaxAttempts, backoff: 'exponential' }, ...(secretRotation(host) ? { secretRotation: secretRotation(host) } : {}) },
     idempotency: { supported: true, crossRegion: 'single-region' },
   };
 }

@@ -102,6 +102,11 @@ export interface WebhookRow {
   /** The contract major the subscriber registered under (webhooks.md §Delivery): the rendering it receives. Rows from before the column default to 1 — the wire they always received. */
   contract_major: 1 | 2;
   created_at: string;
+  /** RFC 0201 §B — the applied `signatureAlgorithms` when the registration carried the field; NULL ⇒ `["v1"]`, the pre-RFC behaviour. */
+  signature_algorithms_json: string | null;
+  /** RFC 0201 §E — the previous secret during a rotation overlap, and when it stops signing (epoch ms). */
+  prev_secret: string | null;
+  prev_secret_expires_at: number | null;
 }
 
 export interface DeliveryRow {
@@ -119,6 +124,8 @@ export interface DeliveryRow {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+  /** RFC 0201 §C.10 — the Standard Webhooks `webhook-id`, minted once per delivery row, so every attempt (and every attempt after a restart) reuses it. NULL for a subscription that did not opt in. */
+  message_id: string | null;
 }
 
 export interface EffectRow {
@@ -364,6 +371,12 @@ export class Store {
     // A database created before subscriptions recorded their contract: add the column, defaulting to the major-1 rendering those rows always received.
     const webhookColumns = (this.db.prepare('PRAGMA table_info(webhooks)').all() as Array<{ name: string }>).map((c) => c.name);
     if (!webhookColumns.includes('contract_major')) this.db.exec('ALTER TABLE webhooks ADD COLUMN contract_major INTEGER NOT NULL DEFAULT 1');
+    // RFC 0201: rows from before the opt-in existed are v1-only subscriptions (NULL), exactly what they always were.
+    if (!webhookColumns.includes('signature_algorithms_json')) this.db.exec('ALTER TABLE webhooks ADD COLUMN signature_algorithms_json TEXT NULL');
+    if (!webhookColumns.includes('prev_secret')) this.db.exec('ALTER TABLE webhooks ADD COLUMN prev_secret TEXT NULL');
+    if (!webhookColumns.includes('prev_secret_expires_at')) this.db.exec('ALTER TABLE webhooks ADD COLUMN prev_secret_expires_at INTEGER NULL');
+    const deliveryColumns = (this.db.prepare('PRAGMA table_info(deliveries)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!deliveryColumns.includes('message_id')) this.db.exec('ALTER TABLE deliveries ADD COLUMN message_id TEXT NULL');
   }
 
   close(): void {
@@ -476,7 +489,11 @@ export class Store {
 
   // ── webhooks ──────────────────────────────────────────────────────────────
   insertWebhook(row: WebhookRow): void {
-    this.db.prepare('INSERT INTO webhooks (webhook_id, tenant, url, events_json, secret, tags_json, contract_major, created_at) VALUES (@webhook_id, @tenant, @url, @events_json, @secret, @tags_json, @contract_major, @created_at)').run(row);
+    this.db.prepare('INSERT INTO webhooks (webhook_id, tenant, url, events_json, secret, tags_json, contract_major, created_at, signature_algorithms_json, prev_secret, prev_secret_expires_at) VALUES (@webhook_id, @tenant, @url, @events_json, @secret, @tags_json, @contract_major, @created_at, @signature_algorithms_json, @prev_secret, @prev_secret_expires_at)').run(row);
+  }
+  /** RFC 0201 §E — install a new secret, keeping the previous one until `prevExpiresAt` (epoch ms). */
+  rotateWebhookSecret(id: string, secret: string, prevSecret: string, prevExpiresAt: number): void {
+    this.db.prepare('UPDATE webhooks SET secret = ?, prev_secret = ?, prev_secret_expires_at = ? WHERE webhook_id = ?').run(secret, prevSecret, prevExpiresAt, id);
   }
   getWebhook(id: string): WebhookRow | undefined {
     return this.db.prepare('SELECT * FROM webhooks WHERE webhook_id = ?').get(id) as WebhookRow | undefined;
@@ -488,8 +505,8 @@ export class Store {
     return this.db.prepare('SELECT * FROM webhooks WHERE tenant = ?').all(tenant) as WebhookRow[];
   }
   insertDelivery(row: DeliveryRow): void {
-    this.db.prepare(`INSERT INTO deliveries (delivery_id, webhook_id, tenant, run_id, sequence, event_type, body, attempts, next_at, state, last_status, last_error, created_at, updated_at)
-      VALUES (@delivery_id, @webhook_id, @tenant, @run_id, @sequence, @event_type, @body, @attempts, @next_at, @state, @last_status, @last_error, @created_at, @updated_at)`).run(row);
+    this.db.prepare(`INSERT INTO deliveries (delivery_id, webhook_id, tenant, run_id, sequence, event_type, body, attempts, next_at, state, last_status, last_error, created_at, updated_at, message_id)
+      VALUES (@delivery_id, @webhook_id, @tenant, @run_id, @sequence, @event_type, @body, @attempts, @next_at, @state, @last_status, @last_error, @created_at, @updated_at, @message_id)`).run(row);
   }
   dueDeliveries(now: number, limit = 20): DeliveryRow[] {
     return this.db.prepare(`SELECT * FROM deliveries WHERE state = 'pending' AND next_at <= ? ORDER BY next_at ASC LIMIT ?`).all(now, limit) as DeliveryRow[];

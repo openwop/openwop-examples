@@ -126,8 +126,12 @@ export interface HostConfig {
   readonly webhookBackoffBaseMs: number;
   readonly webhookRetentionDays: number;
   readonly webhookDeadLetterMaxPageSize: number;
+  /** RFC 0201 §E — `webhooks.secretRotation.overlapSeconds` (60–604800). */
+  readonly webhookRotationOverlapSeconds: number;
   readonly implementedChangeIds: ReadonlySet<string>;
   readonly devValidate: 'off' | 'warn' | 'strict';
+  /** events.md §"The envelope-kind catalog" — drift handling below the per-kind floor (advertised as envelopeStrictness.mode). */
+  readonly envelopeStrictness: 'warn' | 'strict';
   readonly interruptSecret: string;
   readonly interruptKid: string;
   readonly legacyInterruptSecret: string;
@@ -183,8 +187,10 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     webhookBackoffBaseMs: envInt('OPENWOP_WEBHOOK_BACKOFF_BASE_MS', 500),
     webhookRetentionDays: envInt('OPENWOP_WEBHOOK_RETENTION_DAYS', 7),
     webhookDeadLetterMaxPageSize: envInt('OPENWOP_WEBHOOK_DEAD_LETTER_MAX_PAGE', 100),
+    webhookRotationOverlapSeconds: Math.min(604_800, Math.max(60, envInt('OPENWOP_WEBHOOK_ROTATION_OVERLAP_SECONDS', 60))),
     implementedChangeIds: new Set(env('OPENWOP_IMPLEMENTED_CHANGE_IDS', '').split(',').map((s) => s.trim()).filter((s) => s.length > 0)),
     devValidate: validate === 'strict' ? 'strict' : validate === 'off' || validate === 'false' ? 'off' : 'warn',
+    envelopeStrictness: env('OPENWOP_ENVELOPE_STRICTNESS', 'warn') === 'strict' ? 'strict' : 'warn',
     interruptSecret: env('OPENWOP_INTERRUPT_SECRET', randomBytes(32).toString('hex')),
     interruptKid: env('OPENWOP_INTERRUPT_KID', 'v2-reference-1'),
     legacyInterruptSecret: env('OPENWOP_LEGACY_INTERRUPT_SECRET', 'openwop-v1-legacy-interrupt-secret'),

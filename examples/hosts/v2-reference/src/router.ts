@@ -259,7 +259,9 @@ export async function withIdempotency(ctx: Ctx, endpoint: string, digestInput: s
   try {
     reply = await fn();
   } catch (e) {
-    if (e instanceof HostError && e.status < 500 && e.status !== 429 && e.status !== 400 && e.status !== 401 && e.status !== 403) {
+    // RFC 0201 §D.16: a refused endpoint verification is a FINAL outcome (retriable: false) — a
+    // same-key duplicate replays the cached 400 and never sends a second verification request.
+    if (e instanceof HostError && ((e.status < 500 && e.status !== 429 && e.status !== 400 && e.status !== 401 && e.status !== 403) || e.code === 'webhook_endpoint_unverified')) {
       store.completeIdempotency(tenant, endpoint, key, e.status, e.headers, JSON.stringify(e.body()));
     } else {
       store.releaseIdempotency(tenant, endpoint, key);
