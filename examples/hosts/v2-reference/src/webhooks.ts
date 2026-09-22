@@ -5,6 +5,12 @@
  * table, exponential backoff, dead-letter after maxAttempts, retention), the
  * egress guard at registration and delivery, and the inbound verifier the
  * host runs as a subscriber (the seam `receiveWebhookDelivery`).
+ *
+ * RFC 0201 — Standard Webhooks 1.0.0 as an opt-in COMPANION scheme
+ * (`standard-webhooks-1`): a subscription that lists it at registration supplies
+ * a `whsec_` secret, is endpoint-verified before its 201, and every delivery
+ * adds `webhook-id` / `webhook-timestamp` / `webhook-signature` beside the
+ * unchanged scheme-`v1` headers. Every other subscription is untouched.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { guardedRequest, validateEgressUrl } from './egress.js';
@@ -18,9 +24,83 @@ export function sign(secret: string, timestamp: string, rawBody: string): string
   return createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
 }
 
-export function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): { webhookId: string } {
-  const allowed = new Set(['url', 'events', 'secret', 'tags']);
-  for (const k of Object.keys(body)) if (!allowed.has(k)) throw err('validation_error', `unknown key ${k} — the registration body is closed { url, events[], secret?, tags? }`, { key: k });
+export const STANDARD_WEBHOOKS = 'standard-webhooks-1';
+
+/**
+ * The algorithm ids this host applies — the facet advertises exactly this list.
+ * `standard-webhooks-1` only when the INSTALLED contract defines RFC 0201 (its
+ * error code is registered): the host implements the contract it ships, so on a
+ * 2.35.x `@openwop/spec-artifacts` it neither advertises nor accepts the id.
+ */
+export function signatureAlgorithms(host: Host): string[] {
+  return host.artifacts.errors.has('webhook_endpoint_unverified') ? ['v1', STANDARD_WEBHOOKS] : ['v1'];
+}
+
+/** RFC 0201 §E — the `webhooks.secretRotation` facet, or undefined when the companion scheme is not offered. */
+export function secretRotation(host: Host): { overlapSeconds: number } | undefined {
+  return signatureAlgorithms(host).includes(STANDARD_WEBHOOKS) ? { overlapSeconds: host.config.webhookRotationOverlapSeconds } : undefined;
+}
+
+/** The HMAC key of a Standard Webhooks secret: the base64 after `whsec_`, decoded, 24–64 bytes; else null. */
+export function whsecKey(secret: unknown): Buffer | null {
+  if (typeof secret !== 'string' || !secret.startsWith('whsec_')) return null;
+  const b64 = secret.slice('whsec_'.length);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return null;
+  const key = Buffer.from(b64, 'base64');
+  return key.length >= 24 && key.length <= 64 ? key : null;
+}
+
+/** One `webhook-signature` entry: `v1,` + base64 HMAC-SHA256 over `{id}.{timestamp}.{rawBody}` keyed by the decoded secret (Standard Webhooks §"Signature scheme"). */
+export function standardWebhooksSign(secret: string, id: string, timestamp: string, rawBody: string): string {
+  const key = whsecKey(secret);
+  if (key === null) throw new Error('standard-webhooks-1 subscription holds a secret that is not whsec_ form');
+  return `v1,${createHmac('sha256', key).update(`${id}.${timestamp}.${rawBody}`).digest('base64')}`;
+}
+
+/** RFC 0201 §C.10 — a fresh message id; `.`-free, matches `^[A-Za-z0-9_-]{16,128}$`, never derived from the secret. */
+export function mintMessageId(): string {
+  return `msg_${randomBytes(18).toString('base64url')}`;
+}
+
+function optedIn(sub: WebhookRow): boolean {
+  if (sub.signature_algorithms_json === null) return false;
+  return (JSON.parse(sub.signature_algorithms_json) as string[]).includes(STANDARD_WEBHOOKS);
+}
+
+/**
+ * RFC 0201 §D — the one verification request. Same egress path as a delivery
+ * (re-resolve, validate every address, pinned connect, no redirects), 10 s, never
+ * retried. Anything but a 2xx whose JSON `challenge` equals the one sent refuses
+ * the registration, and the caller persists nothing.
+ */
+async function verifyEndpoint(host: Host, url: string, secret: string): Promise<void> {
+  const challenge = randomBytes(24).toString('base64url');
+  const body = JSON.stringify({ type: 'openwop.webhook.verification', challenge });
+  const id = mintMessageId();
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'webhook-id': id,
+    'webhook-timestamp': timestamp,
+    'webhook-signature': standardWebhooksSign(secret, id, timestamp, body),
+  };
+  let result: { status: number; body: string; error?: string };
+  try {
+    result = await guardedRequest(new URL(url), { method: 'POST', headers, body, timeoutMs: 10_000, allowPrivate: host.config.webhookAllowPrivate });
+  } catch (e) {
+    result = { status: 0, body: '', error: (e as Error).message };
+  }
+  let echoed: unknown;
+  try { echoed = (JSON.parse(result.body) as { challenge?: unknown } | null)?.challenge; } catch { echoed = undefined; }
+  if (result.error !== undefined || result.status < 200 || result.status >= 300 || echoed !== challenge) {
+    const why = result.error ?? (result.status < 200 || result.status >= 300 ? `HTTP ${result.status}` : 'the response did not echo the challenge');
+    throw err('webhook_endpoint_unverified', `the endpoint did not consent to the subscription (RFC 0201 §D.14): ${why}`);
+  }
+}
+
+export async function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): Promise<{ webhookId: string; signatureAlgorithms?: string[] }> {
+  const allowed = new Set(['url', 'events', 'secret', 'tags', 'signatureAlgorithms']);
+  for (const k of Object.keys(body)) if (!allowed.has(k)) throw err('validation_error', `unknown key ${k} — the registration body is closed { url, events[], secret?, tags?, signatureAlgorithms? }`, { key: k });
   if (typeof body['url'] !== 'string') throw err('validation_error', 'url is REQUIRED');
   validateEgressUrl(body['url'], host.config.webhookAllowPrivate);
   const events = body['events'];
@@ -41,6 +121,22 @@ export function registerWebhook(host: Host, tenant: string, body: Record<string,
   });
   if (body['secret'] !== undefined && (typeof body['secret'] !== 'string' || body['secret'].length === 0)) throw err('validation_error', 'secret MUST be a non-empty string');
   if (body['tags'] !== undefined && (!Array.isArray(body['tags']) || !body['tags'].every((t) => typeof t === 'string'))) throw err('validation_error', 'tags MUST be a string array');
+  // RFC 0201 §B — the per-subscription opt-in. Absent ⇒ ["v1"], byte for byte today's behaviour.
+  let algorithms: string[] | undefined;
+  if (body['signatureAlgorithms'] !== undefined) {
+    const raw = body['signatureAlgorithms'];
+    if (!Array.isArray(raw) || raw.length === 0 || !raw.every((a) => typeof a === 'string')) throw err('validation_error', 'signatureAlgorithms MUST be a non-empty string array', { field: 'signatureAlgorithms' });
+    const offered = signatureAlgorithms(host);
+    if (!raw.includes('v1')) throw err('validation_error', 'signatureAlgorithms MUST contain "v1" (RFC 0201 §B.5)', { field: 'signatureAlgorithms' });
+    if (new Set(raw).size !== raw.length) throw err('validation_error', 'signatureAlgorithms MUST NOT repeat a value (RFC 0201 §B.5)', { field: 'signatureAlgorithms' });
+    const unknown = (raw as string[]).find((a) => !offered.includes(a));
+    if (unknown !== undefined) throw err('validation_error', `${unknown} is not in this host's webhooks.signatureAlgorithms`, { field: 'signatureAlgorithms' });
+    algorithms = raw as string[];
+  }
+  const wantsStandard = algorithms?.includes(STANDARD_WEBHOOKS) === true;
+  if (wantsStandard && whsecKey(body['secret']) === null) throw err('validation_error', 'an opt-in to standard-webhooks-1 MUST carry secret as whsec_<base64 of 24–64 bytes> (RFC 0201 §B.6)', { field: 'secret' });
+  // §D — verify BEFORE anything is persisted; a refusal throws and no row is written.
+  if (wantsStandard) await verifyEndpoint(host, body['url'], body['secret'] as string);
   const row: WebhookRow = {
     webhook_id: tenantBound(tenant),
     tenant,
@@ -50,9 +146,36 @@ export function registerWebhook(host: Host, tenant: string, body: Record<string,
     tags_json: Array.isArray(body['tags']) ? JSON.stringify(body['tags']) : null,
     contract_major: major,
     created_at: nowIso(),
+    signature_algorithms_json: algorithms === undefined ? null : JSON.stringify(algorithms),
+    prev_secret: null,
+    prev_secret_expires_at: null,
   };
   host.store.insertWebhook(row);
-  return { webhookId: row.webhook_id };
+  // §B.7 — echo the applied list whenever the request carried one; never the secret (§B.6).
+  return algorithms === undefined ? { webhookId: row.webhook_id } : { webhookId: row.webhook_id, signatureAlgorithms: algorithms };
+}
+
+/**
+ * RFC 0201 §E — `rotateWebhookSecret`. 404 when the facet is not advertised;
+ * tenant checks exactly as `unregisterWebhook` (the tenant segment before the
+ * lookup); 400 for a subscription that did not opt in. The previous secret keeps
+ * signing for `overlapSeconds`; a second rotation inside an overlap retires the
+ * oldest immediately, because only one previous secret is ever kept.
+ */
+export function rotateWebhookSecret(host: Host, tenant: string, webhookId: string, body: Record<string, unknown>): { rotatedAt: string; previousSecretExpiresAt: string } {
+  const facet = secretRotation(host);
+  if (facet === undefined) throw err('not_found', 'webhooks.secretRotation is not advertised');
+  checkTenantBound(webhookId, tenant, 'webhookId');
+  const row = host.store.getWebhook(webhookId);
+  if (!row) throw err('not_found', 'no such webhook');
+  if (row.tenant !== tenant) throw err('forbidden', 'the subscription belongs to another tenant');
+  for (const k of Object.keys(body)) if (k !== 'secret') throw err('validation_error', `unknown key ${k} — the rotation body is closed { secret }`, { key: k });
+  if (whsecKey(body['secret']) === null) throw err('validation_error', 'secret MUST be whsec_<base64 of 24–64 bytes> (RFC 0201 §B.6)', { field: 'secret' });
+  if (!optedIn(row)) throw err('validation_error', 'the subscription did not opt into standard-webhooks-1; its single v1 signature cannot overlap (RFC 0201 §E.18)');
+  const now = Date.now();
+  const expires = now + facet.overlapSeconds * 1000;
+  host.store.rotateWebhookSecret(webhookId, body['secret'] as string, row.secret, expires);
+  return { rotatedAt: new Date(now).toISOString(), previousSecretExpiresAt: new Date(expires).toISOString() };
 }
 
 export function unregisterWebhook(host: Host, tenant: string, webhookId: string): void {
@@ -198,7 +321,9 @@ export function subscribeFanout(host: Host): void {
       const major = sub.contract_major === 2 ? 2 : 1;
       const runId = major === 1 ? e.run.runId.slice(e.run.runId.indexOf('/') + 1) : e.run.runId;
       const body = JSON.stringify({ runId, workspaceId: runRow?.owner_json ? ((JSON.parse(runRow.owner_json) as { workspace?: string }).workspace ?? 'default') : 'default', event: docForMajor(e.doc, major) });
-      host.store.insertDelivery({ delivery_id: tenantBound(e.run.tenant), webhook_id: sub.webhook_id, tenant: e.run.tenant, run_id: e.run.runId, sequence: e.doc.sequence, event_type: e.doc.type, body, attempts: 0, next_at: Date.now(), state: 'pending', last_status: null, last_error: null, created_at: nowIso(), updated_at: nowIso() });
+      // RFC 0201 §C.10: the message id is minted ONCE, with the delivery row, so every attempt —
+      // and every attempt after a restart, which re-reads this row — carries the same id.
+      host.store.insertDelivery({ delivery_id: tenantBound(e.run.tenant), webhook_id: sub.webhook_id, tenant: e.run.tenant, run_id: e.run.runId, sequence: e.doc.sequence, event_type: e.doc.type, body, attempts: 0, next_at: Date.now(), state: 'pending', last_status: null, last_error: null, created_at: nowIso(), updated_at: nowIso(), message_id: optedIn(sub) ? mintMessageId() : null });
     }
   });
 }
@@ -206,8 +331,11 @@ export function subscribeFanout(host: Host): void {
 async function attempt(host: Host, d: DeliveryRow): Promise<void> {
   const sub = host.store.getWebhook(d.webhook_id);
   if (!sub) { host.store.updateDelivery(d.delivery_id, { state: 'dead-lettered', last_error: 'subscription removed' }); return; }
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = `sha256=${sign(sub.secret, timestamp, d.body)}`;
+  const now = Date.now();
+  const timestamp = String(Math.floor(now / 1000));
+  // RFC 0201 §E.20 — during a rotation overlap the v1 signature stays on the PREVIOUS secret.
+  const overlap = sub.prev_secret !== null && sub.prev_secret_expires_at !== null && now < sub.prev_secret_expires_at ? sub.prev_secret : null;
+  const signature = `sha256=${sign(overlap ?? sub.secret, timestamp, d.body)}`;
   // The type header is rendered in the subscriber's contract, like the body (persistence.md §The v1 wire of an era-3 log).
   const wireType = sub.contract_major === 2 ? d.event_type : v1TypeOf(d.event_type);
   const headers: Record<string, string> = {
@@ -224,6 +352,17 @@ async function attempt(host: Host, d: DeliveryRow): Promise<void> {
     'X-openwop-Signature': signature,
     'X-openwop-Signature-Algorithm': 'v1',
   };
+  // RFC 0201 §C.9 — the Standard Webhooks headers, only on an opted-in subscription, beside
+  // (never instead of) the ones above. OpenWOP-Signature-Algorithm stays `v1`.
+  if (optedIn(sub)) {
+    const id = d.message_id ?? mintMessageId();
+    if (d.message_id === null) host.store.updateDelivery(d.delivery_id, { message_id: id });
+    const entries = [standardWebhooksSign(sub.secret, id, timestamp, d.body)];
+    if (overlap !== null) entries.push(standardWebhooksSign(overlap, id, timestamp, d.body));
+    headers['webhook-id'] = id;
+    headers['webhook-timestamp'] = timestamp;
+    headers['webhook-signature'] = entries.join(' ');
+  }
   let result: { status: number; error?: string };
   try {
     result = await guardedRequest(new URL(sub.url), { method: 'POST', headers, body: d.body, timeoutMs: 5000, allowPrivate: host.config.webhookAllowPrivate });
