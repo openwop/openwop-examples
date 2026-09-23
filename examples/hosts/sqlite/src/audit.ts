@@ -112,30 +112,27 @@ export interface AuditOptions {
 }
 
 /**
- * Canonical JSON serialization with recursively-sorted keys. Minimal RFC
- * 8785 JCS approximation — enough for stable hashing inside this host.
+ * Canonical JSON serialization with recursively-sorted keys. For every
+ * I-JSON value this produces exactly the RFC 8785 (JCS) bytes, which is what
+ * `spec/v1/auth-profiles.md` §"Audit-log integrity" and RFC 0212 require:
  *
- * What it does:
- *   - Sorts object keys lexicographically at every nesting level.
- *   - Delegates value serialization to `JSON.stringify`, which handles
- *     UTF-8, escape sequences, and the standard primitive shapes.
+ *   - `Object.keys(obj).sort()` with no comparator orders by UTF-16 code
+ *     units — the JCS §3.2.3 rule — and each key is emitted as a string, so
+ *     integer-like keys (`"10"` before `"9"`) keep JCS order too.
+ *   - `JSON.stringify` of a number is ECMAScript Number::toString, which is
+ *     JCS §3.2.2.3 verbatim: `-0` → `0`, `1e21` → `1e+21`, shortest
+ *     round-trip digits.
+ *   - `JSON.stringify` of a string is JCS §3.2.2.2 string serialization. No
+ *     Unicode normalization is applied, and JCS applies none either.
  *
- * What it doesn't (vs strict RFC 8785):
- *   - `-0` round-trips as `0` (JSON has no negative-zero distinction).
- *   - `NaN` / `Infinity` are not valid JSON; `JSON.stringify` would emit
- *     `null` and the audit entry's `details` MUST NOT contain them in
- *     the first place. Loggers SHOULD filter or substitute upstream.
- *   - Unicode normalization is not applied — strings are hashed as-is.
- *     Audit-log entry sources are host-controlled (no user-submitted
- *     text in the canonical entry shape), so NFC normalization isn't
- *     required for hash stability across replays in this host.
- *   - Number formatting follows V8's IEEE-754 round-trip; differs from
- *     strict JCS for some edge cases (e.g., `1e21`). Not exercised by
- *     the reference host's audit-entry shape.
- *
- * Strict RFC 8785 conformance is an open follow-up for hosts that need
- * cross-implementation hash compatibility with verifiers running in
- * different language ecosystems.
+ * Where it is NOT JCS is non-I-JSON input, which RFC 0212 says a hasher MUST
+ * refuse: `NaN` / `Infinity` become `null`, a lone surrogate is emitted as an
+ * escape, and an `undefined` member is dropped (below). The audit entry's
+ * `details` MUST NOT contain those in the first place; this helper does not
+ * refuse them, so a caller that passes one gets a hash no other verifier
+ * reproduces. The conformance suite's `conformance/src/lib/jcs.ts` is the
+ * refusing reference implementation, and `conformance/vectors/jcs-v1.json`
+ * its test.
  */
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
