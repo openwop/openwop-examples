@@ -216,10 +216,22 @@ describe('MCP mount', () => {
     const caps = { elicitation: {} };
     const first = await mcp('tools/call', { name: 'conformance-approval', arguments: {} }, { caps });
     expect(first.result.resultType).toBe('input_required');
-    expect(first.result.inputRequests.gate.method).toBe('elicitation/create');
-    expect(first.result.inputRequests.gate.params.requestedSchema.properties.action.enum).toEqual(['accept', 'reject']);
+    // interop-map.json mcp.mrtr InputRequiredResult: one key per open interrupt, keyed by its
+    // interruptId (tenant-bound, `<tenant>/<opaque>`), NOT by the node id — the same key
+    // mcp.tasks.status projects. A second run of the same workflow suspends at the same node
+    // and MUST therefore be advertised under a different key.
+    const key = Object.keys(first.result.inputRequests)[0] as string;
+    expect(key).toMatch(/^[^/]+\/[A-Za-z0-9._~-]{16,128}$/);
+    expect(key).not.toBe('gate');
+    const second = await mcp('tools/call', { name: 'conformance-approval', arguments: {} }, { caps });
+    const key2 = Object.keys(second.result.inputRequests)[0] as string;
+    expect(key2).not.toBe(key);
+    // …and each key answers only its own interrupt: the second run's state spends key2.
+    await mcp('tools/call', { name: 'conformance-approval', arguments: {}, requestState: second.result.requestState, inputResponses: { [key2]: { action: 'decline' } } }, { caps });
+    expect(first.result.inputRequests[key].method).toBe('elicitation/create');
+    expect(first.result.inputRequests[key].params.requestedSchema.properties.action.enum).toEqual(['accept', 'reject']);
     const state = first.result.requestState as string;
-    const responses = { gate: { action: 'accept', content: { action: 'accept' } } };
+    const responses = { [key]: { action: 'accept', content: { action: 'accept' } } };
     // bound to the principal and the request: another tenant's caller, or other arguments, cannot spend it
     expect((await mcp('tools/call', { name: 'conformance-approval', arguments: {}, requestState: state, inputResponses: responses }, { caps, key: KB })).error?.code).toBe(-32602);
     expect((await mcp('tools/call', { name: 'conformance-approval', arguments: { x: 1 }, requestState: state, inputResponses: responses }, { caps })).error?.code).toBe(-32602);
@@ -228,11 +240,16 @@ describe('MCP mount', () => {
     expect([retry.error, retry.result.resultType, retry.result.isError]).toEqual([undefined, 'complete', false]);
     const again = await mcp('tools/call', { name: 'conformance-approval', arguments: {}, requestState: state, inputResponses: responses }, { caps });
     expect(again.error?.code).toBe(-32602);
+    // …and the key WAS this run's interruptId: the completed result names the run, whose
+    // node.suspended carries the same id the MRTR request was keyed by.
+    const runId = JSON.parse(retry.result.content[0].text).runId as string;
+    expect((await events(runId)).find((e) => e.type === 'node.suspended')?.payload.interruptId).toBe(key);
   });
   it('MRTR decline takes the reject path (a result, isError true)', async () => {
     const caps = { elicitation: {} };
     const first = await mcp('tools/call', { name: 'conformance-approval', arguments: {} }, { caps });
-    const r = await mcp('tools/call', { name: 'conformance-approval', arguments: {}, requestState: first.result.requestState, inputResponses: { gate: { action: 'decline' } } }, { caps });
+    const key = Object.keys(first.result.inputRequests)[0] as string;
+    const r = await mcp('tools/call', { name: 'conformance-approval', arguments: {}, requestState: first.result.requestState, inputResponses: { [key]: { action: 'decline' } } }, { caps });
     expect([r.error, r.result.isError]).toEqual([undefined, true]);
   });
   it('unauthenticated is refused at the boundary (401 envelope), never a 200', async () => {
