@@ -52,7 +52,11 @@ IDP="http://127.0.0.1:${IDP_PORT}"   # where THIS SCRIPT reaches the IdP; the HO
 #              instead of printing "all profiles certified".
 PUBLIC="${PUBLIC:-}"
 if [ -n "$PUBLIC" ]; then
-  for v in OPENWOP_WEBHOOK_RECEIVER_URL OPENWOP_WEBHOOK_RECEIVER_PORT OPENWOP_A2A_FAKE_PEER_URL OPENWOP_A2A_FAKE_PEER_PORT OPENWOP_MCP_FAKE_SERVER_URL OPENWOP_MCP_FAKE_SERVER_PORT IDP_PUBLIC_URL; do
+  # The OAUTH trio joined this list after the 2026-09-23 cut: RFC 0199/0200 added
+  # three suite-owned doubles in 2.36.0 and this guard did not know about them, so
+  # PUBLIC=1 happily proceeded with them on loopback and seven rows failed their
+  # POSITIVE controls. The guard exists precisely to stop that, and it could not.
+  for v in OPENWOP_WEBHOOK_RECEIVER_URL OPENWOP_WEBHOOK_RECEIVER_PORT OPENWOP_A2A_FAKE_PEER_URL OPENWOP_A2A_FAKE_PEER_PORT OPENWOP_MCP_FAKE_SERVER_URL OPENWOP_MCP_FAKE_SERVER_PORT IDP_PUBLIC_URL OPENWOP_OAUTH_AS_URL OPENWOP_OAUTH_AS_PORT OPENWOP_OAUTH_AS2_URL OPENWOP_OAUTH_AS2_PORT OPENWOP_OAUTH_RESOURCE_URL OPENWOP_OAUTH_RESOURCE_PORT; do
     [ -n "${!v:-}" ] || { echo "PUBLIC=1 needs $v - a fixture left on loopback is unreachable through a closed guard and its rows record blocked"; exit 1; }
   done
   ALLOW_PRIVATE=0; RELAXATIONS=''; IDP_FOR_HOST="$IDP_PUBLIC_URL"

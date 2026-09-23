@@ -146,7 +146,20 @@ async function kill(ctx: Ctx): Promise<Reply> {
     if (typeof body.effectUrl !== 'string' || body.effectUrl.length === 0) throw err('validation_error', 'mode=duplicate-delivery needs effectUrl — the destination the one staged effect is counted at');
     const def = host.workflows.get(EFFECTFUL);
     if (!def) throw err('not_found', `${EFFECTFUL} is not registered`);
-    const run = acceptRun(host, subject, EFFECTFUL, { url: body.effectUrl, transportRetries: 0 }, {}, null);
+    // The raised timeout is NOT a fix for the zero-arrivals failure this row saw
+    // on 2026-09-23 — that was the suite (two legs sharing one effect identity,
+    // fixed in openwop#1513), and a slow response provably still lands
+    // (measured). It removes a DIFFERENT false report: a receiver
+    // slower than the ceiling makes the node throw for an effect that arrived.
+    //
+    // `transportRetries` STAYS 0 and the timeout is raised instead. A retry would
+    // re-POST under the same `Idempotency-Key`, which the ledger deduplicates —
+    // but the suite counts ARRIVALS at its receiver, not deduplicated effects, so
+    // a retry after a response that was merely slow (not lost) would land a
+    // SECOND arrival and fail the row for two. Turning a false negative into a
+    // false positive is a worse trade. A longer single attempt removes the
+    // failure without adding a way to double-count.
+    const run = acceptRun(host, subject, EFFECTFUL, { url: body.effectUrl, transportRetries: 0, timeoutMs: 20_000 }, {}, null);
     // Delivered TWICE, to the executor's own entry point and concurrently —
     // BELOW `scheduleRun`'s in-process one-loop-per-run guard, which would
     // otherwise absorb the second delivery before it reached anything worth

@@ -28,9 +28,16 @@ OUT="${1:-bundle-v3.json.new}"
 command -v cloudflared >/dev/null || { echo "cloudflared is not on PATH"; exit 1; }
 
 RX_PORT=3841; A2A_PORT=3842; MCP_PORT=3843; IDP_PORT="${IDP_PORT:-3839}"
+# RFC 0199/0200 (suite 2.36.0+) added three suite-owned doubles the host must reach
+# through a CLOSED guard: the authorization server, a second AS that a PRM may name
+# as a foreign issuer, and the protected-resource double. They were not fronted, so
+# the 2026-09-23 cut recorded seven RFC 0199 rows executed-fail on their POSITIVE
+# controls (the host could not complete a genuine grant) and four discovery rows
+# blocked. Nothing was wrong with the host; the fixtures were simply unreachable.
+AS_PORT=3844; AS2_PORT=3845; RES_PORT=3846
 LOGDIR="$(mktemp -d -t v2ref-tunnels.XXXXXX)"
 PIDS=()
-PORTS=("$RX_PORT" "$A2A_PORT" "$MCP_PORT" "$IDP_PORT")
+PORTS=("$RX_PORT" "$A2A_PORT" "$MCP_PORT" "$IDP_PORT" "$AS_PORT" "$AS2_PORT" "$RES_PORT")
 # TEARDOWN IS THE CONDITION THIS SCRIPT IS ALLOWED TO RUN UNDER, so it is done
 # three ways and then CHECKED. The first version of this script recorded each
 # tunnel's pid inside `$(open_tunnel ...)` - a SUBSHELL - so the parent's PIDS
@@ -67,11 +74,14 @@ open_tunnel() {
   [ -n "$TUNNEL_URL" ] || { echo "tunnel $name (port $port) never reported a URL - see $log" >&2; exit 1; }
 }
 
-echo "opening four public tunnels..."
+echo "opening seven public tunnels..."
 open_tunnel receiver "$RX_PORT"; RX_URL="$TUNNEL_URL"
 open_tunnel a2a "$A2A_PORT";      A2A_URL="$TUNNEL_URL"
 open_tunnel mcp "$MCP_PORT";      MCP_URL="$TUNNEL_URL"
 open_tunnel idp "$IDP_PORT";      IDP_URL="$TUNNEL_URL"
+open_tunnel as "$AS_PORT";        AS_URL="$TUNNEL_URL"
+open_tunnel as2 "$AS2_PORT";      AS2_URL="$TUNNEL_URL"
+open_tunnel resource "$RES_PORT"; RES_URL="$TUNNEL_URL"
 # A quick tunnel's name is not resolvable the instant cloudflared prints it. The
 # first run of this script handed the host an IdP URL seconds old, the host's
 # resolver answered ENOTFOUND, and the SCIM preflight read 500. curl exit 6 is
@@ -106,16 +116,19 @@ wait_resolves() {
   done
   echo "the SYSTEM resolver cannot resolve $url although its A record exists - a negatively-cached early lookup (negative TTL 1800 s). Waiting will not help; re-run, and the new tunnels get new names." >&2; exit 1
 }
-echo "letting the four names settle for ${SETTLE_SECONDS}s before anything looks them up..."
+echo "letting the seven names settle for ${SETTLE_SECONDS}s before anything looks them up..."
 sleep "$SETTLE_SECONDS"
-for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL"; do wait_resolves "$u"; done
-echo "all four public names resolve"
-[ "${#PIDS[@]}" -eq 4 ] || { echo "expected 4 tunnel pids recorded in this shell, have ${#PIDS[@]} - refusing to continue with ingress the trap cannot close" >&2; exit 1; }
-printf '  receiver %s -> :%s\n  a2a      %s -> :%s\n  mcp      %s -> :%s\n  idp      %s -> :%s\n' "$RX_URL" "$RX_PORT" "$A2A_URL" "$A2A_PORT" "$MCP_URL" "$MCP_PORT" "$IDP_URL" "$IDP_PORT"
+for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL" "$AS_URL" "$AS2_URL" "$RES_URL"; do wait_resolves "$u"; done
+echo "all seven public names resolve"
+[ "${#PIDS[@]}" -eq 7 ] || { echo "expected 7 tunnel pids recorded in this shell, have ${#PIDS[@]} - refusing to continue with ingress the trap cannot close" >&2; exit 1; }
+printf '  receiver %s -> :%s\n  a2a      %s -> :%s\n  mcp      %s -> :%s\n  idp      %s -> :%s\n  as       %s -> :%s\n  as2      %s -> :%s\n  resource %s -> :%s\n' "$RX_URL" "$RX_PORT" "$A2A_URL" "$A2A_PORT" "$MCP_URL" "$MCP_PORT" "$IDP_URL" "$IDP_PORT" "$AS_URL" "$AS_PORT" "$AS2_URL" "$AS2_PORT" "$RES_URL" "$RES_PORT"
 
 # The receiver front carries a path; the fakes and the IdP are bare origins.
 PUBLIC=1 IDP_PORT="$IDP_PORT" IDP_PUBLIC_URL="$IDP_URL" \
 OPENWOP_WEBHOOK_RECEIVER_URL="${RX_URL}/hook" OPENWOP_WEBHOOK_RECEIVER_PORT="$RX_PORT" \
 OPENWOP_A2A_FAKE_PEER_URL="$A2A_URL" OPENWOP_A2A_FAKE_PEER_PORT="$A2A_PORT" \
 OPENWOP_MCP_FAKE_SERVER_URL="$MCP_URL" OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_PORT" \
+OPENWOP_OAUTH_AS_URL="$AS_URL" OPENWOP_OAUTH_AS_PORT="$AS_PORT" \
+OPENWOP_OAUTH_AS2_URL="$AS2_URL" OPENWOP_OAUTH_AS2_PORT="$AS2_PORT" \
+OPENWOP_OAUTH_RESOURCE_URL="$RES_URL" OPENWOP_OAUTH_RESOURCE_PORT="$RES_PORT" \
   ./scripts/cut-bundle.sh "$OUT"
