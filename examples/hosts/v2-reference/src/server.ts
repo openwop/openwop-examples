@@ -84,6 +84,7 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
       { name: 'url', defaultValue: 'https://effect-seam.invalid/fire' },
       { name: 'businessKey' },
       { name: 'transportRetries', defaultValue: 0 },
+      { name: 'timeoutMs', defaultValue: 5000 },
     ],
     metadata: { tags: ['reference'] },
   });

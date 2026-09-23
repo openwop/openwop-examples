@@ -97,13 +97,38 @@ export interface FetchOutcome { status: number; error?: string; suppressed?: boo
 const inFlight = new Map<string, Promise<FetchOutcome>>();
 
 /** The request one `core.httpFetch` node makes, with the run's input overrides applied. */
-function requestOf(run: RunRow, node: WorkflowNode): { method: string; url: string; body: string | undefined; transportRetries: number } {
+/**
+ * The default transport budget for one attempt. 5 s is right for the production
+ * path: a provider that has not answered in five seconds is not going to.
+ *
+ * It is NOT right for a conformance receiver behind a public tunnel. When the
+ * round trip exceeds the ceiling and `transportRetries` is 0, the single attempt
+ * is abandoned, the ledger row goes `released` and the node THROWS — while the
+ * request itself already landed. The host then reports failure for work that
+ * succeeded, which is a false report about its own effect.
+ *
+ * What this is NOT. It does not explain a receiver observing ZERO arrivals: a
+ * receiver counts on request ARRIVAL, and a client-side timeout abandons the
+ * wait for the response, not the request that already arrived. Measured
+ * 2026-09-23 against a receiver that delays its response 6.5 s — past the old
+ * 5 s ceiling — the arrival was still recorded. RFC 0158's `duplicate-delivery`
+ * row failed once in four runs with zero arrivals and the cause of THAT is not
+ * this; it remains open. Fixing this one is worth doing on its own terms.
+ */
+const DEFAULT_EFFECT_TIMEOUT_MS = 5_000;
+
+function requestOf(run: RunRow, node: WorkflowNode): { method: string; url: string; body: string | undefined; transportRetries: number; timeoutMs: number } {
   const inputs = JSON.parse(run.inputs_json) as Record<string, unknown>;
   const url = String(inputs['url'] ?? node.config['url'] ?? '');
   const method = String(node.config['method'] ?? 'POST').toUpperCase();
   const body = node.config['body'] === undefined ? undefined : JSON.stringify(node.config['body']);
   const retries = Number(inputs['transportRetries'] ?? node.config['transportRetries'] ?? 0);
-  return { method, url, body, transportRetries: Number.isFinite(retries) ? Math.max(0, Math.min(4, retries)) : 0 };
+  // Bounded like `transportRetries` is, and for the same reason: a caller-named
+  // budget is an input, and an unbounded one would let a workflow pin an
+  // executor slot indefinitely.
+  const declared = Number(inputs['timeoutMs'] ?? node.config['timeoutMs'] ?? DEFAULT_EFFECT_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(declared) ? Math.max(1_000, Math.min(30_000, declared)) : DEFAULT_EFFECT_TIMEOUT_MS;
+  return { method, url, body, transportRetries: Number.isFinite(retries) ? Math.max(0, Math.min(4, retries)) : 0, timeoutMs };
 }
 
 /**
@@ -177,7 +202,7 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
       const target = validateEgressUrl(request.url, host.config.webhookAllowPrivate);
       // The effect identity IS the provider's idempotency key (RFC 0150 §B).
       const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Idempotency-Key': providerKey };
-      const r = await guardedRequest(target, { method: request.method, headers, timeoutMs: 5000, allowPrivate: host.config.webhookAllowPrivate, ...(request.body === undefined ? {} : { body: request.body }) });
+      const r = await guardedRequest(target, { method: request.method, headers, timeoutMs: request.timeoutMs, allowPrivate: host.config.webhookAllowPrivate, ...(request.body === undefined ? {} : { body: request.body }) });
       outcome = r.error === undefined ? { status: r.status } : { status: r.status, error: r.error };
     } catch (e) {
       outcome = { status: 0, error: (e as Error).message };
