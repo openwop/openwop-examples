@@ -147,8 +147,9 @@ async function kill(ctx: Ctx): Promise<Reply> {
     const def = host.workflows.get(EFFECTFUL);
     if (!def) throw err('not_found', `${EFFECTFUL} is not registered`);
     // The raised timeout is NOT a fix for the zero-arrivals failure this row saw
-    // on 2026-09-23 — that cause is still unknown, and a slow response provably
-    // still lands (measured). It removes a DIFFERENT false report: a receiver
+    // on 2026-09-23 — that was the suite (two legs sharing one effect identity,
+    // fixed in openwop#1513), and a slow response provably still lands
+    // (measured). It removes a DIFFERENT false report: a receiver
     // slower than the ceiling makes the node throw for an effect that arrived.
     //
     // `transportRetries` STAYS 0 and the timeout is raised instead. A retry would

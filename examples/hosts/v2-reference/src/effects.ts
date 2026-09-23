@@ -113,7 +113,9 @@ const inFlight = new Map<string, Promise<FetchOutcome>>();
  * 2026-09-23 against a receiver that delays its response 6.5 s — past the old
  * 5 s ceiling — the arrival was still recorded. RFC 0158's `duplicate-delivery`
  * row failed once in four runs with zero arrivals and the cause of THAT is not
- * this; it remains open. Fixing this one is worth doing on its own terms.
+ * this: two suite legs handed the seam one byte-identical destination, so a
+ * correctly deduplicating host fired the second zero times (openwop#1513).
+ * Fixing this one is worth doing on its own terms.
  */
 const DEFAULT_EFFECT_TIMEOUT_MS = 5_000;
 
