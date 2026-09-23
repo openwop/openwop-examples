@@ -108,11 +108,11 @@ export interface AuditOptions {
 }
 
 /**
- * Canonical JSON with sorted keys. See SQLite host's audit.ts for the
- * full discussion of what this approximates vs strict RFC 8785 JCS
- * (negative-zero, NaN/Infinity, NFC normalization, IEEE-754 number edge
- * cases). The hash domain is internal to the host so cross-language
- * verifier compatibility isn't required at v1.
+ * Canonical JSON with sorted keys: exactly the RFC 8785 (JCS) bytes for every
+ * I-JSON value (RFC 0212). See the SQLite host's audit.ts for why — the
+ * default sort is JCS's code-unit order and `JSON.stringify` of numbers and
+ * strings is JCS §3.2.2 — and for the non-I-JSON inputs (NaN, Infinity, lone
+ * surrogates, `undefined`) this helper coerces where a JCS hasher refuses.
  */
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
