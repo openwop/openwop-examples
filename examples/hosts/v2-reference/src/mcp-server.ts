@@ -127,7 +127,8 @@ function toolsList(host: Host): Record<string, unknown> {
 
 // ── requestState ───────────────────────────────────────────────────────────
 
-interface StateClaims { v: 1; p: string; e: number; d: string; r: string; n: string; j: string }
+/** `i` is the interruptId the state is bound to — the same key `inputRequests` is keyed by. */
+interface StateClaims { v: 1; p: string; e: number; d: string; r: string; i: string; j: string }
 
 function stableJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
@@ -138,8 +139,8 @@ const principalOf = (s: Subject): string => `${s.tenant}|${principalRef(s)}`;
 const digestOf = (name: string, args: Record<string, unknown>): string => createHash('sha256').update(`${name}\n${stableJson(args)}`).digest('base64url');
 const mac = (host: Host, body: string): string => createHmac('sha256', host.config.mcpStateSecret).update(body).digest('base64url');
 
-function mintState(host: Host, subject: Subject, name: string, args: Record<string, unknown>, runId: string, nodeId: string): string {
-  const claims: StateClaims = { v: 1, p: principalOf(subject), e: Date.now() + REQUEST_STATE_TTL_MS, d: digestOf(name, args), r: runId, n: nodeId, j: opaque() };
+function mintState(host: Host, subject: Subject, name: string, args: Record<string, unknown>, runId: string, interruptId: string): string {
+  const claims: StateClaims = { v: 1, p: principalOf(subject), e: Date.now() + REQUEST_STATE_TTL_MS, d: digestOf(name, args), r: runId, i: interruptId, j: opaque() };
   const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
   return `${body}.${mac(host, body)}`;
 }
@@ -154,7 +155,7 @@ function verifyState(host: Host, subject: Subject, raw: unknown, name: string, a
   if (sig.length !== expect.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expect))) throw bad('integrity check failed');
   let claims: StateClaims;
   try { claims = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as StateClaims; } catch { throw bad('malformed'); }
-  if (claims.v !== 1 || typeof claims.j !== 'string') throw bad('malformed');
+  if (claims.v !== 1 || typeof claims.j !== 'string' || typeof claims.i !== 'string') throw bad('malformed');
   if (claims.e < Date.now()) throw bad('expired');
   if (claims.p !== principalOf(subject)) throw bad('bound to another principal');
   if (claims.d !== digestOf(name, args)) throw bad('bound to another request');
@@ -260,9 +261,13 @@ function outcome(host: Host, subject: Subject | null, name: string, args: Record
       return textResult(true, { runId: run.run_id, status: run.status, interruptKind: p.kind, message: `${why}; the run is suspended — resolve it at POST /runs/{runId}/interrupts/${pending.node_id}` });
     }
     return {
+      // interop-map.json mcp.mrtr InputRequiredResult: one key per open interrupt, keyed by
+      // its interruptId — the same key mcp.tasks.status projects (taskOf below). A node id
+      // would not name the request: a node that suspends twice reuses it, and two runs of the
+      // same workflow would advertise the same key for different outstanding interrupts.
       resultType: 'input_required',
-      inputRequests: { [pending.node_id]: request },
-      requestState: mintState(host, subject as Subject, name, args, run.run_id, pending.node_id),
+      inputRequests: { [pending.interrupt_id]: request },
+      requestState: mintState(host, subject as Subject, name, args, run.run_id, pending.interrupt_id),
     };
   }
   // waiting-external, or still moving at the cap: no MRTR form fits; the caller follows the run over REST.
@@ -305,8 +310,8 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
   const claims = verifyState(host, subject, params['requestState'], name, rawArgs);
   const responses = params['inputResponses'];
   if (!isObject(responses)) throw new McpError(ERR.INVALID_PARAMS, 'a retry carries inputResponses');
-  const response = responses[claims.n];
-  if (!isObject(response) || typeof response['action'] !== 'string') throw new McpError(ERR.INVALID_PARAMS, `inputResponses.${claims.n} MUST be an ElicitResult`);
+  const response = responses[claims.i];
+  if (!isObject(response) || typeof response['action'] !== 'string') throw new McpError(ERR.INVALID_PARAMS, `inputResponses.${claims.i} MUST be an ElicitResult`);
   // Single use: consumed before it acts, atomically — a second retry with it fails.
   if (!host.store.consumeMcpRequestState(claims.j)) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: already used');
   const run = host.store.getRun(claims.r);
@@ -316,8 +321,10 @@ async function toolsCall(host: Host, subject: Subject, params: Record<string, un
   own.runId = run.run_id;
   if (response['action'] === 'cancel') requestCancel(host, run, 'mcp-elicitation-cancelled');
   else {
-    const pending = host.store.pendingInterruptForNode(run.run_id, claims.n);
-    if (!pending) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: its interrupt is no longer open');
+    // The state names the interrupt, not its node: the answer can only reach the interrupt it
+    // was minted for, never a later one the same node opened.
+    const pending = host.store.getInterrupt(claims.i);
+    if (!pending || pending.run_id !== run.run_id || pending.resolved_at !== null) throw new McpError(ERR.INVALID_PARAMS, 'requestState refused: its interrupt is no longer open');
     const kind = payloadOf(pending).kind;
     if (kind === 'credential' && response['action'] === 'accept') {
       // RFC 0199 §D.2(c): URL mode carries no content; an accept is the §C.4 re-check. A credential
