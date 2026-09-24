@@ -98,6 +98,35 @@ function refuse(protocol: Protocol, requested: string, supported: readonly strin
   throw err('interop_version_unsupported', `${protocol} negotiation refused: ${reason}`, { protocol, requested, supported: [...supported], runId, reason });
 }
 
+/**
+ * RFC 0211 §F — a peer's A2A error, read in either shape. A2A 1.0.1 §9.5 puts
+ * the details in `error.data` as an array of `Any`, one of which is a
+ * `google.rpc.ErrorInfo`; 2.36.x-era peers sent a bare `{ reason }` object. A
+ * client MUST accept the array and SHOULD accept the object through 2.x. The
+ * JSON-RPC code identifies the error either way; `reason` and
+ * `metadata.supportedVersions` are read when present.
+ */
+export function readPeerError(error: unknown): { code: number | null; reason: string | null; supportedVersions: string[] } {
+  if (error === null || typeof error !== 'object') return { code: null, reason: null, supportedVersions: [] };
+  const e = error as { code?: unknown; data?: unknown };
+  const code = typeof e.code === 'number' ? e.code : null;
+  let info: Record<string, unknown> | null = null;
+  if (Array.isArray(e.data)) {
+    const found = e.data.find((x) => x !== null && typeof x === 'object' && (x as Record<string, unknown>)['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo');
+    info = (found as Record<string, unknown> | undefined) ?? null;
+  } else if (e.data !== null && typeof e.data === 'object') {
+    info = e.data as Record<string, unknown>;
+  }
+  const reason = info !== null && typeof info['reason'] === 'string' ? info['reason'] : null;
+  const md = info !== null && info['metadata'] !== null && typeof info['metadata'] === 'object' ? (info['metadata'] as Record<string, unknown>) : {};
+  const svRaw = md['supportedVersions'] ?? (info !== null ? info['supportedVersions'] : undefined);
+  const supportedVersions = typeof svRaw === 'string' ? svRaw.split(',').map((v) => v.trim()).filter((v) => v !== '') : Array.isArray(svRaw) ? svRaw.map(String) : [];
+  return { code, reason, supportedVersions };
+}
+
+/** A peer's VersionNotSupportedError, by code or by ErrorInfo reason. */
+const isVersionNotSupported = (p: ReturnType<typeof readPeerError>): boolean => p.code === -32009 || p.reason === 'VERSION_NOT_SUPPORTED';
+
 /** §22 — the A2A client path, once, against `peerUrl`. */
 export async function a2aInvoke(host: Host, tenant: string, subject: Subject | null, body: Record<string, unknown>, trace: TraceContext | null = null): Promise<{ status: number; body: Record<string, unknown> }> {
   const peerUrl = typeof body['peerUrl'] === 'string' ? body['peerUrl'] : null;
@@ -119,12 +148,26 @@ export async function a2aInvoke(host: Host, tenant: string, subject: Subject | n
   if (typeof body['peerOffersOnly'] === 'string') offers = offers.filter((v) => v === body['peerOffersOnly']);
   const d = decide(A2A_FACET.versions, A2A_FACET.preferredVersion, A2A_FACET.minimumVersion, offers, requested, authenticated);
   audit(host, run, 'a2a', peerUrl, A2A_FACET.minimumVersion, d);
-  if (d.outcome === 'refused') refuse('a2a', requested ?? A2A_FACET.preferredVersion, A2A_FACET.versions, run.run_id, d.reason);
+  if (d.outcome === 'refused') {
+    // host-sample-test-seams.md §22: `requestVersion` overrides the version the host ASKS for
+    // ("used to force an unsupported one"). An unsupported, above-floor request is therefore put
+    // to the peer — which refuses it VersionNotSupportedError — and the peer's error, in either
+    // details shape (RFC 0211 §F), projects to interop_version_unsupported. A below-floor or
+    // unauthenticated refusal is never sent: that is the downgrade protection.
+    if (d.reason === 'unsupported' && requested !== undefined) {
+      const probe = await post(host, rpcUrl, { 'A2A-Version': requested }, { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: { messageId: `neg-${run.run_id.split('/')[1] ?? run.run_id}`, role: 'ROLE_USER', parts: [{ text: 'ping' }] } } });
+      const peer = readPeerError(probe.json?.['error']);
+      const supported = isVersionNotSupported(peer) && peer.supportedVersions.length > 0 ? peer.supportedVersions : A2A_FACET.versions;
+      refuse('a2a', requested, supported, run.run_id, d.reason);
+    }
+    refuse('a2a', requested ?? A2A_FACET.preferredVersion, A2A_FACET.versions, run.run_id, d.reason);
+  }
   // interop.md §Trace context (RFC 0207): the caller's trace, as a child span, in Message.metadata.openwop (SHOULD) AND the header.
   const tc = trace !== null ? childOf(trace) : null;
   const message: Record<string, unknown> = { role: 'user', parts: [{ text: 'ping' }], ...(tc !== null ? { metadata: { openwop: traceFields(tc) } } : {}) };
   const rpc = await post(host, rpcUrl, { 'A2A-Version': d.version, ...traceHeaders(tc) }, { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message } });
   const rpcError = rpc.json?.['error'];
+  if (rpcError && isVersionNotSupported(readPeerError(rpcError))) refuse('a2a', d.version, A2A_FACET.versions, run.run_id, 'unsupported');
   if (rpc.status >= 400 || rpcError) throw err('validation_error', `the peer refused SendMessage under A2A-Version ${d.version}`, { peerStatus: rpc.status, error: rpcError ?? null, runId: run.run_id });
   return { status: 200, body: { negotiatedVersion: d.version, protocol: 'a2a', runId: run.run_id, peerDigest: originDigest(peerUrl), result: rpc.json?.['result'] ?? null } };
 }

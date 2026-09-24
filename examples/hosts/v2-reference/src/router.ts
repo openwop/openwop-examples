@@ -58,6 +58,22 @@ export interface Route {
 /** The path parameters that carry a tenant-bound id (identity.md §5 table) — the only ones the `~` projection applies to; `nodeId` admits a literal `~`. */
 const TENANT_BOUND_PARAMS: ReadonlySet<string> = new Set(['runId', 'webhookId']);
 
+/**
+ * RFC 0211 §C (interop.md §"The operation mappings", A2A error details): a
+ * response on an interface URL the Agent Card lists — a refusal before dispatch
+ * included (401, 403, 406, 429, …) — MUST be in the binding's shape, never the
+ * OpenWOP `{ error, message }` envelope. A JSON-RPC interface registers its path
+ * here; `send` re-shapes an envelope bound for it into a JSON-RPC error, keeping
+ * the HTTP status and headers (so the RFC 0200 challenge still rides a 401).
+ */
+export const JSONRPC_INTERFACE_PATHS = new Set<string>();
+
+/** The OpenWOP envelope re-shaped as a JSON-RPC error (`id` null: the request was never dispatched). */
+export function envelopeAsJsonRpc(status: number, body: { error: string; message: string }): Record<string, unknown> {
+  const code = status >= 500 ? -32603 : status === 404 ? -32601 : -32600;
+  return { jsonrpc: '2.0', id: null, error: { code, message: body.message, data: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: body.error.toUpperCase(), domain: 'openwop.dev' }] } };
+}
+
 export function route(method: string, pattern: string, auth: boolean, handler: Handler, contract?: 1 | 2 | 'both'): Route {
   // A tenant-bound id (`<tenantId>/<opaque>`) may arrive with its slash raw or
   // percent-encoded; every other parameter is one path segment.
@@ -155,7 +171,11 @@ export class Router {
         return;
       }
       if (reply.body === undefined) { res.writeHead(reply.status, headers); res.end(); return; }
-      const text = JSON.stringify(reply.body);
+      const envelope = reply.body as { error?: unknown; message?: unknown };
+      const body = JSONRPC_INTERFACE_PATHS.has(path) && typeof envelope.error === 'string' && typeof envelope.message === 'string'
+        ? envelopeAsJsonRpc(reply.status, envelope as { error: string; message: string })
+        : reply.body;
+      const text = JSON.stringify(body);
       headers['Content-Type'] = 'application/json; charset=utf-8';
       res.writeHead(reply.status, headers);
       res.end(text);
