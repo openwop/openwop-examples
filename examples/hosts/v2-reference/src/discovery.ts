@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import type { Host } from './host.js';
 import { SANDBOX_FACET } from './sandbox.js';
 import { SAML_LANE_ISSUER, SUBJECT_LINK_KEY } from './saml-scim.js';
-import { A2A_FACET, MCP_FACET } from './interop.js';
+import { a2aFacet, MCP_FACET } from './interop.js';
 import { A2A_SERVER_PROFILES, AGENT_CARD_PATH } from './a2a-server.js';
 import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-server.js';
 import { secretRotation, signatureAlgorithms } from './webhooks.js';
@@ -113,7 +113,7 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // mcp-server.ts). The URLs are absolute and derived from the request, so the
     // document names the origin the caller actually reached.
     // RFC 0202: `agentCards` — each GET /agents entry is an A2A card behind its a2aTenant — only when the installed contract defines it.
-    a2a: record('seam-gated', { ...A2A_FACET, versions: [...A2A_FACET.versions], profiles: [...A2A_SERVER_PROFILES], agentCardUrl: `${baseUrl}${AGENT_CARD_PATH}`, ...(agentCardsAdvertised(host) ? { agentCards: true } : {}) }),
+    a2a: record('seam-gated', { ...a2aFacet(host), profiles: [...A2A_SERVER_PROFILES], agentCardUrl: `${baseUrl}${AGENT_CARD_PATH}`, ...(agentCardsAdvertised(host) ? { agentCards: true } : {}) }),
     // RFC 0204: `client` — pack code gets ctx.mcp (mcp-client.ts) — only when the installed contract defines it and a server is bound.
     mcp: record('seam-gated', { ...MCP_FACET, revisions: [...MCP_FACET.revisions], mrtr: { ...MCP_FACET.mrtr }, profiles: [...MCP_SERVER_PROFILES], features: [...MCP_SERVER_FEATURES], serverMount: { transports: ['streamable-http'] }, serverUrls: [`${baseUrl}${MCP_MOUNT_PATH}`], ...(mcpClientAdvertised(host) ? { client: true } : {}) }),
     // tool-catalog.md (RFC 0204): the executor's node types, classified by hand, plus every bound MCP server's tools (unclassified ⇒ write).

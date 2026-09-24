@@ -36,6 +36,8 @@ import { childOf, traceFields, traceHeaders, type TraceContext } from './trace-c
 /** The date this host's advertised versions were last re-evaluated against the upstream registries (interop.md §The refresh SLA: ≤ 90 days). */
 export const INTEROP_REFRESHED_AT = '2026-09-18';
 export const A2A_FACET = { versions: ['1.0'], preferredVersion: '1.0', minimumVersion: '1.0', refreshedAt: INTEROP_REFRESHED_AT, streaming: false, pushNotifications: false, durableTasks: false } as const;
+/** The advertised `a2a` facet: `pushNotifications` follows config (RFC 0214), everything else is fixed. */
+export const a2aFacet = (host: Host): Record<string, unknown> => ({ ...A2A_FACET, versions: [...A2A_FACET.versions], pushNotifications: host.config.a2aPush });
 export const MCP_FACET = { revisions: ['2026-07-28'], preferredVersion: '2026-07-28', minimumRevision: '2026-07-28', refreshedAt: INTEROP_REFRESHED_AT, mrtr: { maxRounds: 4 } } as const;
 
 const META_VERSION = 'io.modelcontextprotocol/protocolVersion';

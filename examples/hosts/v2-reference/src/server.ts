@@ -22,7 +22,7 @@ import { ensureDefaultCredential } from './identity.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
 import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
-import { a2aServerRoutes } from './a2a-server.js';
+import { startA2APush, a2aServerRoutes } from './a2a-server.js';
 import { agentRoutes } from './agents.js';
 import { mcpServerRoutes } from './mcp-server.js';
 import { OAUTH_DDL, OAUTH_USE_TYPE, oauthRoutes, oauthSupported } from './oauth.js';
@@ -179,6 +179,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     ...durabilityRoutes(host),
   );
   subscribeFanout(host);
+  startA2APush(host);
   const stopWorker = startDeliveryWorker(host);
   // Runs left non-terminal by a previous process re-enter the loop (durability across restart),
   // and a run that had started is RECORDED as recovered (`workflow.restored`) — durability.ts.

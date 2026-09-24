@@ -16,9 +16,10 @@
  * routes one skill — the workflow `OPENWOP_A2A_WORKFLOW_ID` names (default
  * conformance-approval). The card lists exactly that skill.
  *
- * Advertised: streaming false, pushNotifications false, durableTasks false —
- * so SendStreamingMessage / SubscribeToTask / returnImmediately are -32004 and
- * push-config methods -32003 (the rows' own errors).
+ * Advertised: streaming false, durableTasks false — so SendStreamingMessage /
+ * SubscribeToTask / returnImmediately are -32004 (the rows' own errors).
+ * pushNotifications follows `OPENWOP_A2A_PUSH` (RFC 0214, a2a-push.ts): off,
+ * the four push-config methods are -32003; on, they are served.
  *
  * RFC 0202 (only when the installed contract defines `a2a.agentCards`):
  * `extendedAgentCard: true`, and every request's `tenant` is read. Absent, the
@@ -45,6 +46,7 @@ import { route, JSONRPC_INTERFACE_PATHS, type Ctx, type Reply, type Route } from
 import { TERMINAL, type Host, type Subject } from './host.js';
 import type { RunRow } from './store.js';
 import { A2A_FACET } from './interop.js';
+import { createPushConfig, deletePushConfig, getPushConfig, listPushConfigs, PushError, subscribePush } from './a2a-push.js';
 import { agentCardsAdvertised, agentRefOf, resolveRoutingValue, type InventoryEntry } from './agents.js';
 
 export const A2A_SERVER_PROFILES = ['a2a-1.0'] as const;
@@ -152,7 +154,7 @@ export function agentCard(host: Host, baseUrl: string): Record<string, unknown> 
     supportedInterfaces: [{ url: `${baseUrl}${A2A_JSONRPC_PATH}`, protocolBinding: 'JSONRPC', protocolVersion: A2A_VERSION }],
     provider: { organization: HOST_VENDOR, url: 'https://openwop.dev' },
     // a2a.card capabilities: equal to the a2a facets; extendedAgentCard is true iff GetExtendedAgentCard is served (RFC 0202).
-    capabilities: { streaming: A2A_FACET.streaming, pushNotifications: A2A_FACET.pushNotifications, extendedAgentCard: extended },
+    capabilities: { streaming: A2A_FACET.streaming, pushNotifications: host.config.a2aPush, extendedAgentCard: extended },
     // a2a.card securitySchemes | securityRequirements: exactly the authentication the endpoint enforces.
     securitySchemes: { bearer: { httpAuthSecurityScheme: { scheme: 'Bearer', description: 'An OpenWOP api-key or session credential (Authorization: Bearer <credential>); the Subject it resolves to owns the task.' } } },
     securityRequirements: [{ schemes: { bearer: { list: [] } } }],
@@ -390,6 +392,42 @@ function cancelTask(host: Host, subject: Subject, params: Record<string, unknown
   return taskOf(host, host.store.getRun(run.run_id) ?? run);
 }
 
+/** The run for a push-config read/delete, or null when the caller cannot read it (answered as an unknown id, never as a distinct refusal). */
+function readableOrNull(host: Host, subject: Subject, id: unknown): RunRow | null {
+  try { return readableRun(host, subject, id); } catch (e) { if (e instanceof RpcError) return null; throw e; }
+}
+
+/** RFC 0214 — the four push-config methods (interop-map a2a.operations push rows). */
+function pushMethod(host: Host, subject: Subject, method: string, params: Record<string, unknown>): Record<string, unknown> {
+  try {
+    switch (method) {
+      case 'CreateTaskPushNotificationConfig': {
+        const run = readableRun(host, subject, params['taskId']);
+        if (TERMINAL.has(run.status)) throw new RpcError(A2A_ERR.UNSUPPORTED_OPERATION, 'a terminal task has no further state to push');
+        return createPushConfig(host, run, params, statusOf(host, run).state);
+      }
+      case 'GetTaskPushNotificationConfig': return getPushConfig(host, readableOrNull(host, subject, params['taskId']), params['id']);
+      case 'ListTaskPushNotificationConfigs': return listPushConfigs(host, readableRun(host, subject, params['taskId']), params['pageSize'], params['pageToken']);
+      default: return deletePushConfig(host, readableOrNull(host, subject, params['taskId']), params['id']);
+    }
+  } catch (e) {
+    if (e instanceof PushError) throw new RpcError(e.kind === 'invalid' ? A2A_ERR.INVALID_PARAMS : A2A_ERR.TASK_NOT_FOUND, e.message);
+    throw e;
+  }
+}
+
+/** The status a push carries: taskOf's projection, as a TaskStatusUpdateEvent. */
+function statusOf(host: Host, run: RunRow): { state: string; update: Record<string, unknown> } {
+  const task = taskOf(host, run);
+  const status = task['status'] as { state: string };
+  return { state: status.state, update: { taskId: run.run_id, contextId: task['contextId'], status } };
+}
+
+/** Wire the push worker onto the host's live event bus (server.ts boot). */
+export function startA2APush(host: Host): void {
+  if (host.config.a2aPush) subscribePush(host, (run) => statusOf(host, run));
+}
+
 /** RFC 0202 §D.7 — the one refusal for a `tenant` that is not a routing value in the caller's inventory. */
 const UNROUTED_TENANT = (): RpcError => new RpcError(A2A_ERR.INVALID_PARAMS, 'tenant does not name an agent this caller can address');
 
@@ -412,7 +450,8 @@ async function dispatch(host: Host, subject: Subject, method: string, params: Re
     case 'GetTaskPushNotificationConfig':
     case 'ListTaskPushNotificationConfigs':
     case 'DeleteTaskPushNotificationConfig':
-      throw new RpcError(A2A_ERR.PUSH_NOT_SUPPORTED, `${method} requires a2a.pushNotifications, which this host does not advertise`);
+      if (!host.config.a2aPush) throw new RpcError(A2A_ERR.PUSH_NOT_SUPPORTED, `${method} requires a2a.pushNotifications, which this host does not advertise`);
+      return pushMethod(host, subject, method, params);
     case 'GetExtendedAgentCard':
       if (!agentCardsAdvertised(host)) throw new RpcError(A2A_ERR.EXTENDED_CARD_NOT_CONFIGURED, 'capabilities.extendedAgentCard is false on this host');
       return agent === null ? agentCard(host, baseUrl) : perAgentCard(host, baseUrl, agent);
