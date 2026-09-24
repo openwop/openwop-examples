@@ -30,6 +30,7 @@ export function effectSeamManifest(host: Host): Record<string, unknown> {
     seams: [
       { seam: 'http.fetch', kind: 'http', guarded: true, guardedBy: 'effects-ledger:recorded-outcome (effects.ts performHttpFetch)', branchReFires: false, note: "the core.httpFetch node. A replay fork resolves the source run's recorded outcome keyed (sourceRunId, nodeId, attempt). A BRANCH does not re-fire it either: the Layer-2 key is the business identity and carries no runId, so a branch reaching the same operation resolves to the recorded outcome (idempotency.md §Layer 2 Keying) rather than calling out." },
       { seam: 'webhook.fanout', kind: 'webhook-fanout', guarded: true, guardedBy: 'fanout-guard:replay-ness-of-the-run (webhooks.ts subscribeFanout)', branchReFires: true, note: 'a replay fork\'s events are never delivered; a branch delivers only events >= fromSeq' },
+      ...(host.config.a2aPush ? [{ seam: 'a2a.push', kind: 'webhook-fanout', guarded: true, guardedBy: 'push-guard:replay-ness-of-the-run + configs keyed on their own task (a2a-push.ts subscribePush)', branchReFires: false, note: 'RFC 0214: a replay fork\'s events are never pushed, and no fork (replay or branch) inherits a source task\'s push configs, so a fork never pushes' }] : []),
     ],
   };
 }

@@ -60,9 +60,13 @@ if [ -n "$PUBLIC" ]; then
     [ -n "${!v:-}" ] || { echo "PUBLIC=1 needs $v - a fixture left on loopback is unreachable through a closed guard and its rows record blocked"; exit 1; }
   done
   ALLOW_PRIVATE=0; RELAXATIONS=''; IDP_FOR_HOST="$IDP_PUBLIC_URL"
+  # RFC 0214: the certifying cut advertises a2a.pushNotifications so the push legs run against a
+  # closed guard; the loopback lane leaves it off (a push to a loopback receiver is exactly what
+  # the guard refuses), and so keeps exercising the unadvertised -32003 refusal leg.
+  A2A_PUSH=1
   echo "POSTURE: PUBLIC - egress guard CLOSED, no relaxation; this cut can certify"
 else
-  ALLOW_PRIVATE=1; IDP_FOR_HOST="$IDP"
+  ALLOW_PRIVATE=1; IDP_FOR_HOST="$IDP"; A2A_PUSH=0
   RELAXATIONS='[{"obligation":"webhooks.egress-guard","durability":"session","reason":"loopback conformance cut: OPENWOP_WEBHOOK_ALLOW_PRIVATE opens this host egress guard (scheme and private-address refusal) for webhook registration and delivery, the http.fetch effect, SAML/SCIM and A2A/MCP interop, because every suite fixture is a loopback listener"}]'
   echo "POSTURE: LOOPBACK REGRESSION LANE - egress guard OPEN and DECLARED; openwop-core-standard will NOT certify. Use PUBLIC=1 for evidence."
 fi
@@ -97,7 +101,7 @@ trap cleanup EXIT
 SUP_LOG="$(mktemp -t v2ref-supervisor.XXXXXX)"
 CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 \
-OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
+OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
 OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" \
   node scripts/supervisor.mjs --restart-ms 1000 --log "$SUP_LOG" >/tmp/cut-host.log 2>&1 &
 HOST_PID=$!
