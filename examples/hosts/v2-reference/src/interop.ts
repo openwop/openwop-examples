@@ -81,17 +81,28 @@ export function audit(host: Host, run: RunRow, protocol: Protocol, peerUrl: stri
   appendEvent(host, run, 'negotiation.decided', { protocol, outcome: d.outcome, ...(d.outcome === 'accepted' ? { version: d.version, reason: 'ok' } : { reason: d.reason }), floor, peerDigest: originDigest(peerUrl), at: nowIso() });
 }
 
-async function post(host: Host, url: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; json: Record<string, unknown> | null }> {
-  const res = await guardedRequest(new URL(url), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: 5000, allowPrivate: host.config.webhookAllowPrivate });
+/**
+ * Per-request budget for an interop peer (A2A / MCP). 20 s, the effect budget
+ * #80 settled on, not 5 s: on the 2026-09-24 public cut (suite 2.37.1) the MRTR
+ * ceiling leg — five sequential tools/call rounds to the suite's MCP fake
+ * through the operator's tunnel — failed `400` where every loopback run passes.
+ * A timed-out round resolves `status: 0` with an empty body, which the MRTR
+ * loop read as "the MCP server refused tools/call". The transport error now
+ * travels in `transportError` so a timeout is never reported as a refusal.
+ */
+const INTEROP_TIMEOUT_MS = 20_000;
+type PeerReply = { status: number; json: Record<string, unknown> | null; transportError?: string };
+async function post(host: Host, url: string, headers: Record<string, string>, body: unknown): Promise<PeerReply> {
+  const res = await guardedRequest(new URL(url), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: INTEROP_TIMEOUT_MS, allowPrivate: host.config.webhookAllowPrivate });
   let json: Record<string, unknown> | null = null;
   try { json = res.body ? (JSON.parse(res.body) as Record<string, unknown>) : null; } catch { json = null; }
-  return { status: res.status, json };
+  return { status: res.status, json, ...(res.error === undefined ? {} : { transportError: res.error }) };
 }
-async function get(host: Host, url: string, headers: Record<string, string>): Promise<{ status: number; json: Record<string, unknown> | null }> {
-  const res = await guardedRequest(new URL(url), { method: 'GET', headers: { Accept: 'application/json', ...headers }, timeoutMs: 5000, allowPrivate: host.config.webhookAllowPrivate });
+async function get(host: Host, url: string, headers: Record<string, string>): Promise<PeerReply> {
+  const res = await guardedRequest(new URL(url), { method: 'GET', headers: { Accept: 'application/json', ...headers }, timeoutMs: INTEROP_TIMEOUT_MS, allowPrivate: host.config.webhookAllowPrivate });
   let json: Record<string, unknown> | null = null;
   try { json = res.body ? (JSON.parse(res.body) as Record<string, unknown>) : null; } catch { json = null; }
-  return { status: res.status, json };
+  return { status: res.status, json, ...(res.error === undefined ? {} : { transportError: res.error }) };
 }
 
 function refuse(protocol: Protocol, requested: string, supported: readonly string[], runId: string, reason: string): never {
@@ -203,7 +214,7 @@ export async function mcpInvoke(host: Host, tenant: string, subject: Subject | n
     const res = await post(host, serverUrl, headers, { jsonrpc: '2.0', id: 2 + rounds, method: 'tools/call', params });
     const r = res.json?.['result'] as Record<string, unknown> | undefined;
     const e = res.json?.['error'];
-    if (!r || e) throw err('validation_error', `the MCP server refused tools/call under ${d.version}`, { serverStatus: res.status, error: e ?? null, runId: run.run_id });
+    if (!r || e) throw err('validation_error', `the MCP server refused tools/call under ${d.version}`, { serverStatus: res.status, error: e ?? null, runId: run.run_id, ...(res.transportError === undefined ? {} : { transportError: res.transportError }) });
     if (r['resultType'] !== 'input_required') {
       return { status: 200, body: { negotiatedVersion: d.version, protocol: 'mcp', runId: run.run_id, peerDigest: originDigest(serverUrl), result: r, ...(inputRequiredSeen ? { mrtr: { inputRequiredSeen, retried, requestStateEchoed, rounds, result: r } } : {}) } };
     }
