@@ -146,7 +146,9 @@ describe('A2A JSON-RPC', () => {
     const unknown = await a2a('GetTask', { id: 'openwop-reference-tenant/AAAAAAAAAAAAAAAAAAAAAAAA' });
     const foreign = await a2a('GetTask', { id: mine.id }, { key: KB });
     const segment = await a2a('GetTask', { id: `zz-other/${mine.id.split('/')[1]}` });
-    for (const r of [unknown, foreign, segment]) { expect(r.status).toBe(200); expect(r.error).toEqual({ code: -32001, message: 'task not found' }); }
+    // RFC 0211 §D: byte-identical details — data is [ErrorInfo TASK_NOT_FOUND], nothing that tells unknown from unreadable.
+    const want = { code: -32001, message: 'task not found', data: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'TASK_NOT_FOUND', domain: 'a2a-protocol.org' }] };
+    for (const r of [unknown, foreign, segment]) { expect(r.status).toBe(200); expect(r.error).toEqual(want); }
     await a2a('CancelTask', { id: mine.id });
   });
   it('ListTasks is the caller\'s tenant only; tenant never selects', async () => {
@@ -162,17 +164,30 @@ describe('A2A JSON-RPC', () => {
     expect(all.result.tasks.every((t: { id: string }) => t.id.startsWith('openwop-reference-tenant-b/'))).toBe(true);
     await a2a('CancelTask', { id: mine.id });
   });
-  it('refuses unadvertised rows with their own codes; a foreign A2A-Version is -32009; unauthenticated is the 401 envelope', async () => {
+  it('refuses unadvertised rows with their own codes; a foreign A2A-Version is -32009; unauthenticated is a 401 in JSON-RPC shape', async () => {
     expect((await a2a('SubscribeToTask', { id: 'x' })).error?.code).toBe(-32004);
     expect((await a2a('SendStreamingMessage', { message: msg() })).error?.code).toBe(-32004);
     expect((await a2a('SendMessage', { message: msg(), configuration: { returnImmediately: true } })).error?.code).toBe(-32004);
-    expect((await a2a('CreateTaskPushNotificationConfig', {})).error?.code).toBe(-32003);
+    for (const m of ['CreateTaskPushNotificationConfig', 'GetTaskPushNotificationConfig', 'ListTaskPushNotificationConfigs', 'DeleteTaskPushNotificationConfig']) {
+      const r = await a2a(m, {});
+      expect([r.error?.code, r.error?.data?.[0]?.reason]).toEqual([-32003, 'PUSH_NOTIFICATION_NOT_SUPPORTED']);
+    }
     if (!running.host.artifacts.agentCardsFacet) expect((await a2a('GetExtendedAgentCard', {})).error?.code).toBe(-32007);
     expect((await a2a('NoSuchMethod', {})).error?.code).toBe(-32601);
-    expect((await a2a('GetTask', { id: 'x' }, { version: '0.3' })).error?.code).toBe(-32009);
+    const v = await a2a('GetTask', { id: 'x' }, { version: '0.3' });
+    expect(v.error?.code).toBe(-32009);
+    // RFC 0211 §A/§E: ErrorInfo VERSION_NOT_SUPPORTED; supportedVersions comma-joined in map<string,string> metadata.
+    expect(v.error?.data).toEqual([{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'VERSION_NOT_SUPPORTED', domain: 'a2a-protocol.org', metadata: { supportedVersions: '1.0' } }]);
+    // RFC 0211 §C: a refusal before dispatch on the card-listed interface URL keeps its HTTP status
+    // and the RFC 0200 challenge, but is never the OpenWOP { error, message } envelope.
     const anon = await fetch(`${B}/a2a/jsonrpc`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(anon.status).toBe(401);
-    expect(((await anon.json()) as { error: string }).error).toBe('unauthenticated');
+    expect(anon.headers.get('www-authenticate')).toMatch(/^Bearer\b/);
+    const body = (await anon.json()) as { jsonrpc?: string; error?: { code?: number; data?: Array<{ reason?: string }> } };
+    expect(typeof (body as { error?: unknown }).error).toBe('object');
+    expect([body.jsonrpc, body.error?.code, body.error?.data?.[0]?.reason]).toEqual(['2.0', -32600, 'UNAUTHENTICATED']);
+    // A standard JSON-RPC error (-32601) is not an A2A error: no ErrorInfo is invented for it.
+    expect((await a2a('NoSuchMethod', {})).error?.data).toBeUndefined();
   });
 });
 
@@ -309,5 +324,17 @@ describe('MCP Tasks (RFC 0198)', () => {
     await call;
     expect(await waitStatus(runId as string, ['cancelled', 'completed'])).toBe('cancelled');
     expect((await events(runId as string)).find((e) => e.type === 'run.cancelled')?.payload.reason).toBe('mcp-request-cancelled');
+  });
+});
+
+describe('RFC 0211 §F — the host as A2A client reads a peer error in either shape', () => {
+  it('readPeerError takes the reason and supportedVersions from Any[] and from the legacy object', async () => {
+    const { readPeerError } = await import('../src/interop.js');
+    const arr = readPeerError({ code: -32009, message: 'x', data: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'VERSION_NOT_SUPPORTED', domain: 'a2a-protocol.org', metadata: { supportedVersions: '1.0, 0.3' } }] });
+    expect(arr).toEqual({ code: -32009, reason: 'VERSION_NOT_SUPPORTED', supportedVersions: ['1.0', '0.3'] });
+    const legacy = readPeerError({ code: -32009, message: 'x', data: { reason: 'VERSION_NOT_SUPPORTED', domain: 'a2a-protocol.org', supportedVersions: ['1.0'] } });
+    expect(legacy).toEqual({ code: -32009, reason: 'VERSION_NOT_SUPPORTED', supportedVersions: ['1.0'] });
+    expect(readPeerError({ code: -32001, message: 'x' })).toEqual({ code: -32001, reason: null, supportedVersions: [] });
+    expect(readPeerError(null)).toEqual({ code: null, reason: null, supportedVersions: [] });
   });
 });

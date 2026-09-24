@@ -41,7 +41,7 @@ import { principalRef } from './identity.js';
 import { nowIso, opaque } from './ids.js';
 import { inboundTraceContext, type TraceContext } from './trace-context.js';
 import { acceptRun } from './runs.js';
-import { route, type Ctx, type Reply, type Route } from './router.js';
+import { route, JSONRPC_INTERFACE_PATHS, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host, type Subject } from './host.js';
 import type { RunRow } from './store.js';
 import { A2A_FACET } from './interop.js';
@@ -67,8 +67,38 @@ export const A2A_ERR = {
   VERSION_NOT_SUPPORTED: -32009,
 } as const;
 
+/**
+ * RFC 0211 (interop.md §"The operation mappings", A2A error details): an A2A
+ * error's `error.data` is an array of ProtoJSON `Any`, carrying exactly one
+ * `google.rpc.ErrorInfo` whose `reason` is the interop-map `a2a.errors` row's
+ * and whose `domain` is `a2a-protocol.org` (A2A 1.0.1 §9.5). The standard
+ * JSON-RPC codes (-32700…-32603) are not A2A errors and carry no ErrorInfo.
+ */
+export const ERROR_INFO_TYPE = 'type.googleapis.com/google.rpc.ErrorInfo';
+export const A2A_ERROR_DOMAIN = 'a2a-protocol.org';
+export const A2A_REASON: Readonly<Record<number, string>> = {
+  [-32001]: 'TASK_NOT_FOUND',
+  [-32002]: 'TASK_NOT_CANCELABLE',
+  [-32003]: 'PUSH_NOTIFICATION_NOT_SUPPORTED',
+  [-32004]: 'UNSUPPORTED_OPERATION',
+  [-32005]: 'CONTENT_TYPE_NOT_SUPPORTED',
+  [-32006]: 'INVALID_AGENT_RESPONSE',
+  [-32007]: 'EXTENDED_AGENT_CARD_NOT_CONFIGURED',
+  [-32008]: 'EXTENSION_SUPPORT_REQUIRED',
+  [-32009]: 'VERSION_NOT_SUPPORTED',
+};
+
+/** The JSON-RPC `error` member for `code`: A2A codes carry `data: [ErrorInfo]`; metadata is `map<string,string>`. */
+export function rpcErrorMember(code: number, message: string, metadata?: Record<string, string>): Record<string, unknown> {
+  const reason = A2A_REASON[code];
+  if (reason === undefined) return { code, message };
+  const info: Record<string, unknown> = { '@type': ERROR_INFO_TYPE, reason, domain: A2A_ERROR_DOMAIN };
+  if (metadata !== undefined && Object.keys(metadata).length > 0) info['metadata'] = metadata;
+  return { code, message, data: [info] };
+}
+
 class RpcError extends Error {
-  constructor(readonly code: number, message: string) { super(message); }
+  constructor(readonly code: number, message: string, readonly metadata?: Record<string, string>) { super(message); }
 }
 
 /** The run status → Task.status.state projection (interop-map.json a2a.taskState). */
@@ -392,7 +422,7 @@ async function dispatch(host: Host, subject: Subject, method: string, params: Re
 }
 
 type RpcId = string | number | null;
-const rpcError = (id: RpcId, code: number, message: string): Reply => ({ status: 200, body: { jsonrpc: '2.0', id, error: { code, message } }, headers: { 'A2A-Version': A2A_VERSION } });
+const rpcError = (id: RpcId, code: number, message: string, metadata?: Record<string, string>): Reply => ({ status: 200, body: { jsonrpc: '2.0', id, error: rpcErrorMember(code, message, metadata) }, headers: { 'A2A-Version': A2A_VERSION } });
 
 async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
   const subject = ctx.subject;
@@ -404,7 +434,8 @@ async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
   const id: RpcId = typeof rawId === 'string' || typeof rawId === 'number' ? rawId : null;
   const version = ctx.header('a2a-version');
   if (version !== null && version.trim() !== '' && version.trim() !== A2A_VERSION) {
-    return rpcError(id, A2A_ERR.VERSION_NOT_SUPPORTED, `A2A-Version ${version.trim()} is not served; this interface serves ${A2A_VERSION}`);
+    // RFC 0211 §E: the versions this interface serves, comma-joined (ErrorInfo.metadata is map<string,string>).
+    return rpcError(id, A2A_ERR.VERSION_NOT_SUPPORTED, `A2A-Version ${version.trim()} is not served; this interface serves ${A2A_VERSION}`, { supportedVersions: A2A_VERSION });
   }
   const params = parsed['params'] === undefined ? {} : parsed['params'];
   if (!isObject(params)) return rpcError(id, A2A_ERR.INVALID_PARAMS, 'params MUST be an object');
@@ -416,7 +447,7 @@ async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
     const result = await dispatch(ctx.host, subject, parsed['method'], params, ctx.baseUrl, trace);
     return { status: 200, body: { jsonrpc: '2.0', id, result }, headers: { 'A2A-Version': A2A_VERSION } };
   } catch (e) {
-    if (e instanceof RpcError) return rpcError(id, e.code, e.message);
+    if (e instanceof RpcError) return rpcError(id, e.code, e.message, e.metadata);
     if (e instanceof HostError) { const r = fromHostError(e); return rpcError(id, r.code, r.message); }
     process.stderr.write(`[a2a] ${String((e as Error)?.stack ?? e)}\n`);
     return rpcError(id, A2A_ERR.INTERNAL, 'the host failed to serve the request');
@@ -424,6 +455,7 @@ async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
 }
 
 export function a2aServerRoutes(): Route[] {
+  JSONRPC_INTERFACE_PATHS.add(A2A_JSONRPC_PATH);
   return [
     route('GET', AGENT_CARD_PATH, false, cardHandler, 'both'),
     route('POST', A2A_JSONRPC_PATH, true, jsonRpcHandler, 'both'),
