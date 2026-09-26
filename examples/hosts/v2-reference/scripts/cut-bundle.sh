@@ -56,7 +56,7 @@ if [ -n "$PUBLIC" ]; then
   # three suite-owned doubles in 2.36.0 and this guard did not know about them, so
   # PUBLIC=1 happily proceeded with them on loopback and seven rows failed their
   # POSITIVE controls. The guard exists precisely to stop that, and it could not.
-  for v in OPENWOP_WEBHOOK_RECEIVER_URL OPENWOP_WEBHOOK_RECEIVER_PORT OPENWOP_A2A_FAKE_PEER_URL OPENWOP_A2A_FAKE_PEER_PORT OPENWOP_MCP_FAKE_SERVER_URL OPENWOP_MCP_FAKE_SERVER_PORT IDP_PUBLIC_URL OPENWOP_OAUTH_AS_URL OPENWOP_OAUTH_AS_PORT OPENWOP_OAUTH_AS2_URL OPENWOP_OAUTH_AS2_PORT OPENWOP_OAUTH_RESOURCE_URL OPENWOP_OAUTH_RESOURCE_PORT; do
+  for v in OPENWOP_WEBHOOK_RECEIVER_URL OPENWOP_WEBHOOK_RECEIVER_PORT OPENWOP_A2A_FAKE_PEER_URL OPENWOP_A2A_FAKE_PEER_PORT OPENWOP_MCP_FAKE_SERVER_URL OPENWOP_MCP_FAKE_SERVER_PORT IDP_PUBLIC_URL OPENWOP_OAUTH_AS_URL OPENWOP_OAUTH_AS_PORT OPENWOP_OAUTH_AS2_URL OPENWOP_OAUTH_AS2_PORT OPENWOP_OAUTH_RESOURCE_URL OPENWOP_OAUTH_RESOURCE_PORT OPENWOP_HOST_PUBLIC_URL; do
     [ -n "${!v:-}" ] || { echo "PUBLIC=1 needs $v - a fixture left on loopback is unreachable through a closed guard and its rows record blocked"; exit 1; }
   done
   ALLOW_PRIVATE=0; RELAXATIONS=''; IDP_FOR_HOST="$IDP_PUBLIC_URL"
@@ -100,6 +100,9 @@ trap cleanup EXIT
 # host has never read — it only worked because 3838 is also the default.)
 SUP_LOG="$(mktemp -t v2ref-supervisor.XXXXXX)"
 CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
+# RFC 0199 §C.2: the host advertises oauth.credentialInterrupt only with an https
+# public base; under PUBLIC=1 that is the host tunnel (suite: OPENWOP_HOST_PUBLIC_URL).
+OPENWOP_PUBLIC_BASE_URL="${OPENWOP_HOST_PUBLIC_URL:-}" \
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 \
 OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
 OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" \

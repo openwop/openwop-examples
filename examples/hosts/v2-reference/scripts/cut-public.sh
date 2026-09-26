@@ -35,9 +35,13 @@ RX_PORT=3841; A2A_PORT=3842; MCP_PORT=3843; IDP_PORT="${IDP_PORT:-3839}"
 # controls (the host could not complete a genuine grant) and four discovery rows
 # blocked. Nothing was wrong with the host; the fixtures were simply unreachable.
 AS_PORT=3844; AS2_PORT=3845; RES_PORT=3846
+# The host itself (cut-bundle.sh PORT). RFC 0199 §C.2: a credential interrupt's
+# connectUrl is on the host's own https origin, so the host needs a public front
+# to advertise oauth.credentialInterrupt; the suite still drives loopback.
+HOST_PORT=3838
 LOGDIR="$(mktemp -d -t v2ref-tunnels.XXXXXX)"
 PIDS=()
-PORTS=("$RX_PORT" "$A2A_PORT" "$MCP_PORT" "$IDP_PORT" "$AS_PORT" "$AS2_PORT" "$RES_PORT")
+PORTS=("$RX_PORT" "$A2A_PORT" "$MCP_PORT" "$IDP_PORT" "$AS_PORT" "$AS2_PORT" "$RES_PORT" "$HOST_PORT")
 # TEARDOWN IS THE CONDITION THIS SCRIPT IS ALLOWED TO RUN UNDER, so it is done
 # three ways and then CHECKED. The first version of this script recorded each
 # tunnel's pid inside `$(open_tunnel ...)` - a SUBSHELL - so the parent's PIDS
@@ -82,6 +86,7 @@ open_tunnel idp "$IDP_PORT";      IDP_URL="$TUNNEL_URL"
 open_tunnel as "$AS_PORT";        AS_URL="$TUNNEL_URL"
 open_tunnel as2 "$AS2_PORT";      AS2_URL="$TUNNEL_URL"
 open_tunnel resource "$RES_PORT"; RES_URL="$TUNNEL_URL"
+open_tunnel host "$HOST_PORT";     HOST_URL="$TUNNEL_URL"
 # A quick tunnel's name is not resolvable the instant cloudflared prints it. The
 # first run of this script handed the host an IdP URL seconds old, the host's
 # resolver answered ENOTFOUND, and the SCIM preflight read 500. curl exit 6 is
@@ -131,4 +136,5 @@ OPENWOP_MCP_FAKE_SERVER_URL="$MCP_URL" OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_PORT" 
 OPENWOP_OAUTH_AS_URL="$AS_URL" OPENWOP_OAUTH_AS_PORT="$AS_PORT" \
 OPENWOP_OAUTH_AS2_URL="$AS2_URL" OPENWOP_OAUTH_AS2_PORT="$AS2_PORT" \
 OPENWOP_OAUTH_RESOURCE_URL="$RES_URL" OPENWOP_OAUTH_RESOURCE_PORT="$RES_PORT" \
+OPENWOP_HOST_PUBLIC_URL="$HOST_URL" \
   ./scripts/cut-bundle.sh "$OUT"
