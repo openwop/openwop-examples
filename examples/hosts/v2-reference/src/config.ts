@@ -102,7 +102,7 @@ export const DEFAULT_TENANT_B = 'openwop-reference-tenant-b';
 // was not on this machine either — the third rotation for the same reason. The
 // key is gitignored and lived only in a worktree that was later removed. From
 // -4 the private half is ALSO kept outside the repository, in the steward's
-// `~/.openwop-private-keys/v2-reference-4.host.pem`, so a later cut copies it
+// `~/.openwop-keys/v2-reference-4.host.pem`, so a later cut copies it
 // into `keys/host.pem` instead of rotating; -3's public key stays in git history.
 export const BUNDLE_SIGNING_KEY_ID = 'v2-reference-4';
 export const KEYS_DIR = new URL('../keys/', import.meta.url).pathname;
