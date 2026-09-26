@@ -10,6 +10,7 @@ import { MIN_CLIENT_VERSION, SERVED_VERSIONS, V1_RETIRED, V1_VERSION, V2_VERSION
 import { HostError, err } from './errors.js';
 import { authenticate, bearerOf } from './identity.js';
 import { IDEMPOTENCY_KEY, unprojectBoundId } from './ids.js';
+import { consumeHold } from './idempotency-hold.js';
 import { challengeFor } from './protected-resource.js';
 import { scopeForRoute } from './scopes.js';
 import type { Host, Subject } from './host.js';
@@ -301,6 +302,10 @@ export async function withIdempotency(ctx: Ctx, endpoint: string, digestInput: s
   if (!store.claimIdempotency(tenant, endpoint, key, digest)) throw err('idempotency_in_flight', 'a concurrent request under this Idempotency-Key is in flight', undefined, { 'Retry-After': '1' });
   let reply: Reply;
   try {
+    // RFC 0213 §B witness seam (idempotency-hold.ts): the claim stays in flight for
+    // an armed hold; the 409 a concurrent same-key request gets is the branch above.
+    const holdMs = consumeHold(ctx.host, tenant, key);
+    if (holdMs > 0) await new Promise((ok) => setTimeout(ok, holdMs));
     reply = await fn();
   } catch (e) {
     // RFC 0201 §D.16: a refused endpoint verification is a FINAL outcome (retriable: false) — a
