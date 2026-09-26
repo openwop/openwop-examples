@@ -58,6 +58,13 @@ jobs:
           # says the host still behaves, never that it certifies. The certifying
           # cut is scripts/cut-public.sh, guard closed, run by an operator.
           OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'
+          # RFC 0199 (suite >= 2.36.0): the suite's OAuth authorization-server doubles
+          # listen on loopback, and the host's token request goes through its own egress
+          # guard (src/oauth.ts tokenRequest), which refuses them unless this is set. The
+          # certifying cut fronts them over https instead and leaves this guard CLOSED
+          # (cut-public.sh). Unset, the first 2.40.0 run failed 5 RFC 0199 positive controls
+          # with "the token endpoint refused the exchange" (openwop-examples#89).
+          OPENWOP_OAUTH_ALLOW_PRIVATE: 'true'
         run: |
           npm start > /tmp/v2-reference.log 2>&1 &
           for i in {1..30}; do curl -sf http://127.0.0.1:3838/.well-known/openwop >/dev/null && exit 0; sleep 1; done
@@ -122,6 +129,13 @@ jobs:
         env:
           OPENWOP_V1_RETIRED: '1'
           OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'
+          # RFC 0199 (suite >= 2.36.0): the suite's OAuth authorization-server doubles
+          # listen on loopback, and the host's token request goes through its own egress
+          # guard (src/oauth.ts tokenRequest), which refuses them unless this is set. The
+          # certifying cut fronts them over https instead and leaves this guard CLOSED
+          # (cut-public.sh). Unset, the first 2.40.0 run failed 5 RFC 0199 positive controls
+          # with "the token endpoint refused the exchange" (openwop-examples#89).
+          OPENWOP_OAUTH_ALLOW_PRIVATE: 'true'
           OPENWOP_PORT: '3839'
           OPENWOP_DB_PATH: /tmp/v2-reference-retired.sqlite
         run: |
