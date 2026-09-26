@@ -125,7 +125,13 @@ echo "letting the seven names settle for ${SETTLE_SECONDS}s before anything look
 sleep "$SETTLE_SECONDS"
 for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL" "$AS_URL" "$AS2_URL" "$RES_URL"; do wait_resolves "$u"; done
 echo "all seven public names resolve"
-[ "${#PIDS[@]}" -eq 7 ] || { echo "expected 7 tunnel pids recorded in this shell, have ${#PIDS[@]} - refusing to continue with ingress the trap cannot close" >&2; exit 1; }
+# The expected count is the number of top-level `open_tunnel` calls in THIS
+# script, not a literal: #86 added the host tunnel (8th) without updating a
+# hardcoded 7, and the check then refused a correct run. It still catches the
+# failure it exists for - a tunnel opened in a subshell, whose pid the trap
+# cannot see - because such a call never appends to PIDS.
+EXPECTED_TUNNELS="$(grep -cE '^open_tunnel ' "$0")"
+[ "${#PIDS[@]}" -eq "$EXPECTED_TUNNELS" ] || { echo "expected $EXPECTED_TUNNELS tunnel pids recorded in this shell, have ${#PIDS[@]} - refusing to continue with ingress the trap cannot close" >&2; exit 1; }
 printf '  receiver %s -> :%s\n  a2a      %s -> :%s\n  mcp      %s -> :%s\n  idp      %s -> :%s\n  as       %s -> :%s\n  as2      %s -> :%s\n  resource %s -> :%s\n' "$RX_URL" "$RX_PORT" "$A2A_URL" "$A2A_PORT" "$MCP_URL" "$MCP_PORT" "$IDP_URL" "$IDP_PORT" "$AS_URL" "$AS_PORT" "$AS2_URL" "$AS2_PORT" "$RES_URL" "$RES_PORT"
 
 # The receiver front carries a path; the fakes and the IdP are bare origins.
