@@ -6,6 +6,7 @@
  *   POST sample/event-log/seed                  seedEra2EventLog (RFC 0176)
  *   POST sample/webhooks/receive                receiveWebhookDelivery (RFC 0176 §D.2)
  *   POST sample/auth/credential/{mint,revoke}   the per-lane revoke seam (RFC 0170 §B.3)
+ *   POST sample/test/idempotency/hold            armIdempotencyHold — RFC 0213 §B in-flight witness (idempotency-hold.ts)
  *   POST sample/test/workload-identity/resolve  §20 workload identity (RFC 0154 / 0170 §B.4)
  *   POST sample/test/sandbox-{load,invoke}      §8 sandbox seam (RFC 0173 §B; sandbox.ts)
  *   POST sample/{a2a,mcp}/invoke                §22/§23 negotiation drivers (RFC 0175; interop.ts)
@@ -19,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { EVENT_SCHEMA_VERSION, SEAMS_PREFIX } from './config.js';
 import { err } from './errors.js';
 import { mintCredential, resolveWorkloadIdentity, revokeCredential } from './identity.js';
-import { nowIso, opaque, tenantBound } from './ids.js';
+import { IDEMPOTENCY_KEY, nowIso, opaque, tenantBound } from './ids.js';
 import { installedPacks, publishTestPack } from './packs.js';
 import { effectSeamManifest } from './effects.js';
 import { scheduleRun } from './executor.js';
@@ -34,6 +35,7 @@ import { a2aInvoke, mcpInvoke } from './interop.js';
 import { unregisterChainPack } from './chains.js';
 import { admitSurface } from './a2ui.js';
 import { loadRun } from './runs.js';
+import { armHold, MAX_HOLD_MS } from './idempotency-hold.js';
 import { beginGrant, configureProvider, expireAccessToken, oauthSupported, registerReachProvider } from './oauth.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
@@ -140,6 +142,22 @@ async function effectRetryRoute(ctx: Ctx): Promise<Reply> {
   const effectId = rows[0]?.effect_id;
   if (effectId === undefined) throw err('internal_error', 'the seam run recorded no effect — the ledger is the witness this seam exists to produce');
   return { status: 201, body: { runId, effectId } };
+}
+
+/**
+ * `armIdempotencyHold` (RFC 0213 §B witness) — arms a single-use hold so the
+ * caller tenant's NEXT `POST /runs` under `key` keeps its Layer-1 claim in flight
+ * for `holdMs`. The seam answers only its own 201; the 409 a concurrent same-key
+ * create receives comes from `withIdempotency`'s real in-flight branch.
+ */
+async function idempotencyHoldRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ key?: unknown; holdMs?: unknown }>();
+  for (const k of Object.keys(body)) if (k !== 'key' && k !== 'holdMs') throw err('validation_error', `unknown key ${k}`);
+  if (typeof body.key !== 'string' || !IDEMPOTENCY_KEY.test(body.key)) throw err('validation_error', 'key MUST be an Idempotency-Key (^[A-Za-z0-9._~-]{22,128}$)');
+  if (typeof body.holdMs !== 'number' || !Number.isInteger(body.holdMs) || body.holdMs < 1 || body.holdMs > MAX_HOLD_MS) throw err('validation_error', `holdMs MUST be an integer in 1..${MAX_HOLD_MS}`);
+  const tenant = ctx.subject?.tenant ?? ctx.host.config.tenant;
+  armHold(ctx.host, tenant, body.key, body.holdMs);
+  return { status: 201, body: { key: body.key, holdMs: body.holdMs } };
 }
 
 async function mint(ctx: Ctx): Promise<Reply> {
@@ -335,6 +353,7 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/webhooks/receive`, true, receive),
     route('POST', `${p}/sample/effect-seams/fire`, true, fireEffectSeamRoute),
     route('POST', `${p}/sample/test/idempotency/effect-retry`, true, effectRetryRoute),
+    route('POST', `${p}/sample/test/idempotency/hold`, true, idempotencyHoldRoute),
     route('POST', `${p}/sample/auth/credential/mint`, true, mint),
     route('POST', `${p}/sample/auth/credential/revoke`, true, revoke),
     route('POST', `${p}/sample/test/workload-identity/resolve`, true, workloadResolve),
