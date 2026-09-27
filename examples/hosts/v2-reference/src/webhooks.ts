@@ -320,7 +320,12 @@ export function subscribeFanout(host: Host): void {
       // bare run id and the v1 owner echo it has always received.
       const major = sub.contract_major === 2 ? 2 : 1;
       const runId = major === 1 ? e.run.runId.slice(e.run.runId.indexOf('/') + 1) : e.run.runId;
-      const body = JSON.stringify({ runId, workspaceId: runRow?.owner_json ? ((JSON.parse(runRow.owner_json) as { workspace?: string }).workspace ?? 'default') : 'default', event: docForMajor(e.doc, major) });
+      // webhooks.md §Delivery (v2): `workspaceId` is present exactly when RunSnapshot.owner.workspace is;
+      // nothing is substituted for an absent one. A major-1 subscription keeps the v1 wrapper, which
+      // always carried a workspaceId.
+      const workspace = runRow?.owner_json ? (JSON.parse(runRow.owner_json) as { workspace?: string }).workspace : undefined;
+      const workspaceField = workspace !== undefined ? { workspaceId: workspace } : major === 1 ? { workspaceId: 'default' } : {};
+      const body = JSON.stringify({ runId, ...workspaceField, event: docForMajor(e.doc, major) });
       // RFC 0201 §C.10: the message id is minted ONCE, with the delivery row, so every attempt —
       // and every attempt after a restart, which re-reads this row — carries the same id.
       host.store.insertDelivery({ delivery_id: tenantBound(e.run.tenant), webhook_id: sub.webhook_id, tenant: e.run.tenant, run_id: e.run.runId, sequence: e.doc.sequence, event_type: e.doc.type, body, attempts: 0, next_at: Date.now(), state: 'pending', last_status: null, last_error: null, created_at: nowIso(), updated_at: nowIso(), message_id: optedIn(sub) ? mintMessageId() : null });
