@@ -77,6 +77,18 @@ describe('discovery + negotiation', () => {
     const r426 = await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Client-Version': '0.0.1' });
     expect(r426.s).toBe(426); expect(r426.b.error).toBe('client_version_unsupported');
   });
+  it('RFC 0219: a malformed OpenWOP-Client-Version is treated as absent; a well-formed one below the floor is 426', async () => {
+    for (const v of ['abc', '1.0abc', '01.0']) {
+      const r = await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Client-Version': v });
+      expect(r.s, v).toBe(200);
+    }
+    const low = await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Client-Version': '0.0.1' });
+    expect(low.s).toBe(426); expect(low.b.error).toBe('client_version_unsupported'); expect(low.b.details.minClientVersion).toBe('1.0');
+    for (const v of ['1.0', '1.0.7', '2.3']) {
+      const r = await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Client-Version': v });
+      expect(r.s, v).toBe(200);
+    }
+  });
   it('serves /openapi.json under both majors and /.well-known/wop only under v1', async () => {
     expect((await call('GET', '/openapi.json')).s).toBe(200);
     expect((await call('GET', '/v1/openapi.json', undefined, { 'OpenWOP-Version': '1' })).s).toBe(200);

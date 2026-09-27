@@ -206,9 +206,10 @@ export class Router {
       }
       const client = req.headers['openwop-client-version'];
       if (typeof client === 'string' && client.trim() !== '') {
-        const m = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)/.exec(client.trim());
-        const announced = m ? `${m[1]}.${m[2]}` : '0.0';
-        if (versionLt(announced, MIN_CLIENT_VERSION)) throw err('client_version_unsupported', `the client announced ${client.trim()}, below minClientVersion ${MIN_CLIENT_VERSION}`, { minClientVersion: MIN_CLIENT_VERSION });
+        // RFC 0219: `<major>.<minor>[.<patch>]`, compared on major.minor only. A
+        // malformed value is treated as if the header were absent — never refused.
+        const m = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?$/.exec(client.trim());
+        if (m && versionLt(`${m[1]}.${m[2]}`, MIN_CLIENT_VERSION)) throw err('client_version_unsupported', `the client announced ${client.trim()}, below minClientVersion ${MIN_CLIENT_VERSION}`, { minClientVersion: MIN_CLIENT_VERSION });
       }
       const bucketKey = (req.headers['authorization'] as string | undefined) ?? req.socket.remoteAddress ?? 'anon';
       const taken = this.bucketFor(bucketKey).take();
