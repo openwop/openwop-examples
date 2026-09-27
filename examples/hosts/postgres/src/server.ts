@@ -45,6 +45,7 @@ import {
   logAudit,
   triggerCheckpointIfDue,
   verifyAuditChain,
+  toWireVerifyResult,
   defaultAuditOptions,
   type SigningKey,
   type AuditOptions,
@@ -4697,7 +4698,7 @@ async function handleAuditVerify(
   }
   const q = await querier();
   const result = await verifyAuditChain(q, fromSeq, toSeq, auditSigningKey());
-  sendJSON(res, 200, result);
+  sendJSON(res, 200, toWireVerifyResult(result));
 }
 
 async function handleEventsSse(

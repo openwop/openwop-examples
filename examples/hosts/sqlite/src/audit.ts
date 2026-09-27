@@ -596,6 +596,22 @@ export function verifyAuditChain(
 }
 
 /** Reasonable defaults for a reference host running fast conformance scenarios. */
+/**
+ * Project a {@link VerifyResult} onto the closed `audit-verify-result.schema.json`
+ * wire shape. The per-checkpoint `verified` bit is host-internal (the tamper
+ * test reads it); the schema's `Checkpoint` is `additionalProperties: false`
+ * and carries only checkpoint/atSequence/merkleRoot/signature. The aggregate
+ * verdict stays on the wire as the schema's OPTIONAL `checkpointsValid`.
+ */
+export function toWireVerifyResult(result: VerifyResult): Omit<VerifyResult, 'checkpoints'> & {
+  checkpoints: Array<Omit<VerifyResult['checkpoints'][number], 'verified'>>;
+} {
+  return {
+    ...result,
+    checkpoints: result.checkpoints.map(({ verified: _verified, ...wire }) => wire),
+  };
+}
+
 export function defaultAuditOptions(): AuditOptions {
   return {
     checkpointIntervalEntries: Number(
