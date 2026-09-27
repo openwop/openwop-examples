@@ -98,7 +98,7 @@ async function verifyEndpoint(host: Host, url: string, secret: string): Promise<
   }
 }
 
-export async function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): Promise<{ webhookId: string; signatureAlgorithms?: string[] }> {
+export async function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): Promise<{ webhookId: string; signatureAlgorithms?: string[]; secret?: string }> {
   const allowed = new Set(['url', 'events', 'secret', 'tags', 'signatureAlgorithms']);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw err('validation_error', `unknown key ${k} — the registration body is closed { url, events[], secret?, tags?, signatureAlgorithms? }`, { key: k });
   if (typeof body['url'] !== 'string') throw err('validation_error', 'url is REQUIRED');
@@ -151,8 +151,11 @@ export async function registerWebhook(host: Host, tenant: string, body: Record<s
     prev_secret_expires_at: null,
   };
   host.store.insertWebhook(row);
-  // §B.7 — echo the applied list whenever the request carried one; never the secret (§B.6).
-  return algorithms === undefined ? { webhookId: row.webhook_id } : { webhookId: row.webhook_id, signatureAlgorithms: algorithms };
+  // §B.7 — echo the applied list whenever the request carried one. A supplied secret is never
+  // echoed (RFC 0201 §B.6); a secret the host generated is returned here, once (RFC 0221) —
+  // otherwise the subscriber could never verify a delivery.
+  const generated = typeof body['secret'] === 'string' ? {} : { secret: row.secret };
+  return algorithms === undefined ? { webhookId: row.webhook_id, ...generated } : { webhookId: row.webhook_id, signatureAlgorithms: algorithms, ...generated };
 }
 
 /**
