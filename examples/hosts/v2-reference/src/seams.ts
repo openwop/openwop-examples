@@ -4,6 +4,7 @@
  * `conformance.seamsProfile`. Never part of the canonical API.
  *
  *   POST sample/event-log/seed                  seedEra2EventLog (RFC 0176)
+ *   POST sample/event-log/append                appendEra2Event — RFC 0176 §A writer-rule witness (§27): the PRODUCTION writer, seeded runs only
  *   POST sample/webhooks/receive                receiveWebhookDelivery (RFC 0176 §D.2)
  *   POST sample/auth/credential/{mint,revoke}   the per-lane revoke seam (RFC 0170 §B.3)
  *   POST sample/test/idempotency/hold            armIdempotencyHold — RFC 0213 §B in-flight witness (idempotency-hold.ts)
@@ -28,6 +29,7 @@ import { EVENT_LOG_SCHEMA_VERSION } from './config.js';
 import { TERMINAL } from './host.js';
 import { route, type Ctx, type Reply, type Route } from './router.js';
 import { verifyInbound } from './webhooks.js';
+import { appendEvent } from './events.js';
 import type { Host } from './host.js';
 import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
 import { samlValidate, scimProvision, subjectLink } from './saml-scim.js';
@@ -65,7 +67,38 @@ async function seedEra2(ctx: Ctx): Promise<Reply> {
     // Persisted VERBATIM: v1 type string, the given sequence, no translation at write time.
     ctx.host.store.insertEvent({ run_id: runId, sequence: raw['sequence'] as number, event_id: opaque(), type: raw['type'], payload_json: JSON.stringify(raw['payload']), timestamp: typeof raw['timestamp'] === 'string' ? raw['timestamp'] : nowIso(), node_id: typeof (raw['payload'] as { nodeId?: unknown })['nodeId'] === 'string' ? String((raw['payload'] as { nodeId: string }).nodeId) : null, causation_id: typeof raw['causationId'] === 'string' ? raw['causationId'] : null, schema_version: EVENT_SCHEMA_VERSION, engine_version: null });
   }
+  seededOf(ctx.host).add(runId);
   return { status: 201, body: { runId } };
+}
+
+/** Runs this host's seed seam created — the ONLY runs the append seam may touch (§27). */
+const SEEDED = new WeakMap<Host, Set<string>>();
+function seededOf(host: Host): Set<string> {
+  let s = SEEDED.get(host);
+  if (s === undefined) { s = new Set(); SEEDED.set(host, s); }
+  return s;
+}
+
+/**
+ * appendEra2Event (host-sample-test-seams.md §27). The seam is only the trigger:
+ * the event goes through `appendEvent`, the same writer every production append
+ * uses, which stores an era-2 run's event under its v1 spelling
+ * (persistence.md §The writer rule). No seam-specific branch decides the spelling.
+ */
+async function appendEra2(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ runId?: unknown; type?: unknown; payload?: unknown }>();
+  for (const k of Object.keys(body)) if (!['runId', 'type', 'payload'].includes(k)) throw err('validation_error', `unknown key ${k}`);
+  if (typeof body.runId !== 'string' || typeof body.type !== 'string' || body.payload === null || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
+    throw err('validation_error', '{ runId, type, payload } — payload an object');
+  }
+  const tenant = ctx.subject?.tenant ?? ctx.host.config.tenant;
+  const run = ctx.host.store.getRun(body.runId);
+  // An unseeded run (a real one) reads exactly as an unknown one: the seam cannot inject.
+  if (run === undefined || run.tenant !== tenant || !seededOf(ctx.host).has(run.run_id)) throw err('not_found', 'no seeded era-2 run with that id');
+  if (TERMINAL.has(run.status)) throw err('run_terminal', `the run is ${run.status}`);
+  if (!ctx.host.artifacts.v2EventTypes.has(body.type)) throw err('validation_error', `${body.type} is not a v2 registry event type`);
+  const doc = appendEvent(ctx.host, run, body.type, body.payload);
+  return { status: 202, body: { runId: run.run_id, sequence: doc.sequence } };
 }
 
 async function receive(ctx: Ctx): Promise<Reply> {
@@ -350,6 +383,7 @@ export function seamRoutes(host: Host): Route[] {
   const p = SEAMS_PREFIX;
   return [
     route('POST', `${p}/sample/event-log/seed`, true, seedEra2),
+    route('POST', `${p}/sample/event-log/append`, true, appendEra2),
     route('POST', `${p}/sample/webhooks/receive`, true, receive),
     route('POST', `${p}/sample/effect-seams/fire`, true, fireEffectSeamRoute),
     route('POST', `${p}/sample/test/idempotency/effect-retry`, true, effectRetryRoute),
