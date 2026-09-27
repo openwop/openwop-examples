@@ -151,10 +151,18 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
       throw Object.assign(new Error(`no recorded outcome for (${run.source_run_id}, ${node.id}, ${attempt}) — the effect is not performed`), { code: 'replay_source_missing' });
     }
     const outcome = JSON.parse(recorded.outcome_json) as FetchOutcome;
-    // The fork's own ledger carries the resolved (suppressed) row so the read
-    // projection is whole-run; no attempt is added beyond the source's.
-    const mirror = host.store.claimEffect({ effect_id: recorded.effect_id, run_id: run.run_id, node_id: node.id, attempt: 1, keying: 'business-identity', state: 'completed', provider_key: recorded.provider_key, invocation_id: `replay-of:${recorded.run_id}`, at: nowIso(), business_key: key, outcome_json: JSON.stringify({ ...outcome, suppressed: true }) });
-    return { outputs: { status: outcome.status, suppressed: true, sourceEffectId: recorded.effect_id }, effectId: mirror.row.effect_id };
+    // The fork's own ledger carries the SOURCE run's attempts for this node as
+    // inherited history, so the read projection stays whole-run — and records
+    // no attempt the source did not make. Each row keeps the source's attempt
+    // number, state and `at`: a replay proves recorded history and MUST NOT
+    // regenerate it (replay.md §Suppression rule 1). Until 2026-09-27 this wrote
+    // one row stamped `attempt: 1`, `state: completed`, `at: now()`, which read
+    // on GET /runs/{fork}/effects as a new attempt the host never made — a
+    // re-fire on the host's own ledger (RFC 0173 §C.2, suite 2.42.2).
+    for (const src of host.store.effectsForRun(run.source_run_id).filter((e) => e.node_id === node.id)) {
+      host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
+    }
+    return { outputs: { status: outcome.status, suppressed: true, sourceEffectId: recorded.effect_id }, effectId: recorded.effect_id };
   }
 
   // The identity is assigned once per business key and reused by every attempt.

@@ -558,9 +558,9 @@ export class Store {
     const sets = keys.map((k) => `${k} = @${k}`).join(', ');
     this.db.prepare(`UPDATE effects SET ${sets} WHERE run_id = @run_id AND effect_id = @effect_id AND attempt = @attempt`).run({ ...patch, run_id: runId, effect_id: effectId, attempt });
   }
-  /** A completed outcome already recorded for this business identity, in any run. */
+  /** A completed outcome already recorded for this business identity, in the run that PERFORMED it — a replay fork's inherited copies are history, not performers. */
   completedEffect(businessKey: string): EffectRow | undefined {
-    return this.db.prepare(`SELECT * FROM effects WHERE business_key = ? AND state = 'completed' AND outcome_json IS NOT NULL ORDER BY attempt ASC LIMIT 1`).get(businessKey) as EffectRow | undefined;
+    return this.db.prepare(`SELECT * FROM effects WHERE business_key = ? AND state = 'completed' AND outcome_json IS NOT NULL AND (invocation_id IS NULL OR invocation_id NOT LIKE 'replay-of:%') ORDER BY attempt ASC LIMIT 1`).get(businessKey) as EffectRow | undefined;
   }
   effectsForRun(runId: string): EffectRow[] {
     return this.db.prepare('SELECT * FROM effects WHERE run_id = ? ORDER BY at ASC, attempt ASC').all(runId) as EffectRow[];
