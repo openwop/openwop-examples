@@ -57,6 +57,7 @@ import {
   triggerCheckpointIfDue,
   createCheckpoint,
   verifyAuditChain,
+  toWireVerifyResult,
   defaultAuditOptions,
   type SigningKey,
   type AuditOptions,
@@ -3017,7 +3018,7 @@ function handleAuditVerify(req: IncomingMessage, res: ServerResponse, url: URL):
     return;
   }
   const result = verifyAuditChain(db, fromSeq, toSeq, auditSigningKey);
-  sendJSON(res, 200, result);
+  sendJSON(res, 200, toWireVerifyResult(result));
 }
 
 /**
