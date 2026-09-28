@@ -24,7 +24,9 @@ process.env.OPENWOP_AUDIT_KEY_DIR = workdir;
 
 import { setQuerier, start } from '../src/server.js';
 import type { Querier, QueryResult } from '../src/db.js';
-import { McpFakeServer } from '../../../../conformance/src/lib/mcp-fake-server.js';
+import { importFromSpecRepo } from './sibling-repos.js';
+// Borrowed from the spec repo's conformance suite (test/sibling-repos.ts).
+const { McpFakeServer } = (await importFromSpecRepo('conformance', 'src', 'lib', 'mcp-fake-server.js')) as { McpFakeServer: any };
 import {
   callMcpTool,
   summarizeForEventLog,

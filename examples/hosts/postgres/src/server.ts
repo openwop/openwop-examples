@@ -143,6 +143,7 @@ import {
 // RFC 0036 — the canonical cross-region convergence resolver (pure function).
 // Exposed to the conformance suite via the multi-region simulator seam below.
 import { resolveCrossRegionConflict, type ConflictClaim } from './multi-region.js';
+import { signingKeys } from './signing-keys.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // RFC 0036 — gates both the multi-region/cross-engine capability advertisement
@@ -3111,6 +3112,10 @@ function handleDiscovery(req: IncomingMessage, res: ServerResponse): void {
         maxNodeExecutions: 1000,
       },
       supportedTransports: ['rest'],
+      // RFC 0168 §E.2 — the key a certification bundle v3 is signed with. A
+      // bundle is v3 regardless of major, and this v1-only host has only this
+      // document to hand a verifier (src/signing-keys.ts).
+      signingKeys: signingKeys(),
       fixtures: advertisedFixtures,
       debugBundle: { supported: true },
       capabilities: {

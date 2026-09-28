@@ -42,7 +42,9 @@ const issuerPort = 4501;
 const issuerUrl = `http://127.0.0.1:${issuerPort}`;
 const audience = 'urn:openwop:test';
 
-import { createSyntheticOIDCIssuer } from '../../../../conformance/src/lib/oidc-issuer.js';
+import { importFromSpecRepo } from './sibling-repos.js';
+// Borrowed from the spec repo's conformance suite (test/sibling-repos.ts).
+const { createSyntheticOIDCIssuer } = (await importFromSpecRepo('conformance', 'src', 'lib', 'oidc-issuer.js')) as { createSyntheticOIDCIssuer: any };
 
 const issuer = createSyntheticOIDCIssuer({ issuer: issuerUrl, audience });
 

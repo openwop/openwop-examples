@@ -39,11 +39,12 @@ import {
   PackConsumerError,
   type ResolvedPack,
 } from '../src/pack-consumer.js';
+import { registryRepoPath } from './sibling-repos.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
-const PACK_DIR = join(REPO_ROOT, 'registry', 'v1', 'packs', 'core.openwop.examples', '-');
-const KEYS_DIR = join(REPO_ROOT, 'registry', 'keys');
+// The canonical signed pack lives in the registry repo since the split (test/sibling-repos.ts).
+const PACK_DIR = registryRepoPath('registry', 'v1', 'packs', 'core.openwop.examples', '-');
+const KEYS_DIR = registryRepoPath('registry', 'keys');
 
 function loadCanonicalResolved(): { resolved: ResolvedPack; tarball: Buffer; manifest: { name: string; version: string } } {
   const tarball = readFileSync(join(PACK_DIR, '1.0.0.tgz'));
