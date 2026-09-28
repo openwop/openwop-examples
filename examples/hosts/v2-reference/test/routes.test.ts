@@ -235,6 +235,47 @@ describe('interrupts', () => {
     expect((await call('POST', `/runs/${enc(e.b.runId)}/interrupts/wait-for-external`, { resumeValue: { ok: true } })).s).toBe(200);
     expect((await waitStatus(e.b.runId, ['completed'])).status).toBe('completed');
   });
+  it('a replay fork short-circuits to the recorded resolution at every fork point (replay.md §Determinism caveats 2, #102)', async () => {
+    const c = await call('POST', '/runs', { workflowId: 'conformance-approval' });
+    await waitStatus(c.b.runId, ['waiting-approval']);
+    const resumeValue = { action: 'accept', decidedAt: '2026-09-28T12:00:00Z' };
+    expect((await call('POST', `/runs/${enc(c.b.runId)}/interrupts/gate`, { resumeValue })).s).toBe(200);
+    expect((await waitStatus(c.b.runId, ['completed'])).status).toBe('completed');
+    const source = (await call('GET', `/runs/${enc(c.b.runId)}/events/poll?timeout=1`)).b.events as any[];
+    const types = source.map((e) => e.type);
+    expect(types).toEqual(['run.started', 'node.started', 'interrupt.requested', 'node.suspended', 'interrupt.resolved', 'node.resumed', 'node.completed', 'run.completed']);
+    const key = source.find((e) => e.type === 'interrupt.requested').payload.key as string;
+    // Before the gate ran, at its suspend, at its resolution and after it resumed:
+    // 5 and 6 are the issue's repro. (2 cuts inside the gate's attempt, which the
+    // loop re-enters as a fresh `node.started` for every node type — not this.)
+    for (const fromSeq of [0, 1, 3, 4, 5, 6]) {
+      const f = await call('POST', `/runs/${enc(c.b.runId)}:fork`, { mode: 'replay', fromSeq });
+      expect(f.s).toBe(201);
+      expect((await waitStatus(f.b.runId, ['completed', 'failed'], 2000)).status, `fromSeq ${fromSeq}`).toBe('completed');
+      const fork = (await call('GET', `/runs/${enc(f.b.runId)}/events/poll?timeout=1`)).b.events as any[];
+      expect(fork.map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(types);
+      // K is the source's key, never one minted from the fork's own runId.
+      expect(fork.filter((e) => e.type === 'interrupt.requested').map((e) => e.payload.key), `fromSeq ${fromSeq}`).toEqual([key]);
+      expect(fork.find((e) => e.type === 'interrupt.resolved').payload.resumeValue).toEqual(resumeValue);
+      expect(fork.find((e) => e.type === 'node.completed').payload.outputs).toEqual({ resumeValue });
+      // Nothing is left for anyone to resolve on the fork.
+      expect((await call('POST', `/runs/${enc(f.b.runId)}/interrupts/gate`, { resumeValue })).s, `fromSeq ${fromSeq}`).not.toBe(200);
+    }
+  }, 30_000);
+  it('a replay fork of a rejected approval fails the gate as the source did, without asking again (#102)', async () => {
+    const c = await call('POST', '/runs', { workflowId: 'conformance-approval' });
+    await waitStatus(c.b.runId, ['waiting-approval']);
+    expect((await call('POST', `/runs/${enc(c.b.runId)}/interrupts/gate`, { resumeValue: { action: 'reject' } })).s).toBe(200);
+    expect((await waitStatus(c.b.runId, ['failed'])).status).toBe('failed');
+    const types = ((await call('GET', `/runs/${enc(c.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type);
+    for (const fromSeq of [0, 4, 5]) {
+      const f = await call('POST', `/runs/${enc(c.b.runId)}:fork`, { mode: 'replay', fromSeq });
+      const snap = await waitStatus(f.b.runId, ['completed', 'failed'], 2000);
+      expect(snap.status, `fromSeq ${fromSeq}`).toBe('failed');
+      expect(snap.error?.code, `fromSeq ${fromSeq}`).toBe('approval_rejected');
+      expect(((await call('GET', `/runs/${enc(f.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(types);
+    }
+  }, 30_000);
 });
 
 describe('persistence + replay', () => {
