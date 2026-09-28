@@ -78,16 +78,16 @@ jobs:
           # offers — and CI has been red on main since 2026-09-18 07:46, when
           # suite 2.4.5 first made --require-behavior do anything.
           #
-          # The three opt-outs are the ones cut-bundle.sh declares: strict mode
+          # The four opt-outs are the ones cut-bundle.sh declares: strict mode
           # requires every capability-gated scenario to find its family
           # ADVERTISED or find an explicit opt-out, and this host implements
-          # none of the three. An opt-out is a CLAIM, not a hiding place — it is
+          # none of the four. An opt-out is a CLAIM, not a hiding place — it is
           # recorded in the bundle where a reader can see it.
           #
           # The fakes are in-process and match the cut. The SAML/SCIM seam
           # opt-ins are deliberately NOT set: they need the synthetic IdP that
           # only cut-bundle.sh starts, and those rows skip honestly without it.
-          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported'
+          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported,family.packs'
           # The relaxation this leg's host runs under, declared. Suite >= 2.33.0
           # checks: `v2-webhook-egress-refusal` registers eight destinations the
           # guard MUST refuse, and with the guard open and NOTHING declared it
@@ -161,16 +161,16 @@ jobs:
           # offers — and CI has been red on main since 2026-09-18 07:46, when
           # suite 2.4.5 first made --require-behavior do anything.
           #
-          # The three opt-outs are the ones cut-bundle.sh declares: strict mode
+          # The four opt-outs are the ones cut-bundle.sh declares: strict mode
           # requires every capability-gated scenario to find its family
           # ADVERTISED or find an explicit opt-out, and this host implements
-          # none of the three. An opt-out is a CLAIM, not a hiding place — it is
+          # none of the four. An opt-out is a CLAIM, not a hiding place — it is
           # recorded in the bundle where a reader can see it.
           #
           # The fakes are in-process and match the cut. The SAML/SCIM seam
           # opt-ins are deliberately NOT set: they need the synthetic IdP that
           # only cut-bundle.sh starts, and those rows skip honestly without it.
-          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported'
+          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported,family.packs'
           # The relaxation this leg's host runs under, declared. Suite >= 2.33.0
           # checks: `v2-webhook-egress-refusal` registers eight destinations the
           # guard MUST refuse, and with the guard open and NOTHING declared it
