@@ -74,18 +74,18 @@ This reference workflow is the **single-platform linear path**. To publish to al
 
 ## Pack inventory
 
-All 8 packs are published at `packs.openwop.dev`:
+All 8 packs are published in the registry's v2 tree at `packs.openwop.dev` (the Meta variant's set is shown; Google and TikTok swap the last row for `ads-publish-google` / `ads-publish-tiktok`):
 
 | Pack | typeId(s) | Pure logic? |
 |---|---|---|
-| [`vendor.myndhyve.ads-studio-core@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-studio-core/index.json) | `ads.brief.build`, `ads.variant.plan` | AI |
-| [`vendor.myndhyve.ads-platforms@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-platforms/index.json) | `ads.platform.specs` | Pure data |
-| [`vendor.myndhyve.ads-copy-generate@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-copy-generate/index.json) | `ads.copy.generate` | AI |
-| [`vendor.myndhyve.ads-image-generate@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-image-generate/index.json) | `ads.image.generate` | ctx.callImageGenerator |
-| [`vendor.myndhyve.ads-creative-validate@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-creative-validate/index.json) | `ads.creative.validate` | Pure logic |
-| [`vendor.myndhyve.ads-tools@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-tools/index.json) | `ads.tracking.link` | Pure logic |
-| [`vendor.myndhyve.ads-export@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-export/index.json) | `ads.export.pack` | Pure logic |
-| [`vendor.myndhyve.ads-publish-meta@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-publish-meta/index.json) | `ads.publish.meta` | External HTTP + secrets |
+| [`vendor.myndhyve.ads-studio-core@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-studio-core/index.json) | `ads.brief.build`, `ads.variant.plan` | AI |
+| [`vendor.myndhyve.ads-platforms@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-platforms/index.json) | `ads.platform.specs` | Pure data |
+| [`vendor.myndhyve.ads-copy-generate@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-copy-generate/index.json) | `ads.copy.generate` | AI |
+| [`vendor.myndhyve.ads-image-generate@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-image-generate/index.json) | `ads.image.generate` | ctx.callImageGenerator |
+| [`vendor.myndhyve.ads-creative-validate@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-creative-validate/index.json) | `ads.creative.validate` | Pure logic |
+| [`vendor.myndhyve.ads-tools@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-tools/index.json) | `ads.tracking.link` | Pure logic |
+| [`vendor.myndhyve.ads-export@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-export/index.json) | `ads.export.pack` | Pure logic |
+| [`vendor.myndhyve.ads-publish-meta@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-publish-meta/index.json) | `ads.publish.meta` | External HTTP + secrets |
 
 ## Credentials flow (NFR-7)
 
@@ -96,21 +96,25 @@ The workflow never carries plaintext credentials. Pattern:
 3. **Pack resolves at execution time**: `ctx.secrets.resolve({ ref, purpose: 'ads.publish.meta:campaign.create' })` → `{ plaintext }`.
 4. **Plaintext lives only in local pack variables**, sent only via `Authorization: Bearer` header, never logged via `ctx.log`, never returned in node outputs.
 
-See the [secrets-resolve-in-pack](https://github.com/openwop/openwop/blob/main/spec/v1/host-capabilities.md#secretsresolveInpack) spec section for the host-side contract.
+See the [`secrets`](https://github.com/openwop/openwop/blob/main/spec/v2/core/capabilities.md#-secrets) capability family (facet `resolveInPack`) for the host-side contract.
 
 ## Activation
 
-To use this workflow on an OpenWOP host:
+This definition runs on a host that has the ads packs, an image-generation provider, and a secrets store; the v2 reference host (`examples/hosts/v2-reference`) has none of them, so it is not runnable there.
 
-1. Ensure the host advertises:
-   - `aiProviders: supported` + `aiProviders.imageGeneration: supported`
-   - `secrets.resolveInPack: supported`
-2. Ensure the pack registry has the 8 listed packs available at the listed versions
-3. Host's secrets store has Meta OAuth tokens under the credential reference scheme
-4. POST the workflow JSON to `/v1/workflows` (host endpoint)
-5. POST a run via `/v1/runs` with `{ workflowId: "vendor.myndhyve.ads-creative-publish-meta", variables: { campaignGoal, icpContext, productContext, destinationUrl, metaAdAccountId, metaCredentialRef, ... } }`
+1. The host advertises, in its v2 discovery document (`GET /.well-known/openwop` with `OpenWOP-Version: 2`):
+   - `aiProviders` with the `imageGeneration` facet
+   - `secrets` with the `resolveInPack` facet
 
-See [`spec/v1/rest-endpoints.md`](https://github.com/openwop/openwop/blob/main/spec/v1/rest-endpoints.md) for the run lifecycle wire protocol.
+   (`metadata.hostCapabilities` still spells the facets as v1 dotted paths, which `spec/v2/peer-dependency-aliases.json` maps to those families through the overlap.)
+2. The host resolves the 8 listed packs at the listed versions from the registry's [v2 tree](https://packs.openwop.dev/.well-known/openwop-registry.json) (`endpoints.v2`).
+3. The host's secrets store has the platform OAuth tokens under the credential reference scheme.
+4. Install the workflow through the host's own tooling. v2 defines no workflow-registration operation; `GET /workflows/{workflowId}` reads an installed one.
+5. Start a run: `POST /runs` with `OpenWOP-Version: 2`, an `Idempotency-Key`, and `{ "workflowId": "<the installed id>", "inputs": { "campaignGoal": "…", "icpContext": "…", "productContext": "…", "destinationUrl": "…", "metaAdAccountId": "…", "metaCredentialRef": "…" } }`. Follow it with `GET /runs/{runId}/events` (SSE), the run id projected as one path segment (`tenant~2Fopaque`).
+
+See [`spec/v2/core/runs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/runs.md) for the run lifecycle.
+
+**Not yet v2-shaped.** The definition bodies predate `schemas/v2/workflow-definition.schema.json` and do not validate against it: the `id` carries dots (v2: `^[a-z][a-z0-9_-]*$`), node `inputs` are bare `$.…` strings, literals, and objects with `$.…` strings inside, rather than `PortValue` objects, and `metadata.packs` / `metadata.hostCapabilities` are not `WorkflowMetadata` members. The pack references are checked against the v2 tree in CI (`scripts/check-example-pack-refs.mjs`).
 
 ## What's NOT in this JSON
 

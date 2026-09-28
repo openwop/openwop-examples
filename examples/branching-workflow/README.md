@@ -1,12 +1,12 @@
 # Branching Workflow
 
-Demonstrates the openwop DAG executor: a single workflow with **two parallel paths** that fan out from one source, run concurrently, then fan back in at a merge node. Exercises `core.flow.router`, `core.flow.iterator`, `core.flow.aggregate-array`, and `core.flow.merge` from `core.openwop.flow@1.1.0`.
+Demonstrates the openwop DAG executor: a single workflow with **two parallel paths** that fan out from one source, run concurrently, then fan back in at a merge node. Fan-out is plain edges from `source`; fan-in is `core.flow.merge`.
 
-This is the canonical "branching is real" demo. Hosts whose executor is linear-only (e.g., the workflow-engine sample at HEAD~5) reject the workflow at submit time; DAG-capable hosts run it end-to-end.
+This is the canonical "branching is real" demo: a host whose executor is linear either refuses the workflow or runs the branches serially, and the example's interleaving check fails.
 
-| Profile required | None (uses default `core.openwop.flow` + `core.openwop.data` packs) |
-| Host target      | Any DAG-capable host (workflow-engine sample, Postgres reference host) |
-| Run modes        | Default (skip-equivalent without `OPENWOP_BASE_URL`) |
+| v2 family required | none — an installed `branching-demo` workflow and a DAG executor that runs branches concurrently |
+| Host target        | a v2 host with [`workflow.json`](./workflow.json) installed |
+| Run modes          | default |
 
 ## What the workflow does
 
@@ -47,40 +47,39 @@ The two branches MUST run concurrently — the run completes when both upstream 
 ## Run
 
 ```bash
-OPENWOP_BASE_URL=http://localhost:8080 \
-OPENWOP_API_KEY=sample-token \
-  npm start
+npm start                                   # defaults to the v2 reference host
+OPENWOP_BASE_URL=https://your-host.example OPENWOP_API_KEY=$YOUR_KEY npm start
 ```
 
-Without env vars set, the example exits 0 with a `skip-equivalent` message so CI doesn't fail when no host is available.
+v2 defines no workflow-registration operation, so the example does not register anything: it reads `GET /workflows/branching-demo` and, when the host does not have it, says so and exits 0. Install [`workflow.json`](./workflow.json) through the host's own tooling first. Its node types (`local.sample.demo.uppercase`, `local.sample.demo.mock-ai`, `core.flow.merge`) must be ones the host executes.
 
-## Output
+The v2 reference host does not have it (its catalog is the conformance fixtures, and its executor runs nodes one at a time). A real run there:
 
 ```
-→ Discovery: http://localhost:8080/.well-known/openwop
-  ✓ Host supports DAG execution (branching workflows accepted)
-→ Registering workflow: branching-demo
-  ✓ Workflow registered
-→ POST /v1/runs { workflowId: "branching-demo", inputs: { message: "hello" } }
-  ✓ Run started: run_abc123
-→ Polling for terminal state…
-  ✓ Run completed in 240ms
-→ Event log (10 events):
-    seq=1  run.started
-    seq=2  node.started      source
-    seq=3  node.completed    source
-    seq=4  node.started      branchA      ┐
-    seq=5  node.started      branchB      │ interleaved — parallel paths
-    seq=6  node.completed    branchA      │
-    seq=7  node.completed    branchB      ┘
-    seq=8  node.started      merge
-    seq=9  node.completed    merge
-    seq=10 node.started      sink
-    seq=11 node.completed    sink
-    seq=12 run.completed
-  ✓ Both branches emitted node.started before either branch completed
-    (proves concurrent execution — not sequential)
+→ Discovery: http://127.0.0.1:3838/.well-known/openwop (OpenWOP-Version: 2)
+  ✓ Host reachable (OpenWOP-Version 2.0, openwop-host-v2-reference)
+→ GET /workflows/branching-demo
+⊘ Workflow "branching-demo" is not installed on this host.
+  v2 defines no workflow-registration operation; install workflow.json through the
+  host's own tooling, then re-run. Its node types (local.sample.demo.*, core.flow.merge)
+  must be ones the host executes, and the executor must run DAG branches concurrently.
 ```
+
+On a host that has it, the example starts the run, polls it to `completed`, reads `GET /runs/{runId}/events/poll`, and asserts the interleaving below:
+
+```
+    seq= 0  started                 (run.started)
+    seq= 1  started       source
+    seq= 2  completed     source
+    seq= 3  started       branchA      ┐
+    seq= 4  started       branchB      │ interleaved — parallel paths
+    seq= 5  completed     branchA      │
+    seq= 6  completed     branchB      ┘
+    ...
+  ✓ Both branches emitted node.started before either emitted node.completed
+```
+
+(That listing is the assertion's shape, not a captured run: no v2 example host executes this workflow yet.)
 
 ## How to know it really branched
 
@@ -95,14 +94,13 @@ The example asserts this interleaving and exits non-zero if it doesn't hold.
 
 ## What this exercises
 
-- `core.flow.router` fan-out semantics (one input → N outputs, each labelled with its own branch).
+- Edge fan-out: two edges from one source schedule both targets once the source completes.
 - `core.flow.merge` fan-in with `mode: 'combine-by-position'` (zip branchA's output with branchB's).
-- The DAG scheduler's bounded-concurrency knob (`OPENWOP_MAX_CONCURRENT_NODES`) — try `=1` to force serialization and watch the assertion fail.
+- The DAG scheduler's bounded concurrency — a host that caps node concurrency at 1 serializes the branches and fails the assertion.
 - The canonical `WorkflowEdge.triggerRule` default (`all_success`) waits for both upstreams before firing the merge.
 
 ## See also
 
-- `spec/v1/workflow-definition.schema.json` §`WorkflowEdge` — canonical edge shape + `triggerRule` enum
-- `spec/v1/channels-and-reducers.md` — typed shared state for richer fan-in semantics
-- `packs/core.openwop.flow/README.md` — every flow primitive with examples
-- `examples/multi-agent-research-assistant/` — production-shape multi-agent DAG with channels
+- [`schemas/v2/workflow-definition.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/workflow-definition.schema.json) §`WorkflowEdge` — the edge shape and the `triggerRule` enum
+- [`spec/v2/core/events.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/events.md) — the event log and `events/poll`
+- [`examples/multi-agent-research-assistant/`](../multi-agent-research-assistant/) — a multi-agent DAG composition

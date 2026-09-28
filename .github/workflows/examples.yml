@@ -90,17 +90,19 @@ jobs:
       fail-fast: false
       matrix:
         example:
-          # In-memory-targeting — CI starts the reference host.
-          # v2-targeting — CI starts the v2 reference host.
-          - { name: tiny-workflow,         host: v2-reference }
-          - { name: streaming-client,      host: v2-reference }
-          - { name: idempotent-runs,       host: in-memory }
-          # External-host targeting — skip-equivalent without secrets.
-          - { name: approval-workflow,     host: external }
-          - { name: branch-fork,           host: external }
-          - { name: mcp-tool,              host: external }
-          # Dry-run — no host needed.
-          - { name: node-pack-publishing,  host: dry-run }
+          # v2-targeting — CI starts the v2 reference host (port 3838). A sample
+          # whose surface the host does not advertise exits 0 saying so.
+          - { name: tiny-workflow,           host: v2-reference }
+          - { name: streaming-client,        host: v2-reference }
+          - { name: idempotent-runs,         host: v2-reference }
+          - { name: approval-workflow,       host: v2-reference }
+          - { name: branch-fork,             host: v2-reference }
+          - { name: branching-workflow,      host: v2-reference }
+          - { name: mcp-tool,                host: v2-reference }
+          - { name: multi-agent-cross-host,  host: v2-reference }
+          # Dry-run — no host needed (core-packs-lockfile reads packs.openwop.dev).
+          - { name: node-pack-publishing,    host: dry-run }
+          - { name: core-packs-lockfile,     host: dry-run }
     steps:
       - uses: actions/checkout@v6
 

@@ -1,53 +1,55 @@
 # Idempotent Runs
 
-Demonstrates Layer-1 HTTP idempotency per `spec/v1/idempotency.md`. Three identical `POST /v1/runs` calls with the same `Idempotency-Key` collapse to a single run; a fourth call with the same key but a different body returns 409.
+Layer-1 request idempotency on the v2 wire ([`spec/v2/core/idempotency.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/idempotency.md)). Three identical `POST /runs` calls with the same `Idempotency-Key` collapse to a single run; a fourth with the same key and a different body is refused.
+
+| v2 family required | `idempotency` |
+| Host target        | the v2 reference host, or any v2 host |
+| Run modes          | default |
 
 ## Run
 
-Against the in-memory reference host (start it in another terminal first — see `examples/hosts/in-memory/`):
+Against the v2 reference host (start it first — see [`examples/hosts/v2-reference/`](../hosts/v2-reference/)):
 
 ```bash
 npm start
 ```
 
-Output:
+## Output (a real run against the v2 reference host)
 
 ```
-Idempotency-Key: idempotent-example-3b...
+Idempotency-Key: idempotent-example-11b53a9d-bc38-4361-9290-2cc1dd469966
 
 → Call 1 (fresh)
   status:  201
-  runId:   run-...abc
-  replay:  false
+  runId:   openwop-reference-tenant/dU01qV4ZWHYlTwwDndm74Q5O
+  replay:  null
 → Call 2 (same key, same body — expect cached replay)
   status:  201
-  runId:   run-...abc
+  runId:   openwop-reference-tenant/dU01qV4ZWHYlTwwDndm74Q5O
   replay:  true
 → Call 3 (same key, same body — expect cached replay)
   status:  201
-  runId:   run-...abc
+  runId:   openwop-reference-tenant/dU01qV4ZWHYlTwwDndm74Q5O
   replay:  true
 
-✓ All three responses share runId run-...abc
+✓ All three responses share runId openwop-reference-tenant/dU01qV4ZWHYlTwwDndm74Q5O
 
-→ Call 4 (same key, DIFFERENT body — expect 409 conflict)
+→ Call 4 (same key, DIFFERENT body — expect 409 idempotency_key_mismatch)
   status: 409
-  error:  idempotency_key_conflict
-✓ Body conflict correctly rejected
+  error:  idempotency_key_mismatch
+✓ Body mismatch correctly rejected
 ```
 
 ## What this teaches
 
-- **Same key + same body** → cached replay. Server returns the original response with `openwop-Idempotent-Replay: true`.
-- **Same key + different body** → `409 idempotency_key_conflict`. The key pins exactly one logical operation; reusing it for a different request is caller misuse.
-- The `openwop-Idempotent-Replay` response header lets clients distinguish "fresh result" from "replayed result" — useful for analytics and audit.
+- **Same key + same body** → the cached response, marked `OpenWOP-Idempotent-Replay: true`. The fresh response carries no marker.
+- **Same key + different body** → `409 idempotency_key_mismatch`, the only mismatch code, and never the cached body. The key pins one logical operation.
+- **Concurrent duplicates.** While the first request is still in flight, a duplicate either waits for the winner's final outcome or gets `409 idempotency_in_flight`.
 
 ## Why this matters
 
-A network blip, retry storm, or competing tab can cause the same logical operation to fire multiple times. Without idempotency, each retry would create a new run (extra cost, race conditions, duplicate side effects). With `Idempotency-Key`, the second-through-Nth call gets the same response cheaply, no matter how many retries happen.
+A network blip, retry storm, or second tab can fire the same logical operation several times. Without idempotency each retry creates a new run; with `Idempotency-Key` every retry lands on the same `runId`.
 
-Per `spec/v1/idempotency.md`, hosts MUST handle ≥5 retries 100ms apart with the cached response — drive a retry storm against a host and every retry should land on the same `runId`.
-
-## ~80 lines, zero dependencies
+## Zero dependencies
 
 Pure Node `fetch`. The protocol contract is what's interesting; the client code is incidental.

@@ -5,10 +5,10 @@
   "description": "Reference prompt pack proving the RFC 0028 §B manifest format works end-to-end across schema validation, registry indexing, and the in-memory PromptStore's installPackTemplates() seam. Two templates: a writer-system prompt and a critic-system prompt — the minimal pair that lets a multi-agent workflow author point a `writer` + `critic` node pair at vendor-published prompts via `prompt:writer-system@1.0.0` / `prompt:critic-system@1.0.0` refs. In-tree only (NOT published to packs.openwop.dev); the canonical proof that the prompt-pack contract is implementable with real-world-shaped content.",
   "author": "openwop project",
   "license": "Apache-2.0",
-  "homepage": "https://openwop.dev/spec/v1/prompts.md",
+  "homepage": "https://openwop.dev/spec/v2/core/packs.html",
   "repository": "https://github.com/openwop/openwop",
   "engines": {
-    "openwop": ">=1.1 <2.0.0"
+    "openwop": ">=1.1.0 <3.0.0"
   },
   "prompts": [
     {

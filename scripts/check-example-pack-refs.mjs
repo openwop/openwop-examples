@@ -14,18 +14,16 @@
  *
  *   node scripts/check-example-pack-refs.mjs
  *   node scripts/check-example-pack-refs.mjs --registry https://packs.openwop.dev
- *   node scripts/check-example-pack-refs.mjs --offline registry/v1/index.json
+ *   node scripts/check-example-pack-refs.mjs --offline ../openwop-registry/registry/v2/index.json
  *
  * Files are detected by presence of `.metadata.packs` array containing
  * `<name>@<version>` strings. Files without that shape are silently skipped
  * (they are runnable examples with package.json, not workflow definitions).
  *
- * Offline mode reads schemas from the in-tree tarballs at
- * `registry/v1/packs/{name}/-/{version}.tgz`. Live mode fetches them from
- * the CDN's derived schema mirror at /v1/packs/{name}/{version}/<file>.
- * Live-mode warnings for missing schemas are expected (only ~12 schemas
- * are CDN-mirrored as of 2026-05-13; the rest live only in tarballs).
- * The CI gate runs in offline mode where coverage is complete.
+ * Every path is resolved in the registry's v2 tree through its
+ * `/.well-known/openwop-registry.json` `endpoints.v2`. Config schemas are read
+ * out of each version's tarball, so pass 3 has complete coverage in both
+ * modes. Offline mode reads an openwop-registry checkout's `registry/v2/` tree.
  *
  * Exit codes:
  *   0  all three passes clean
@@ -118,91 +116,121 @@ function isWorkflowDefinition(parsed) {
   );
 }
 
-async function loadTopIndex() {
+/**
+ * The registry's v2 tree paths, resolved through its
+ * `/.well-known/openwop-registry.json` `endpoints.v2` (packs.md §"The registry
+ * tree": a client resolves every registry path through that document rather
+ * than constructing one). Offline mode reads the same templates under the
+ * directory that holds `v2/index.json` in an openwop-registry checkout.
+ */
+let endpointsV2 = null;
+
+async function loadEndpoints() {
+  if (endpointsV2) return endpointsV2;
   if (offlineIndex) {
-    if (!existsSync(offlineIndex)) {
-      console.error(`ERROR: --offline file not found: ${offlineIndex}`);
-      process.exit(2);
-    }
-    return JSON.parse(readFileSync(offlineIndex, 'utf8'));
+    endpointsV2 = {
+      registryIndex: '/v2/index.json',
+      packMetadata: '/v2/packs/{name}/index.json',
+      versionManifest: '/v2/packs/{name}/-/{version}.json',
+      versionTarball: '/v2/packs/{name}/-/{version}.tgz',
+    };
+    return endpointsV2;
   }
-  const url = `${registry.replace(/\/$/, '')}/v1/index.json`;
+  const url = `${registry.replace(/\/$/, '')}/.well-known/openwop-registry.json`;
   let res;
   try {
     res = await fetchWithTimeout(url, { redirect: 'follow' });
   } catch (e) {
     const detail = e.name === 'AbortError' ? `timeout after ${FETCH_TIMEOUT_MS}ms` : e.message;
     console.error(`ERROR: registry unreachable at ${url}: ${detail}`);
-    console.error(`  Hint: pass --offline registry/v1/index.json to validate against in-tree state`);
+    console.error(`  Hint: pass --offline <openwop-registry>/registry/v2/index.json to validate against a checkout`);
     process.exit(2);
   }
   if (!res.ok) {
     console.error(`ERROR: registry returned ${res.status} for ${url}`);
     process.exit(2);
   }
-  return res.json();
+  const v2 = (await res.json())?.endpoints?.v2;
+  if (!v2?.registryIndex || !v2?.packMetadata || !v2?.versionManifest || !v2?.versionTarball) {
+    console.error(`ERROR: ${url} names no complete v2 tree (endpoints.v2)`);
+    process.exit(2);
+  }
+  endpointsV2 = v2;
+  return endpointsV2;
+}
+
+function fillPath(template, name, version) {
+  return template.replace('{name}', name).replace('{version}', version ?? '');
+}
+
+/** Read one registry path as bytes, or null when it does not exist. */
+async function readRegistryPath(path) {
+  if (offlineIndex) {
+    const root = offlineIndex.replace(/\/v2\/index\.json$/, '');
+    const file = `${root}${path}`;
+    return existsSync(file) ? readFileSync(file) : null;
+  }
+  try {
+    const res = await fetchWithTimeout(`${registry.replace(/\/$/, '')}${path}`, { redirect: 'follow' });
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function readRegistryJson(path) {
+  const bytes = await readRegistryPath(path);
+  if (!bytes) return null;
+  try {
+    return JSON.parse(bytes.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function loadTopIndex() {
+  if (offlineIndex && !existsSync(offlineIndex)) {
+    console.error(`ERROR: --offline file not found: ${offlineIndex}`);
+    process.exit(2);
+  }
+  const { registryIndex } = await loadEndpoints();
+  const index = await readRegistryJson(registryIndex);
+  if (!index) {
+    console.error(`ERROR: v2 registry index unreadable at ${offlineIndex ?? `${registry}${registryIndex}`}`);
+    process.exit(2);
+  }
+  return index;
 }
 
 async function loadPackIndex(name) {
-  if (offlineIndex) {
-    const dir = offlineIndex.replace(/\/v1\/index\.json$/, '');
-    const path = `${dir}/v1/packs/${name}/index.json`;
-    if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, 'utf8'));
-  }
-  const url = `${registry.replace(/\/$/, '')}/v1/packs/${name}/index.json`;
-  try {
-    const res = await fetchWithTimeout(url, { redirect: 'follow' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+  const { packMetadata } = await loadEndpoints();
+  return readRegistryJson(fillPath(packMetadata, name));
 }
 
 async function loadPackVersion(name, version) {
-  if (offlineIndex) {
-    const dir = offlineIndex.replace(/\/v1\/index\.json$/, '');
-    const path = `${dir}/v1/packs/${name}/-/${version}.json`;
-    if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, 'utf8'));
-  }
-  const url = `${registry.replace(/\/$/, '')}/v1/packs/${name}/-/${version}.json`;
-  try {
-    const res = await fetchWithTimeout(url, { redirect: 'follow' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+  const { versionManifest } = await loadEndpoints();
+  return readRegistryJson(fillPath(versionManifest, name, version));
 }
 
 /**
- * Fetch a schema file referenced by configSchemaRef / inputSchemaRef
- * (e.g., "schemas/chat-completion.config.json"). In offline mode the
- * source is the in-tree tarball at registry/v1/packs/{name}/-/{version}.tgz;
- * in live mode it's the derived mirror at
- *   /v1/packs/{name}/{version}/<schema-basename>
+ * Read a schema file referenced by configSchemaRef / inputSchemaRef
+ * (e.g., "schemas/chat-completion.config.json") out of the version's tarball
+ * in the v2 tree — the one source that carries every schema a pack ships.
  */
+const tarballCache = new Map();
 async function loadPackSchema(name, version, schemaRef) {
-  if (offlineIndex) {
-    const dir = offlineIndex.replace(/\/v1\/index\.json$/, '');
-    const tarballPath = `${dir}/v1/packs/${name}/-/${version}.tgz`;
-    if (!existsSync(tarballPath)) return { schema: null };
-    try {
-      const bytes = readTarballFile(readFileSync(tarballPath), schemaRef);
-      if (!bytes) return { schema: null };
-      return { schema: JSON.parse(bytes.toString('utf8')) };
-    } catch (e) {
-      return { schema: null, parseError: e.message };
-    }
+  const key = `${name}@${version}`;
+  if (!tarballCache.has(key)) {
+    const { versionTarball } = await loadEndpoints();
+    tarballCache.set(key, await readRegistryPath(fillPath(versionTarball, name, version)));
   }
-  const filename = schemaRef.replace(/^schemas\//, '');
-  const url = `${registry.replace(/\/$/, '')}/v1/packs/${name}/${version}/${filename}`;
+  const tarball = tarballCache.get(key);
+  if (!tarball) return { schema: null };
   try {
-    const res = await fetchWithTimeout(url, { redirect: 'follow' });
-    if (!res.ok) return { schema: null };
-    return { schema: await res.json() };
+    const bytes = readTarballFile(tarball, schemaRef);
+    if (!bytes) return { schema: null };
+    return { schema: JSON.parse(bytes.toString('utf8')) };
   } catch (e) {
     return { schema: null, parseError: e.message };
   }

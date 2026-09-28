@@ -1,98 +1,96 @@
 # Node-Pack Publishing
 
-Walks through building a pack manifest, signing with Ed25519, and (optionally) publishing to a registry. **Defaults to `--dry-run` mode** — no network calls, no auth required, safe to run anywhere.
+Builds a v2 node-pack manifest, signs it the one way v2 signs a pack, verifies the signature, and (optionally) shows where a registry's v2 tree would serve it. **Defaults to `--dry-run`** — no network calls, no auth, safe to run anywhere.
 
-| Profile required | `openwop-node-packs` (for `--print-publish-cmd` mode) |
-| Host target      | None for dry-run; super-admin-authorized registry for `--print-publish-cmd` |
-| Run modes        | default (dry-run) / `--print-publish-cmd` |
+| v2 family required | none (runs locally); `--print-publish-cmd` reads a registry's `/.well-known/openwop-registry.json` |
+| Host target        | dry-run |
+| Run modes          | default (dry-run) / `--print-publish-cmd` |
 
-## Why dry-run by default
+## What it does
 
-Publishing to a real registry requires super-admin authorization. Most readers won't have that, and accidentally publishing to production would be bad. So the default mode does everything except the network PUT:
-
-1. Generates an Ed25519 keypair (per-run, ephemeral).
-2. Constructs a sample manifest under the `private.local-example.*` scope (a real public registry won't accept this scope per `spec/v1/node-packs.md` §Naming — safe by default).
-3. Computes canonical JSON + Ed25519 signature.
-4. Prints the curl command you'd run for live publish.
+1. Generates an ephemeral Ed25519 keypair.
+2. Builds a v2 `pack.json` ([`schemas/v2/node-pack-manifest.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/node-pack-manifest.schema.json)): `kind: "node"`, an `engines.openwop` range with an explicit major ceiling (`>=2.0.0 <3.0.0`), a `runtime`, one node, and the closed signing block `{ keyId, scheme: "ed25519-canonical-json" }`. The name is under `private.local-example.*`, which MUST NOT appear in a public registry — safe by default.
+3. Signs the RFC 8785 (JCS) bytes of `pack.json` — a detached 64-byte Ed25519 signature ([`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) §Signing). A signature over tarball bytes is not a v2 signature.
+4. Verifies it with the public key, and checks that a manifest with a changed version does not verify.
 
 ## Run
 
 ```bash
-# Default (no auth, no network)
-npm start
-
-# Print the curl PUT command (requires super-admin env vars)
-# Renamed from --live in this version; --live is accepted as a
-# deprecated alias. The flag prints the publish command but does NOT
-# execute it — the example doesn't ship a buildable pack source.
-OPENWOP_PACK_REGISTRY_URL=https://your-registry.example \
-OPENWOP_PACK_PUBLISH_KEY=$YOUR_SUPER_ADMIN_KEY \
-  npm start -- --print-publish-cmd
+npm start                              # dry-run
+npm start -- --print-publish-cmd       # also read the registry's v2 endpoints (--live is a deprecated alias)
+OPENWOP_PACK_REGISTRY_URL=https://your-registry.example npm start -- --print-publish-cmd
 ```
 
-## Output (dry-run)
+## Output (dry-run, a real run)
 
 ```
-=== OpenWOP node-pack publishing example ===
+=== OpenWOP v2 node-pack publishing example ===
 Mode: dry-run (default)
 
 → Generating Ed25519 keypair...
   ✓ keypair generated
-→ Built manifest:
+→ Built pack.json:
+  kind:     node
   name:     private.local-example.echo-tool
   version:  1.0.0
-  scope:    private.local-example (won't accept on public registries)
-  signing:  ed25519 / detached
+  engines:  openwop >=2.0.0 <3.0.0
+  scope:    private.local-example (MUST NOT appear in a public registry)
+  signing:  ed25519-canonical-json / keyId local-example-1
 
-→ Canonical JSON (NNN bytes):
-  {"description":"Reference example pack — single core.noop-style node...
+→ JCS bytes (520):
+  {"description":"Reference example pack — one pure echo node, demonstration only.","engines":{"openwop":">=2.0.0 <3.0.0"}...
 
-→ Ed25519 signature (base64): MEUCIQDXP...
+→ Ed25519 signature (64 bytes, base64): nDzdqb1ucqtbZpjwf1dWIsGAPrqtWCziqYFm/Fs0...
+→ Public key (raw 32 bytes, base64):    QipUXkY2qWBUdDl1R0dUhS1dPRVbeQqXGx7wbl0mbug=
 
-→ Public key (DER, base64):  MCowBQYDK...
+→ Verifying the signature against the public key...
+  ✓ verifies; a manifest with a changed version does not
 
-To publish to a real registry:
-  1. Pre-register your public key with the registry operator
-     (super-admin action; out of scope for this example).
-  2. Build the actual pack tarball:
-       cd your-pack-source && tar czf pack.tgz manifest.json dist/
-  3. PUT the tarball:
-       curl -X PUT \
-         "$OPENWOP_PACK_REGISTRY_URL/v1/packs/private.local-example.echo-tool/-/1.0.0" \
-         -H "Authorization: Bearer $OPENWOP_PACK_PUBLISH_KEY" \
-         -H "Content-Type: application/gzip" \
-         --data-binary @pack.tgz
-  4. Re-run this example with --print-publish-cmd to print the
-     populated curl command (the example doesn't run the PUT itself).
+Re-run with --print-publish-cmd to see where this version would live in a
+registry's v2 tree and how that registry accepts submissions.
 
 ✓ Dry-run complete (no network calls made).
 ```
 
+`--print-publish-cmd` appends (a real run against `packs.openwop.dev`):
+
+```
+→ Registry: https://packs.openwop.dev/.well-known/openwop-registry.json
+  name: openwop reference registry
+  signing schemes: [ed25519-canonical-json]
+  This version would live in the v2 tree at:
+    versionManifest  https://packs.openwop.dev/v2/packs/private.local-example.echo-tool/-/1.0.0.json
+    versionTarball   https://packs.openwop.dev/v2/packs/private.local-example.echo-tool/-/1.0.0.tgz
+    versionSignature https://packs.openwop.dev/v2/packs/private.local-example.echo-tool/-/1.0.0.sig
+    versionSbom      https://packs.openwop.dev/v2/packs/private.local-example.echo-tool/-/1.0.0.sbom.json
+
+  Submissions: no write API; publish by github-pull-request at https://github.com/openwop/openwop-registry/pulls.
+  Before submitting: register your keyId with the registry operator (its
+  signingKeys[] entry names the namespaces the key may sign), use a public
+  scope (vendor.<org>.* / community.<author>.*), and build a deterministic
+  tarball containing pack.json and the runtime entry. The registry refuses a
+  republished version, a bad signature, or an engine range without a ceiling.
+
+✓ Publish plan printed (no submission made).
+```
+
+Registry paths come from the registry document's `endpoints.v2`; a client resolves them there rather than constructing them (`packs.md` §"The registry tree").
+
 ## What this teaches
 
-- **Manifest shape.** Required fields per `spec/v1/node-packs.md` §"Manifest format": `name`, `version`, `runtime`, `nodes`, `signing`.
-- **Naming scopes.** `private.<host>.*` (host-internal) vs `community.*` / `vendor.<org>.*` / `local.*` (per `spec/v1/node-packs.md` §Naming).
-- **Canonical JSON.** Sort keys recursively; signing operates on the canonical form so signatures are reproducible.
-- **Ed25519 signature flow.** Sign canonical JSON → registry verifies against a published keychain (per `spec/v1/registry-operations.md` §"Signing keychain"); detached `.sig` blob served via `GET /v1/packs/{name}/-/{version}.sig` per `openwop/openwop@434c8f2`.
+- **The engine range.** `engines.openwop` is a `>=` lower bound plus an explicit `<` major ceiling. A v2 host treats a range with no upper bound as `<2.0.0` and refuses a range that does not admit its major with `pack_engine_unsupported`.
+- **`kind` is required** on every bare and version manifest.
+- **One signing scheme.** `signing` is `{ keyId, scheme }` and nothing else; the v1 `publicKeyRef` / `signatureRef` / `method` block fails validation. A verifier checks the signature against the issuing registry's key for `keyId` and that key's `permittedNamespaces`.
+- **Canonical JSON.** Signing is over JCS bytes (sorted keys, no whitespace), so any verifier reproduces the exact input.
 
 ## What this does NOT do
 
-- **Build a pack tarball.** Real publishing tar-packs a manifest + `dist/` directory. The example has no `dist/` to pack — it's documentation, not a working pack.
-- **Register the public key.** A real registry validates signatures against pre-registered public keys (super-admin operation). The example generates ephemeral keys; even if you ran `--print-publish-cmd` and copy-pasted the curl, the registry would reject the signature with `signature_unknown_key` since the public key isn't in the keychain.
-- **Test the registry's response shape.** The conformance scenarios `pack-registry.test.ts` + `maliciousManifest.test.ts` cover the registry HTTP contract.
-
-## Why the live PUT is intentionally incomplete
-
-A live publish requires:
-1. Super-admin auth at the registry operator level.
-2. Pre-registration of the publisher's public key in the keychain.
-3. A real built pack tarball — not a stub.
-
-All three are deployment-specific. An example that bundled a working pack would imply that one specific pack shape is canonical, which it isn't. The example shows the protocol contract; the build step is your project's concern.
+- **Build a tarball.** A real publication packs `pack.json` and the runtime entry into a deterministic tarball; the example has no `dist/`.
+- **Register the key.** A registry accepts only signatures from a `signingKeys[]` entry whose `status` is `active` and whose `permittedNamespaces` cover the pack name; the ephemeral key here is in no registry.
+- **Submit anything.** `packs.openwop.dev` has no write API; it publishes through pull requests to [`openwop-registry`](https://github.com/openwop/openwop-registry) (`writeApi.publishMethod: github-pull-request`). To start a real pack, run `node scripts/new-pack.mjs <name>` there, which scaffolds from the registry's v2 template.
 
 ## See also
 
-- [`../../spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) — full pack contract
-- [`../../spec/v1/registry-operations.md`](https://github.com/openwop/openwop/blob/main/spec/v1/registry-operations.md) — operator-side reference
-- [`../../SECURITY/threat-model-node-packs.md`](https://github.com/openwop/openwop/blob/main/SECURITY/threat-model-node-packs.md) — supply-chain threat model
-- [`../../conformance/src/scenarios/pack-registry.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/pack-registry.test.ts) — registry HTTP contract
+- [`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) — engine range, registry tree, signing, version manifests
+- [`docs/PACK-AUTHOR-QUICKSTART.md`](https://github.com/openwop/openwop/blob/main/docs/PACK-AUTHOR-QUICKSTART.md) — the pack author path end to end
+- [`SECURITY/threat-model-node-packs.md`](https://github.com/openwop/openwop/blob/main/SECURITY/threat-model-node-packs.md) — supply-chain threat model

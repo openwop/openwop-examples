@@ -54,7 +54,7 @@
     { "id": "e5", "sourceNodeId": "merge", "targetNodeId": "sink" }
   ],
   "triggers": [{ "id": "manual", "type": "manual" }],
-  "variables": {},
+  "variables": [],
   "metadata": { "example": "branching-workflow", "demonstrates": ["fan-out", "fan-in", "all_success-merge"] },
   "settings": {}
 }

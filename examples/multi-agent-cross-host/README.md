@@ -1,68 +1,76 @@
 # Cross-host parent-child workflow sample
 
-> MA-6 from `plans/openwop-protocol-gap-closure-plan.md` Workstream 6. Runnable evidence of an OpenWOP parent issuing a child task to an A2A peer and projecting the peer's terminal state back to OpenWOP's `run.status` per the canonical state-projection table.
+An OpenWOP parent hands a child task to an **A2A 1.0 peer** on another host and projects the peer's task state back onto the parent's `run.status`. The peer is real: a v2 host's A2A interface (the v2 reference host serves one — `a2a.profiles: [a2a-1.0]`, an Agent Card at `a2a.agentCardUrl`, one JSONRPC interface).
 
-Companion to [`examples/multi-agent-research-assistant/`](../multi-agent-research-assistant/README.md) (in-host multi-agent composition, MA-1). This example covers the **other** boundary — when the worker lives on a **different host** reachable via [A2A v1](https://a2a-protocol.org/).
+Companion to [`examples/multi-agent-research-assistant/`](../multi-agent-research-assistant/README.md) (in-host multi-agent composition). This sample covers the **other** boundary — when the worker lives on a different host reachable over [A2A](https://a2a-protocol.org/).
 
-## What this is
+| v2 family required | `a2a` on the peer (profile `a2a-1.0`, `agentCardUrl`) |
+| Host target        | the v2 reference host as the peer, or any v2 host serving an A2A 1.0 interface |
+| Run modes          | default |
 
-A standalone TypeScript script that boots the conformance suite's [`A2AFakePeer`](https://github.com/openwop/openwop/blob/main/conformance/src/lib/a2a-fake-peer.ts), drives a complete parent-child workflow across the boundary, and asserts the canonical state-projection rules from [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) §"State projection".
+## What it does
 
-Six scenarios cover the projection table end-to-end:
+[`bridge.mjs`](./bridge.mjs) plays the parent host's bridge node:
 
-| Scenario | A2A terminal state | OpenWOP `run.status` projection | Reason code |
-|---|---|---|---|
-| Happy path | `completed` | `completed` | — |
-| Drift point #3 | `auth-required` | `waiting-input` | `auth_required_by_remote` |
-| Drift point #4 | `rejected` | `failed` | `rejected_by_remote` |
-| Plain failure | `failed` | `failed` | — |
-| Cancellation | `canceled` (1 `l`) | `cancelled` (2 `l`) | — |
-| Replay determinism | `rejected` × 2 | identical projection | — |
+1. `GET /.well-known/openwop` with `OpenWOP-Version: 2` → `a2a.agentCardUrl`; `GET` the card → the JSONRPC interface at `protocolVersion` 1.0.
+2. `SendMessage` → the peer starts a run of its one skill (on the reference host, `conformance-approval`), whose approval gate suspends the task: `TASK_STATE_INPUT_REQUIRED`.
+3. A second `SendMessage` on the task (`taskId`, `contextId`) with a `data` part `{ action, decidedAt }` resolves the gate through the peer's REST resolve path:
+   - `accept` → `TASK_STATE_COMPLETED` → `run.status` `completed`
+   - `reject` → `TASK_STATE_FAILED` → `run.status` `failed`
+4. `SendMessage` then `CancelTask` → `TASK_STATE_CANCELED` → `run.status` `cancelled`.
+5. The projection rows a live peer does not reach on demand (`auth-required`, `rejected`, an unknown state) and the projection's determinism, checked as a pure function.
+
+`message.messageId` is the peer's idempotency seed (a repeat answers the task it already reached), so the bridge derives it from `(parentRunId, "delegate", step)`; the sample resends one reply and asserts the same task comes back.
 
 ## Run
 
 ```bash
-cd /path/to/openwop
-npx tsx examples/multi-agent-cross-host/bridge.ts
+npm start                                   # the v2 reference host as the peer
+OPENWOP_BASE_URL=https://peer-host.example OPENWOP_API_KEY=$PEER_KEY npm start
 ```
 
-Expected output:
+When the peer does not advertise an A2A 1.0 interface, the sample says so and exits 0.
+
+## Output (a real run against the v2 reference host)
 
 ```
-ok multi-agent-cross-host — A2A bridge state-projection verified end-to-end
-  happy-path:    A2A=completed → OpenWOP=completed
-  AUTH_REQUIRED: A2A=auth-required → OpenWOP=waiting-input (reason=auth_required_by_remote)
-  REJECTED:      A2A=rejected → OpenWOP=failed (reason=rejected_by_remote)
-  FAILED:        A2A=failed → OpenWOP=failed
-  CANCELED:      A2A=canceled → OpenWOP=cancelled
-  replay-deterministic: 2 independent invocations produced identical projection
+→ Discovery: http://127.0.0.1:3838/.well-known/openwop (OpenWOP-Version: 2)
+  peer: openwop-host-v2-reference — skill conformance-approval at http://127.0.0.1:3838/a2a/jsonrpc
+ok multi-agent-cross-host — A2A 1.0 peer state projected onto run.status end-to-end
+  accept:         TASK_STATE_INPUT_REQUIRED → TASK_STATE_COMPLETED ⇒ OpenWOP=completed
+  reject:         TASK_STATE_INPUT_REQUIRED → TASK_STATE_FAILED ⇒ OpenWOP=failed
+  cancel:         TASK_STATE_INPUT_REQUIRED → TASK_STATE_CANCELED ⇒ OpenWOP=cancelled
+  AUTH_REQUIRED:  ⇒ OpenWOP=waiting-input (reason=auth_required_by_remote)  [pure]
+  REJECTED:       ⇒ OpenWOP=failed (reason=rejected_by_remote)  [pure]
+  idempotent:     a repeated messageId answered the same task
 ```
 
-## The bridge
+## The projection
 
-[`bridge.ts`](./bridge.ts) ships two reference pieces of code that future OpenWOP hosts implementing `core.a2a.invoke` can adopt:
+`projectA2AStateToOpenWop(wireState)` is the reverse projection (consuming an external A2A agent). It accepts both spellings: A2A 1.0 renders the state as `TASK_STATE_*`; the stored vocabulary ([`schemas/v2/a2a-task-state.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/a2a-task-state.schema.json)) is lowercase-hyphen, and the two are a bijection.
 
-1. **`projectA2AStateToOpenWop(wireState)`** — pure function applying the canonical projection per `a2a-integration.md` §"A2A → openwop (reverse projection)". Handles drift points #3 and #4 with the documented reason codes; falls through to `failed` with `unknown_remote_state` for forward-compatible unknown states.
-
-2. **`invokeA2APeer(endpoint, skill, message)`** — reference bridge node. Issues `message/send`, polls `tasks/get` until the task reaches a terminal wire state, applies the projection, and returns the projected `run.status` + the full A2A Task. The implementation comment lists the production-grade additions (timeout, retry, OAuth2, OTel propagation, idempotency) that a real host MUST layer on top.
+| A2A state | Parent `run.status` | Reason code |
+|---|---|---|
+| `submitted`, `working` | `running` | — |
+| `input-required` | `waiting-input` (a bridge that reads the status message MAY choose `waiting-approval`) | — |
+| `auth-required` | `waiting-input` | `auth_required_by_remote` |
+| `completed` | `completed` | — |
+| `failed` | `failed` | — |
+| `canceled` (1 `l`) | `cancelled` (2 `l`) | — |
+| `rejected` | `failed` | `rejected_by_remote` |
+| anything else | `failed` | `unknown_remote_state` |
 
 ## What this is NOT
 
-This example is NOT a production bridge. Specifically:
+A production bridge also needs:
 
-- **No timeout / retry / backoff.** The polling loop is tight and ungated; a real bridge MUST respect the host's `OPENWOP_A2A_POLL_TIMEOUT_MS` (or analogue) and back off exponentially.
-- **No OAuth2 client-credentials.** The fake peer accepts unauthenticated POSTs; real A2A endpoints typically require an OAuth2 access token per their AgentCard's `securitySchemes`.
-- **No OTel trace propagation.** Production hosts MUST inject the parent run's trace context into `Task.metadata.openwop.traceContext` per [`observability.md`](https://github.com/openwop/openwop/blob/main/spec/v1/observability.md) §"Cross-host trace propagation" so a single trace spans both hosts.
-- **No idempotency.** Real bridges MUST key the `message/send` call off `(parentRunId, nodeId)` and reuse the resulting `taskId` on retry — otherwise a retry creates a duplicate task on the peer.
-- **No forward projection.** This example only covers A2A → OpenWOP (reverse). When OpenWOP is the agent and A2A clients call IN, the host applies the forward projection per `a2a-integration.md` §"openwop → A2A". The conformance scenario `a2a-task-roundtrip.test.ts` covers both directions.
+- **Timeouts and backoff** — the settle loop polls `GetTask` at a fixed 100 ms for at most 4 s.
+- **The peer's auth scheme** — the sample sends the peer's own API key as a Bearer; a real bridge authenticates as the parent host's outbound identity per the card's `securitySchemes`.
+- **Trace propagation** — carry the parent run's trace context on the message ([`interop.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/interop.md) §"Trace context").
+- **Push or streaming** — the reference host advertises neither `streaming` nor `pushNotifications` by default, so the sample polls.
 
-## How this is verified
+## See also
 
-The same projection rules are enforced normatively by `conformance/src/scenarios/a2a-task-roundtrip.test.ts` (the suite-tier check, run on every host claiming A2A composition). This example is the runnable narrative an integrator can read end-to-end **before** wiring `core.a2a.invoke` into their own host.
-
-## Related material
-
-- [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) — normative integration spec (FINAL v1, 2026-05-05).
-- [`examples/multi-agent-research-assistant/README.md`](../multi-agent-research-assistant/README.md) — in-host multi-agent composition (orchestrator + dispatch + AgentRef + reasoning events + HITL + memory).
-- [`conformance/src/scenarios/a2a-task-roundtrip.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/a2a-task-roundtrip.test.ts) — conformance scenario covering the same projection contract.
-- [`conformance/src/lib/a2a-fake-peer.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/lib/a2a-fake-peer.ts) — the in-process synthetic peer this example reuses.
+- [`spec/v2/core/interop.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/interop.md) — A2A and MCP interop: negotiation, the operation mappings, multi-turn, error details, per-agent cards
+- [`spec/v2/interop-map.json`](https://github.com/openwop/openwop/blob/main/spec/v2/interop-map.json) — the `a2a.*` operation, state and error rows
+- [`examples/multi-agent-research-assistant/README.md`](../multi-agent-research-assistant/README.md) — in-host multi-agent composition

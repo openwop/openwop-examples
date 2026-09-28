@@ -5,10 +5,10 @@
   "description": "Reference workflow-chain pack proving the RFC 0013 manifest format works end-to-end across schema validation, registry indexing, and the reference expansion library. Two chains: a 1-node 'summarize text' chain showing literal parameter substitution, and a 2-node 'fetch-and-summarize' chain showing multi-node DAG composition with edge wiring and capability propagation. In-tree only (NOT published to packs.openwop.dev); the canonical proof that the chain-pack contract is implementable with real-world-shaped content.",
   "author": "openwop project",
   "license": "Apache-2.0",
-  "homepage": "https://openwop.dev/spec/v1/workflow-chain-packs.md",
+  "homepage": "https://openwop.dev/spec/v2/core/workflow-chain-packs.html",
   "repository": "https://github.com/openwop/openwop",
   "engines": {
-    "openwop": ">=1.1 <2.0.0"
+    "openwop": ">=1.1.0 <3.0.0"
   },
   "chains": [
     {

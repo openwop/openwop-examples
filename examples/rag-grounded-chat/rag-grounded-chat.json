@@ -88,11 +88,11 @@
   "metadata": {
     "tags": ["rag", "knowledge", "ai", "vendor.myndhyve"],
     "packs": [
-      "vendor.myndhyve.knowledge-tools@1.0.0",
-      "core.openwop.ai@1.0.0"
+      "vendor.myndhyve.knowledge-tools@1.0.1",
+      "core.openwop.ai@1.4.1"
     ],
     "hostCapabilities": [
-      "host.knowledge",
+      "knowledge",
       "aiProviders"
     ]
   },
