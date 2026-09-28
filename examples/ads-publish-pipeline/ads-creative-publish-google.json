@@ -175,14 +175,14 @@
   "metadata": {
     "tags": ["ads", "creative", "publish", "google", "vendor.myndhyve"],
     "packs": [
-      "vendor.myndhyve.ads-studio-core@1.0.0",
-      "vendor.myndhyve.ads-platforms@1.0.0",
-      "vendor.myndhyve.ads-copy-generate@1.0.0",
-      "vendor.myndhyve.ads-image-generate@1.0.0",
-      "vendor.myndhyve.ads-creative-validate@1.0.0",
-      "vendor.myndhyve.ads-tools@1.0.0",
-      "vendor.myndhyve.ads-export@1.0.0",
-      "vendor.myndhyve.ads-publish-google@1.0.0"
+      "vendor.myndhyve.ads-studio-core@1.0.1",
+      "vendor.myndhyve.ads-platforms@1.0.1",
+      "vendor.myndhyve.ads-copy-generate@1.0.1",
+      "vendor.myndhyve.ads-image-generate@1.0.1",
+      "vendor.myndhyve.ads-creative-validate@1.0.1",
+      "vendor.myndhyve.ads-tools@1.0.1",
+      "vendor.myndhyve.ads-export@1.0.1",
+      "vendor.myndhyve.ads-publish-google@1.0.1"
     ],
     "hostCapabilities": ["aiProviders", "aiProviders.imageGeneration", "secrets.resolveInPack"]
   },

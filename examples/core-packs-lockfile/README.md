@@ -1,86 +1,59 @@
-# `core-packs-lockfile/` — workspace lockfile demo pinning the 4 audit-gated core packs
+# `core-packs-lockfile/` — a v2 workspace lockfile pinning four core packs
 
-Reference workspace [`pack-lockfile`](https://github.com/openwop/openwop/blob/main/schemas/pack-lockfile.schema.json)
-that pins the four core packs whose **registry publication** is gated on
-the external security audit (`SECURITY/external-audit-engagement.md` §2.1):
+A reference [`pack-lockfile`](https://github.com/openwop/openwop/blob/main/schemas/v2/pack-lockfile.schema.json) that pins four core packs from the registry's **v2 tree** at `packs.openwop.dev`:
 
-- `core.openwop.ai@1.0.0`
-- `core.openwop.http@1.0.0`
-- `core.openwop.mcp@1.0.0`
-- `core.openwop.triggers@1.0.0`
+- `core.openwop.ai@1.4.1`
+- `core.openwop.http@2.1.1`
+- `core.openwop.mcp@1.1.3`
+- `core.openwop.triggers@1.1.2`
 
-The packs themselves are **built, signed, and in-tree** at
-`registry/v1/packs/<name>/-/1.0.0.{tgz,sig,sbom.json,json}`. The audit
-gate only blocks pushing them to the hosted registry at
-`packs.openwop.dev`; everything below the push step ships in the repo.
-This lockfile is the consumer-side artifact that pins them to v1.0.0
-with SRI integrity hashes + Ed25519 signature material.
+Each record carries the tarball URL in the v2 tree (`resolved`), its SRI hash (`integrity`), the Ed25519 signature material (`signature`), and the pack's `peerDependencies` (v2 family keys, echoed for audit).
 
 ## Why this exists
 
-Per `spec/v1/node-packs.md` §"Dependency resolution + lockfile", a
-workspace records a lockfile alongside its workflow definitions; the
-registry resolver MUST honor pinned versions on subsequent installs.
-This file demonstrates the lockfile shape against the canonical core
-packs — useful for:
+A workspace records a lockfile alongside its workflow definitions; the resolver MUST honor the pinned versions on later installs instead of re-running range resolution. This file shows the shape against real published packs, and is useful for:
 
-1. **Schema-validity evidence** — the file validates against
-   [`schemas/pack-lockfile.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/pack-lockfile.schema.json).
-2. **Air-gapped install reproducibility** — an operator with the
-   in-tree tarballs + this lockfile can install the 4 packs without
-   reaching the hosted registry. The `resolved:` URLs point at
-   `packs.openwop.dev` for documentation; substitute a local file://
-   path when air-gapped.
-3. **Signature verification offline** — each pack's
-   `signature.{algorithm, publicKey, value}` carries the raw Ed25519
-   bytes; resolvers verify against the publisher's advertised key
-   without re-fetching from the registry.
+1. **Schema validity** — it validates against [`schemas/v2/pack-lockfile.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/pack-lockfile.schema.json).
+2. **Reproducible installs** — an operator with the tarballs and this lockfile can install the four packs without re-resolving. The `resolved:` URLs point at `packs.openwop.dev`; substitute a local path when air-gapped (the `integrity` check still applies).
+3. **Offline signature verification** — each `signature.{algorithm, publicKey, value}` carries the raw Ed25519 bytes, so a resolver verifies without re-fetching the registry's key.
+
+## What the signature covers
+
+v2 has one signing scheme, `ed25519-canonical-json` ([`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) §Signing): a detached 64-byte Ed25519 signature over the RFC 8785 (JCS) bytes of `pack.json` inside the tarball — **not** over the tarball bytes. `signature.value` is the version's `.sig` file base64-encoded; `signature.publicKey` is the raw 32-byte key of the signer (`keyId: openwop-team-1`, served at `/keys/openwop-team-1.pub`), base64-encoded. The tarball bytes are covered separately by `integrity`.
 
 ## Verifying
 
 ```bash
-# Validate the lockfile against the published schema
-npx -y ajv-cli@5 validate --strict=false --spec=draft2020 \
-  -s schemas/pack-lockfile.schema.json \
-  -d examples/core-packs-lockfile/openwop-pack-lockfile.json
-
-# Verify each pack's tarball matches the recorded integrity
-for p in ai http mcp triggers; do
-  expected=$(jq -r ".packs[] | select(.name == \"core.openwop.$p\") | .integrity" \
-    examples/core-packs-lockfile/openwop-pack-lockfile.json | sed 's/sha256-//')
-  actual=$(openssl dgst -sha256 -binary \
-    "registry/v1/packs/core.openwop.$p/-/1.0.0.tgz" | base64)
-  [ "$expected" = "$actual" ] && echo "✓ core.openwop.$p" || echo "✗ core.openwop.$p MISMATCH"
-done
-
-# Verify each pack's signature with the canonical verifier
-node registry/scripts/verify-signatures.mjs
+npm test            # or: node verify.mjs
 ```
 
-## Pack-author key
+[`verify.mjs`](./verify.mjs) downloads each pinned tarball, checks its SHA-256 against `integrity`, extracts `pack.json`, checks it is the pinned name and version and a v2 manifest (`kind` present, an `engines.openwop` ceiling that admits major 2), and verifies the signature over its JCS bytes. Real output:
 
-All 4 packs in this lockfile are signed with `keyId: openwop-team-1`
-(public key at `registry/keys/openwop-team-1.pub`). The signature is
-over the canonical manifest JSON per
-`scripts/build-pack-tarball.mjs` §"Signing input" — not over the
-tarball bytes. The lockfile's `signature.value` carries this same
-Ed25519 signature, and `signature.publicKey` is the raw 32-byte key
-extracted from the SPKI DER (base64-encoded).
+```
+✓ core.openwop.ai@1.4.1  kind=node engines=>=1.0.0 <3.0.0  integrity + signature verified
+✓ core.openwop.http@2.1.1  kind=node engines=>=1.0.0 <3.0.0  integrity + signature verified
+✓ core.openwop.mcp@1.1.3  kind=node engines=>=1.0.0 <3.0.0  integrity + signature verified
+✓ core.openwop.triggers@1.1.2  kind=node engines=>=1.0.0 <3.0.0  integrity + signature verified
+✓ all 4 pinned packs verified against https://packs.openwop.dev
+```
+
+A changed byte in any `signature.value` makes that row fail (`FAILED: signature`) and the script exit 1.
+
+To re-pin to the registry's current `latest` versions:
+
+```bash
+node verify.mjs --generate && node verify.mjs
+```
+
+Both modes resolve registry paths through `/.well-known/openwop-registry.json` `endpoints.v2`; a client does not construct them ([`packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) §"The registry tree").
 
 ## What this is NOT
 
-- **Not a published lockfile.** This is an example, not the output of a
-  real install resolution against `packs.openwop.dev`. A workspace
-  using these packs in production generates its own lockfile via
-  `npm install`-style resolution.
-- **Not a substitute for the audit gate.** The 4 core packs remain
-  flagged as audit-required in
-  `SECURITY/external-audit-engagement.md` §2.1; this evidence proves
-  they're build-ready, not that they're cleared for publication.
+- **Not a resolver's output.** It pins four packs by hand, not the transitive closure of a real workspace's workflow definitions. A workspace generates its own lockfile at install.
+- **Not a trust decision.** Verifying the signature proves the registry's `openwop-team-1` key signed this `pack.json`; whether to trust that key for the `core.openwop.*` namespace is the registry's `signingKeys[].permittedNamespaces`, which a resolver checks separately.
 
 ## See also
 
-- [`schemas/pack-lockfile.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/pack-lockfile.schema.json) — normative shape.
-- [`spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) §"Dependency resolution + lockfile".
-- [`registry/scripts/verify-signatures.mjs`](https://github.com/openwop/openwop-registry/blob/main/registry/scripts/verify-signatures.mjs) — canonical verifier (28/28 packs pass as of 2026-05-13).
-- [`SECURITY/external-audit-engagement.md`](https://github.com/openwop/openwop/blob/main/SECURITY/external-audit-engagement.md) §2.1 — audit-gated pack list.
+- [`schemas/v2/pack-lockfile.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/pack-lockfile.schema.json) — normative shape.
+- [`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) — engine range, registry tree, signing, version manifests.
+- [`openwop-registry`](https://github.com/openwop/openwop-registry) — the registry source; `registry/v2/` is the tree these URLs serve.

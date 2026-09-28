@@ -11,14 +11,14 @@ protocol repo stays a lean spec + conformance contract.
   - **`v2-reference/`** — **the v2 reference host**: implemented from `spec/v2/core/*.md` and the
     generated v2 documents, never adapted from a v1 host. Certified on the 2.x suite (see its
     `conformance.md`). Start here for a new integration — v2 is the current protocol major.
-  - `in-memory/` — minimal, dependency-free (Node stdlib) **v1** host; the default target for the samples
+  - `in-memory/` — minimal, dependency-free (Node stdlib) **v1** host
   - `sqlite/` — durable single-file v1 host (`better-sqlite3`)
   - `postgres/` — production-profile v1 host (`pg`; pglite for in-process tests)
   - `python/` — v1 host in Python (stdlib)
   - `wasm-sandbox/` — RFC 0035 sandboxed-execution reference
 - `examples/` (top level) — runnable workflow samples (`tiny-workflow`, `approval-workflow`,
-  `streaming-client`, `mcp-tool`, …). Samples are `fetch`-only. `tiny-workflow` and `streaming-client`
-  speak v2 and default to the v2 reference host; the others default to the in-memory v1 host.
+  `streaming-client`, `mcp-tool`, `branch-fork`, …). Samples are `fetch`-only, speak v2, and default
+  to the v2 reference host; see [`examples/README.md`](examples/README.md) for what each one needs.
 
 > **v1 and v2.** v1 hosts are not retired: through the overlap a host advertises both majors and
 > keeps `preferredVersion` on `1.x` by MUST (`spec/v2/core/versioning.md` §1.1), so the v1 hosts
@@ -31,9 +31,14 @@ protocol repo stays a lean spec + conformance contract.
 # boot the v2 reference host
 ( cd examples/hosts/v2-reference && npm install --legacy-peer-deps && npm start )   # serves http://127.0.0.1:3838
 
-# in another shell, run a v2 sample against it
-( cd examples/tiny-workflow && npm test )
+# in another shell, run v2 samples against it
+( cd examples/tiny-workflow && npm test )        # discovery → POST /runs → poll to completed
+( cd examples/approval-workflow && npm test )    # suspend at an approval gate, resolve it, complete
+( cd examples/streaming-client && npm test )     # the run's event stream over SSE
 ```
+
+Every sample sends `OpenWOP-Version: 2`, uses the unversioned v2 paths (`/runs`, `/runs/{runId}/events`),
+and projects tenant-bound run ids into one path segment (`tenant~2Fopaque`).
 
 ## Conformance
 

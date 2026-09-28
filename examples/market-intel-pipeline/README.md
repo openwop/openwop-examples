@@ -72,24 +72,24 @@ The reference workflow JSONs in this directory express the **single-source linea
 
 | Capability | Used by |
 |---|---|
-| `aiProviders: supported` | All 8/9 nodes (every typeId calls `ctx.callAI`) |
-| `host.webResearch.fetchBatch: supported` (production) | The `fetchBatch` step between `ai-discovery` and `content-extraction`. Reference JSONs leave this step OFF the DAG and instead reference `$.run.variables.pageHtml` — host-fetched out-of-band. |
+| `aiProviders` | All 8/9 nodes (every typeId calls `ctx.callAI`) |
+| `webResearch` (production; v1 alias `host.webResearch`) | The `fetchBatch` step between `ai-discovery` and `content-extraction`. Reference JSONs leave this step OFF the DAG and instead reference `$.run.variables.pageHtml` — host-fetched out-of-band. |
 
 ## Pack inventory
 
-All 9 packs are published at `packs.openwop.dev`:
+All 9 packs are published in the registry's v2 tree at `packs.openwop.dev`:
 
 | Pack | typeId(s) | Spec PR |
 |---|---|---|
-| [`vendor.myndhyve.market-intel-query-builder@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-query-builder/index.json) | `market-intel.query-builder` | — |
-| [`vendor.myndhyve.market-intel-discovery@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-discovery/index.json) | `market-intel.ai-discovery` | — |
-| [`vendor.myndhyve.market-intel-thread-triage@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-thread-triage/index.json) | `market-intel.thread-triage` | — |
-| [`vendor.myndhyve.market-intel-content-extraction@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-content-extraction/index.json) | `market-intel.content-extraction` | — |
-| [`vendor.myndhyve.market-intel-voc@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-voc/index.json) | `market-intel.voc-extraction` | — |
-| [`vendor.myndhyve.market-intel-opportunity-scoring@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-opportunity-scoring/index.json) | `market-intel.opportunity-scoring` | — |
-| [`vendor.myndhyve.market-intel-ad-angles@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-ad-angles/index.json) | `market-intel.ad-angles` | — |
-| [`vendor.myndhyve.market-intel-audience-targeting@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.market-intel-audience-targeting/index.json) | `market-intel.audience-targeting` | — |
-| [`vendor.myndhyve.ads-copy-generate@1.0.0`](https://packs.openwop.dev/v1/packs/vendor.myndhyve.ads-copy-generate/index.json) | `ads.copy.generate` | — |
+| [`vendor.myndhyve.market-intel-query-builder@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-query-builder/index.json) | `market-intel.query-builder` | — |
+| [`vendor.myndhyve.market-intel-discovery@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-discovery/index.json) | `market-intel.ai-discovery` | — |
+| [`vendor.myndhyve.market-intel-thread-triage@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-thread-triage/index.json) | `market-intel.thread-triage` | — |
+| [`vendor.myndhyve.market-intel-content-extraction@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-content-extraction/index.json) | `market-intel.content-extraction` | — |
+| [`vendor.myndhyve.market-intel-voc@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-voc/index.json) | `market-intel.voc-extraction` | — |
+| [`vendor.myndhyve.market-intel-opportunity-scoring@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-opportunity-scoring/index.json) | `market-intel.opportunity-scoring` | — |
+| [`vendor.myndhyve.market-intel-ad-angles@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-ad-angles/index.json) | `market-intel.ad-angles` | — |
+| [`vendor.myndhyve.market-intel-audience-targeting@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.market-intel-audience-targeting/index.json) | `market-intel.audience-targeting` | — |
+| [`vendor.myndhyve.ads-copy-generate@1.0.1`](https://packs.openwop.dev/v2/packs/vendor.myndhyve.ads-copy-generate/index.json) | `ads.copy.generate` | — |
 
 (`vendor.myndhyve.market-intel-community-rank` is an optional refinement step between `ai-discovery` and the rest — not in the reference DAGs but available for hosts that want to refine candidate communities before extraction.)
 
@@ -101,14 +101,16 @@ This directory's `.json` files are the canonical answer: declarative graphs that
 
 ## Activation
 
-To use one of these workflows on an OpenWOP host:
+These definitions run on a host that has the market-intel packs and an AI provider; the v2 reference host (`examples/hosts/v2-reference`) has neither, so they are not runnable there.
 
-1. Ensure the host advertises `aiProviders: supported` (+ `host.webResearch.fetchBatch: supported` for the production fan-out path).
-2. Ensure the host's pack registry has the 9 listed packs available at compatible versions.
-3. POST the workflow JSON to `/v1/workflows` (host endpoint).
-4. POST a run via `/v1/runs` with `{ workflowId: "vendor.myndhyve.market-intel-research", variables: { researchTopic, icpContext, productContext } }`.
+1. The host advertises the `aiProviders` family in its v2 discovery document (`GET /.well-known/openwop` with `OpenWOP-Version: 2`). The production fan-out path also needs the `webResearch` family; the reference DAGs do not use it.
+2. The host resolves the 9 listed packs at the listed versions from the registry's [v2 tree](https://packs.openwop.dev/.well-known/openwop-registry.json) (`endpoints.v2`).
+3. Install the workflow through the host's own tooling. v2 defines no workflow-registration operation; `GET /workflows/{workflowId}` reads an installed one.
+4. Start a run: `POST /runs` with `OpenWOP-Version: 2`, an `Idempotency-Key`, and `{ "workflowId": "<the installed id>", "inputs": { "researchTopic": "…", "icpContext": "…", "productContext": "…" } }`. Follow it with `GET /runs/{runId}/events` (SSE), the run id projected as one path segment (`tenant~2Fopaque`).
 
-See [`spec/v1/rest-endpoints.md`](https://github.com/openwop/openwop/blob/main/spec/v1/rest-endpoints.md) for the run lifecycle wire protocol.
+See [`spec/v2/core/runs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/runs.md) for the run lifecycle.
+
+**Not yet v2-shaped.** The definition bodies predate `schemas/v2/workflow-definition.schema.json` and do not validate against it: the `id` carries dots (v2: `^[a-z][a-z0-9_-]*$`), node `inputs` are bare `$.…` strings, literals, and objects with `$.…` strings inside, rather than `PortValue` objects, and `metadata.packs` / `metadata.hostCapabilities` are not `WorkflowMetadata` members. The pack references are checked against the v2 tree in CI (`scripts/check-example-pack-refs.mjs`).
 
 ## What's NOT in these JSONs
 

@@ -4,7 +4,7 @@
 
 This example is **documentation-first** — it doesn't ship a runnable host; it composes existing reference fixtures (`conformance/fixtures/conformance-orchestrator-*.json` + `conformance-agent-*.json`) into a single narrative an adopter can read end-to-end. The runnable bits live in the conformance suite + the Postgres reference host.
 
-If you want the runnable surface, see [`examples/hosts/postgres/`](../hosts/postgres/) — it implements every multi-agent capability shape this composition exercises.
+Event names below are the v2 names (`spec/v2/event-codemap.json`). No v2 example host advertises the multi-agent families yet: the v2 reference host (`examples/hosts/v2-reference`) does not serve `core.orchestrator.supervisor` or `core.dispatch`, and the Postgres reference host ([`examples/hosts/postgres/`](../hosts/postgres/)), which implements every shape this composition exercises, serves v1 through the overlap (its paths are `/v1/…` and its events carry the v1 names).
 
 ---
 
@@ -23,8 +23,8 @@ A research-assistant workflow is the canonical multi-agent worked example. A use
               │ (RFC 0006)               │   { agentId: "core.research.supervisor",
               │                          │     modelClass: "reasoning" }
               │ Emits:                   │
-              │   runOrchestrator.       │
-              │     decided              │
+              │   orchestrator.decided   │
+              │                          │
               │     { kind: "next-worker"│
               │       nextWorkerIds: ["worker-research"] }
               └──────────┬───────────────┘
@@ -45,8 +45,8 @@ A research-assistant workflow is the canonical multi-agent worked example. A use
               │                          │     memoryRef: "mem_<tenant>_<agent>_longTerm" }
               │ Emits:                   │
               │   agent.reasoned         │   ← verbosity-gated per
-              │   agent.toolCalled       │     RunOptions.configurable
-              │   agent.toolReturned     │     .reasoningVerbosity
+              │   agent.tool-called      │     RunOptions.configurable
+              │   agent.tool-returned    │     .ai.reasoningVerbosity
               │   agent.decided          │
               └──────────┬───────────────┘
                          ▼
@@ -54,18 +54,19 @@ A research-assistant workflow is the canonical multi-agent worked example. A use
               │ core.approvalGate        │
               │                          │
               │ Emits:                   │
-              │   approval.requested     │
+              │   interrupt.requested    │
               │ Suspends:                │
               │   waiting-approval       │
               └──────────┬───────────────┘
                          ▼
               ┌──────────────────────────┐
               │ (HITL resolution via     │
-              │  POST /v1/interrupts/   │
-              │  {token})                │
+              │  POST /interrupts/{token}│
+              │  or POST /runs/{runId}/  │
+              │  interrupts/{nodeId})    │
               │                          │
               │ Emits:                   │
-              │   approval.received      │
+              │   interrupt.resolved     │
               └──────────┬───────────────┘
                          ▼
               ┌──────────────────────────┐
@@ -73,7 +74,7 @@ A research-assistant workflow is the canonical multi-agent worked example. A use
               └──────────────────────────┘
 ```
 
-Every event in the boxes above is canonical per [`observability.md`](https://github.com/openwop/openwop/blob/main/spec/v1/observability.md) §"Canonical run lifecycle event names". Every `AgentRef` shape is normative per [`schemas/agent-ref.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/agent-ref.schema.json) + RFC 0002.
+Every event in the boxes above is a registered v2 type ([`events.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/events.md), names from [`event-codemap.json`](https://github.com/openwop/openwop/blob/main/spec/v2/event-codemap.json)); a host emitting `interrupt.requested` SHOULD also emit the kind-specific `approval.requested` ([`interrupt.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/interrupt.md) §Events). Every `AgentRef` shape is normative per [`schemas/v2/agent-ref.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/agent-ref.schema.json) + RFC 0002.
 
 ---
 
@@ -93,59 +94,56 @@ Each fixture is independently runnable against any host that advertises the rele
 
 ---
 
-## End-to-end run (against the Postgres reference host)
+## End-to-end run (v2 wire)
 
-The Postgres host advertises every capability this composition exercises. Boot it with the full feature set:
-
-```bash
-cd examples/hosts/postgres
-OPENWOP_MEMORY_COMPACTION=true \
-OPENWOP_OAUTH2_ISSUER_URL=https://your-idp/ \
-OPENWOP_OAUTH2_AUDIENCE=https://your-host/ \
-npm start
-```
-
-Run the canonical multi-agent dispatch loop:
+Against a v2 host that advertises the `agents`, `memory` and `multiAgent` families and seeds the `conformance-orchestrator-dispatch` fixture (every request carries `OpenWOP-Version: 2`):
 
 ```bash
-# 1. Discovery should show all 4 multi-agent capabilities advertised.
-curl https://your-host/.well-known/openwop | jq '.capabilities | {agents, memory, orchestrator, dispatch}'
+# 1. Discovery: the v2 root carries one record per advertised family.
+curl -s https://your-host/.well-known/openwop -H 'OpenWOP-Version: 2' \
+  | jq '{agents, memory, multiAgent, fixtures}'
 
-# 2. Create a run.
-curl -X POST https://your-host/v1/runs \
+# 2. Create a run (an Idempotency-Key makes a retry return the same run).
+curl -s -X POST https://your-host/runs \
+  -H 'OpenWOP-Version: 2' \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"workflowId":"conformance-orchestrator-dispatch","configurable":{"reasoningVerbosity":"summary"}}'
+  -H "Idempotency-Key: research-$(uuidgen)" \
+  -H 'Content-Type: application/json' \
+  -d '{"workflowId":"conformance-orchestrator-dispatch","configurable":{"version":1,"ai":{"reasoningVerbosity":"summary"}}}'
 
-# 3. Stream events (canonical multi-agent vocabulary).
-curl -N "https://your-host/v1/runs/$RUN_ID/events?streamMode=updates" \
+# 3. Stream events. The runId is tenant-bound (`tenant/opaque`); in a path it
+#    travels as one projected segment, `/` → `~2F` (identity.md §5).
+curl -N "https://your-host/runs/${RUN_ID//\//~2F}/events?streamMode=updates" \
+  -H 'OpenWOP-Version: 2' \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: text/event-stream"
+  -H 'Accept: text/event-stream'
 ```
 
 The event stream will carry, in order:
 
 1. `run.started`
 2. `node.started` (supervisor)
-3. `runOrchestrator.decided` — typed `{kind: 'next-worker', nextWorkerIds: [...]}`
+3. `orchestrator.decided` — typed `{kind: 'next-worker', nextWorkerIds: [...]}`
 4. `agent.reasoned` (verbosity-gated; redacted per RFC 0012 §D if compaction is active)
 5. `node.started` (dispatch)
 6. `node.started` (child run worker)
-7. `agent.toolCalled` + `agent.toolReturned` (paired via shared `callId`; MCP-1 + SR-1 redacted)
+7. `agent.tool-called` + `agent.tool-returned` (paired via shared `callId`; MCP-1 + SR-1 redacted)
 8. `agent.decided` (with `confidence ∈ [0, 1]`)
-9. `runOrchestrator.decided` — typed `{kind: 'terminate', reason: '...'}`
+9. `orchestrator.decided` — typed `{kind: 'terminate', reason: '...'}`
 10. `node.completed` (dispatch)
 11. `node.completed` (supervisor)
 12. `run.completed`
 
-For a HITL-gated variant, replace `conformance-orchestrator-dispatch` with a fixture that chains an `core.approvalGate` after the dispatch — the run pauses with `waiting-approval` until a `POST /v1/interrupts/{token}` resolves it.
+For a HITL-gated variant, replace `conformance-orchestrator-dispatch` with a fixture that chains a `core.approvalGate` after the dispatch — the run pauses with `waiting-approval` until `POST /runs/{runId}/interrupts/{nodeId}` (or the signed-token `POST /interrupts/{token}`) resolves it with `{ "resumeValue": { "action": "accept" } }`. [`examples/approval-workflow/`](../approval-workflow/) runs that resolve live against the v2 reference host.
+
+The Postgres reference host serves this same flow on v1 through the overlap: `POST /v1/runs`, `GET /v1/runs/{runId}/events`, no `OpenWOP-Version` header, v1 event names (`runOrchestrator.decided`, `agent.toolCalled`).
 
 ---
 
 ## What this composition does NOT do
 
 - **Define agent reasoning internals.** How an agent decides what tool to call, what the prompt looks like, what model serves the call — all host / pack territory. The protocol only normates the events emitted.
-- **Specify agent-to-agent transport.** Multi-agent inside one OpenWOP run uses `core.dispatch` (in-host). Cross-host agent messaging composes with [A2A](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) — distinct surface.
+- **Specify agent-to-agent transport.** Multi-agent inside one OpenWOP run uses `core.dispatch` (in-host). Cross-host agent messaging composes with [A2A](https://github.com/openwop/openwop/blob/main/spec/v2/core/interop.md) — distinct surface.
 - **Mandate memory backends.** The MemoryAdapter contract is wire-level; implementations choose Postgres / Redis / vector DB / etc.
 - **Define a planning algorithm.** RFC 0006 supports `single` / `delegate` / `delegate.smart` patterns; hosts choose. The protocol normates the decision-event shape, not the algorithm that produces it.
 
@@ -155,16 +153,16 @@ For a HITL-gated variant, replace `conformance-orchestrator-dispatch` with a fix
 
 When a worker is an external A2A peer rather than an in-host workflow:
 
-1. The orchestrator's `runOrchestrator.decided` emits `kind: 'next-worker'` with the external worker's `AgentRef` referencing an A2A AgentCard.
-2. `core.dispatch` routes to an A2A bridge node (host-implementation; not normated) that issues an A2A `message/send` task.
-3. The bridge node maps A2A `Task.status` back to OpenWOP run state per [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) §"State projection".
+1. The orchestrator's `orchestrator.decided` emits `kind: 'next-worker'` with the external worker's `AgentRef` referencing an A2A AgentCard.
+2. `core.dispatch` routes to an A2A bridge node (host-implementation; not normated) that issues an A2A 1.0 `SendMessage`.
+3. The bridge node maps A2A `Task.status.state` back to OpenWOP run state (the state vocabulary is [`schemas/v2/a2a-task-state.schema.json`](https://github.com/openwop/openwop/blob/main/schemas/v2/a2a-task-state.schema.json); A2A 1.0 renders it `TASK_STATE_*`).
 4. On the A2A peer's `completed` state, the bridge resumes the local run with the A2A `Task.result`.
 
 The protocol-level boundaries — `AgentRef`, the runOrchestrator decision envelope, the dispatch contract — stay identical regardless of whether the worker is local or remote. The A2A bridge is the only host-implementation surface that differs.
 
-See [`spec/v1/a2a-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/a2a-integration.md) §"Operational mapping table" for the 10 cross-protocol edge cases.
+See [`spec/v2/core/interop.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/interop.md) §"The operation mappings" and [`spec/v2/interop-map.json`](https://github.com/openwop/openwop/blob/main/spec/v2/interop-map.json) for the operation, state and error mappings.
 
-→ Runnable form at [`examples/multi-agent-cross-host/`](../multi-agent-cross-host/README.md). That example boots the conformance suite's `A2AFakePeer`, walks 6 scenarios end-to-end (happy path + drift points #3/#4 + plain failure + cancellation + replay determinism), and exports the canonical projection + bridge functions future hosts can adopt.
+→ Runnable form at [`examples/multi-agent-cross-host/`](../multi-agent-cross-host/README.md). That example drives a real v2 host's A2A 1.0 interface as the peer (the v2 reference host serves one), walks accept / reject / cancel end-to-end, checks the remaining projection rows as a pure function, and exports the projection future hosts can adopt.
 
 ---
 
@@ -183,12 +181,12 @@ This is independent of the dispatch loop above; compaction runs on the host sche
 
 ## See also
 
-- [`spec/v1/agent-ref-positioning.md`](https://github.com/openwop/openwop/blob/main/spec/v1/agent-ref-positioning.md) — `AgentRef` vs W3C DID vs A2A AgentCard vs AGNTCY composition.
+- [`spec/v2/core/identity.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/identity.md) — Subjects and tenant-bound identifiers, including the `~2F` path projection.
 - [`RFCS/0002-agent-identity-and-reasoning-events.md`](https://github.com/openwop/openwop/blob/main/RFCS/0002-agent-identity-and-reasoning-events.md) — canonical `AgentRef` + agent-event vocabulary.
 - [`RFCS/0004-memory-layer.md`](https://github.com/openwop/openwop/blob/main/RFCS/0004-memory-layer.md) — MemoryAdapter + SR-1 secret-redaction invariant.
 - [`RFCS/0006-orchestrator.md`](https://github.com/openwop/openwop/blob/main/RFCS/0006-orchestrator.md) — orchestrator decision shape + CP-1 escalation.
 - [`RFCS/0007-dispatch.md`](https://github.com/openwop/openwop/blob/main/RFCS/0007-dispatch.md) — `core.dispatch` contract.
 - [`RFCS/0012-memory-compaction-profile.md`](https://github.com/openwop/openwop/blob/main/RFCS/0012-memory-compaction-profile.md) — memory compaction + SR-1 carry-forward.
-- [`spec/v1/observability.md`](https://github.com/openwop/openwop/blob/main/spec/v1/observability.md) §"Canonical run lifecycle event names" — the canonical event vocabulary.
+- [`spec/v2/core/events.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/events.md) + [`spec/v2/event-codemap.json`](https://github.com/openwop/openwop/blob/main/spec/v2/event-codemap.json) — the v2 event vocabulary and its v1 spellings.
 - [`docs/PROFILE-DECISION-GUIDE.md`](https://github.com/openwop/openwop/blob/main/docs/PROFILE-DECISION-GUIDE.md) — which `capabilities.*` advertisements gate which scenarios.
-- [`examples/hosts/postgres/README.md`](../hosts/postgres/README.md) — runnable reference host that advertises every capability this composition exercises.
+- [`examples/hosts/postgres/README.md`](../hosts/postgres/README.md) — runnable reference host that advertises every capability this composition exercises (v1 through the overlap).

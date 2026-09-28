@@ -1,37 +1,31 @@
-// MCP-tool example — vendor-extension probe + observation pattern.
+// MCP-tool example — an OpenWOP v2 host seen through its MCP server mount.
 //
-// OpenWOP + MCP compose: OpenWOP runs the workflow, MCP exposes tools to the
-// LLM nodes inside it. Per spec/v1/mcp-integration.md the integration
-// pattern is host-implementation-defined — there's no `openwop-mcp`
-// profile yet.
+// OpenWOP and MCP compose in both directions (spec/v2/core/interop.md): a host
+// can be an MCP SERVER (its workflows are tools an MCP client calls) and an MCP
+// CLIENT (pack code reaches MCP servers through `ctx.mcp`). The `mcp` family in
+// discovery says which: `profiles[]` + `serverUrls[]` for the server mount,
+// `client: true` for the client.
 //
-// What this example demonstrates:
-//   1. Discovery probe: look for vendor-prefixed MCP advertisement.
-//   2. If host advertises MCP support, start a workflow that uses an
-//      MCP tool and observe the tool-call lifecycle in the event
-//      stream.
-//   3. Verify event-stream invariants: tool-call events appear before
-//      the next LLM turn; tool responses are wrapped in untrusted
-//      markers (per SECURITY/threat-model-prompt-injection.md
-//      `prompt-injection-mcp-marker`).
+// What this example does:
+//   1. GET /.well-known/openwop — read the `mcp` family; exit 0 when absent.
+//   2. POST <serverUrls[0]> `tools/list` — the host's workflows as MCP tools.
+//   3. POST <serverUrls[0]> `tools/call` — call one tool; the host starts a run.
+//   4. GET /runs/{runId}/events/poll — observe that same run on the OpenWOP
+//      wire: `run.started` records `transport: mcp`.
 //
-// Why not run a live MCP server here:
-//   - Real MCP integration requires the host's MCP client wiring + a
-//     registered MCP server with stable stdio or HTTP transport.
-//     Both are host-deployment specifics, not protocol concerns.
-//   - The example's job is to show the openwop-side observability of
-//     MCP-mediated workflows, not to wire MCP itself.
+// The MCP mount is stateless at revision 2026-07-28: no `initialize`, no
+// session id; every request carries its revision in both the
+// `MCP-Protocol-Version` header and `_meta["io.modelcontextprotocol/protocolVersion"]`.
+// The tool result is untrusted content (security-defaults.md): this example
+// parses it only to find the runId, then reads the run through REST.
 //
-// Profile required: vendor-extension probe (`openwop.mcp` or
-//                   equivalent host extension). When a `openwop-mcp`
-//                   profile lands via RFC, this example will gate on
-//                   it directly.
+// Configuration via env vars:
+//   OPENWOP_BASE_URL   default http://127.0.0.1:3838  (the v2 reference host)
+//   OPENWOP_API_KEY    default openwop-v2-dev-key
+//   OPENWOP_MCP_TOOL   default conformance-noop — the tool (workflowId) to call
 //
-// Host target: . Skip-equivalent without
-//              OPENWOP_BASE_URL or when host doesn't advertise.
-//
-// @see spec/v1/mcp-integration.md
-// @see SECURITY/threat-model-prompt-injection.md (mcp-* invariants)
+// @see spec/v2/core/interop.md
+// @see spec/v2/interop-map.json (the `mcp.*` rows)
 
 import { randomUUID } from 'node:crypto';
 
@@ -44,147 +38,103 @@ const skip = (msg) => console.log(`${_c.dim}${msg}${_c.reset}`);
 const fail = (msg) => console.error(`${_c.red}${msg}${_c.reset}`);
 const ok = (msg) => console.log(`${_c.green}${msg}${_c.reset}`);
 
-const BASE_URL = process.env.OPENWOP_BASE_URL ?? '';
-const API_KEY = process.env.OPENWOP_API_KEY ?? '';
-const WORKFLOW_ID = process.env.OPENWOP_WORKFLOW_ID ?? '';
+const BASE_URL = process.env.OPENWOP_BASE_URL || 'http://127.0.0.1:3838';
+const API_KEY = process.env.OPENWOP_API_KEY || 'openwop-v2-dev-key';
+const TOOL = process.env.OPENWOP_MCP_TOOL || 'conformance-noop';
+const V2 = { 'OpenWOP-Version': '2' };
+const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
 
-if (!BASE_URL) {
-  skip('⊘ mcp-tool: OPENWOP_BASE_URL unset — skip-equivalent.');
-  process.exit(0);
-}
-if (!API_KEY) {
-  fail('✗ mcp-tool: OPENWOP_API_KEY required.');
-  process.exit(1);
+/** identity.md §5: every byte outside [A-Za-z0-9._-] becomes ~ plus two uppercase hex digits. */
+function projectId(id) {
+  return [...Buffer.from(id, 'utf8')]
+    .map((b) => (/[A-Za-z0-9._-]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `~${b.toString(16).toUpperCase().padStart(2, '0')}`))
+    .join('');
 }
 
-async function http(method, path, body, opts = {}) {
-  const headers = {
-    Authorization: `Bearer ${API_KEY}`,
-    'Content-Type': 'application/json',
-  };
-  if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+/** One stateless MCP JSON-RPC request against the server mount. */
+async function mcp(url, revision, method, params = {}) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      'MCP-Protocol-Version': revision,
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params: { ...params, _meta: { [META_VERSION]: revision } } }),
   });
-  return { status: res.status, json: await res.json().catch(() => null) };
-}
-
-function detectMcpExtension(caps) {
-  // Look for MCP advertisement under any vendor-prefixed namespace.
-  // Conventional locations:
-  //   - capabilities.openwop.mcp ()
-  //   - capabilities.mcp (generic extension advertisement)
-  //   - capabilities.<vendor>.mcp
-  const candidates = [];
-  if (caps.mcp != null) candidates.push({ key: 'mcp', value: caps.mcp });
-  for (const [k, v] of Object.entries(caps)) {
-    if (typeof v === 'object' && v !== null && 'mcp' in v) {
-      candidates.push({ key: `${k}.mcp`, value: v.mcp });
-    }
-  }
-  return candidates;
+  const body = await res.json().catch(() => null);
+  if (body?.error) throw new Error(`${method} → ${body.error.code} ${body.error.message}`);
+  if (!res.ok || !body?.result) throw new Error(`${method} → HTTP ${res.status}`);
+  return body.result;
 }
 
 async function main() {
-  console.log(`→ Discovery: ${BASE_URL}/.well-known/openwop`);
-  const discovery = await fetch(`${BASE_URL}/.well-known/openwop`);
-  if (!discovery.ok) {
-    fail(`✗ discovery failed: ${discovery.status}`);
+  console.log(`→ Discovery: ${BASE_URL}/.well-known/openwop (OpenWOP-Version: 2)`);
+  const disco = await fetch(`${BASE_URL}/.well-known/openwop`, { headers: V2 });
+  if (!disco.ok) throw new Error(`discovery failed: ${disco.status}`);
+  if (!String(disco.headers.get('openwop-version') ?? '').startsWith('2')) {
+    fail('✗ The host did not serve major 2. It may not implement v2 yet.');
     process.exit(1);
   }
-  const caps = await discovery.json();
-  console.log(`  Host: ${caps.implementation?.name ?? 'unknown'}`);
-
-  // Probe for MCP advertisement.
-  const mcpCandidates = detectMcpExtension(caps);
-  if (mcpCandidates.length === 0) {
-    skip(`⊘ Host doesn't advertise MCP support under any vendor prefix.`);
-    skip(`  Looked under: capabilities.mcp + capabilities.<vendor>.mcp`);
-    skip(`  This example targets hosts with MCP extensions wired.`);
-    process.exit(0); // skip-equivalent
+  const doc = await disco.json();
+  console.log(`  Host: ${doc.implementation?.name ?? 'unknown'}`);
+  const family = doc.mcp;
+  if (family == null) {
+    skip('⊘ The `mcp` family is not advertised by this host.');
+    process.exit(0);
   }
-  console.log(`  ✓ MCP advertisement found:`);
-  for (const c of mcpCandidates) {
-    const json = JSON.stringify(c.value);
-    const display = json.length > 100 ? json.slice(0, 100) + '...' : json;
-    console.log(`    capabilities.${c.key}: ${display}`);
-  }
+  console.log(`  ✓ mcp advertised (status: ${family.status})`);
+  console.log(`    profiles:   [${(family.profiles ?? []).join(', ')}]`);
+  console.log(`    revisions:  [${(family.revisions ?? []).join(', ')}]`);
+  console.log(`    serverUrls: [${(family.serverUrls ?? []).join(', ')}]`);
+  console.log(`    client:     ${family.client === true ? 'true (pack code gets ctx.mcp)' : 'not advertised'}`);
 
-  if (!WORKFLOW_ID) {
-    // Without a configured workflow, demonstrate just the discovery side.
-    // This is the safe default — readers learn the probe pattern.
-    console.log('');
-    console.log('No OPENWOP_WORKFLOW_ID set — discovery probe complete.');
-    console.log('To exercise the full lifecycle, set OPENWOP_WORKFLOW_ID to a');
-    console.log('workflow that uses MCP tools and re-run.');
+  const serverUrl = Array.isArray(family.serverUrls) ? family.serverUrls[0] : undefined;
+  const revision = Array.isArray(family.revisions) ? family.revisions[0] : undefined;
+  if (!serverUrl || !revision) {
+    skip('⊘ No MCP server mount is advertised by this host (no `mcp.serverUrls[]`); nothing to call.');
     process.exit(0);
   }
 
-  // Phase 2: start a run that uses MCP tools, observe event stream.
-  console.log(`→ POST /v1/runs { workflowId: "${WORKFLOW_ID}" }`);
-  const idemKey = `openwop-example-mcp-tool-${process.env.GITHUB_RUN_ID ?? randomUUID()}`;
-  const create = await http('POST', '/v1/runs', { workflowId: WORKFLOW_ID }, { idempotencyKey: idemKey });
-  if (create.status === 404) {
-    skip(`⊘ Workflow "${WORKFLOW_ID}" not seeded; skip-equivalent.`);
+  console.log(`→ tools/list  (${serverUrl}, MCP-Protocol-Version: ${revision})`);
+  const list = await mcp(serverUrl, revision, 'tools/list');
+  const tools = list.tools ?? [];
+  console.log(`  ${tools.length} tool(s): ${tools.slice(0, 6).map((t) => t.name).join(', ')}${tools.length > 6 ? ', …' : ''}`);
+  if (!tools.some((t) => t.name === TOOL)) {
+    skip(`⊘ Tool "${TOOL}" is not listed by this host's mount. Set OPENWOP_MCP_TOOL to one of the names above.`);
     process.exit(0);
   }
-  if (create.status !== 201) {
-    fail(`✗ run failed: ${create.status} ${JSON.stringify(create.json)}`);
-    process.exit(1);
-  }
-  const { runId } = create.json;
-  console.log(`  runId: ${runId}`);
 
-  // Poll the events stream looking for tool-call events.
-  console.log(`→ Polling /v1/runs/${runId}/events/poll for tool-call observability...`);
-  const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
-  let toolCallCount = 0;
-  let lastStatus = 'pending';
-  let pollCount = 0;
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    pollCount++;
-    const res = await http('GET', `/v1/runs/${encodeURIComponent(runId)}/events/poll`);
-    if (res.status === 200 && res.json) {
-      const events = res.json.events ?? [];
-      // Tool-call events vary in shape per host — we look for type
-      // strings containing "tool" or "mcp" as the cross-host probe.
-      const toolEvents = events.filter((e) =>
-        typeof e.type === 'string' && (e.type.includes('tool') || e.type.includes('mcp')),
-      );
-      toolCallCount = toolEvents.length;
-    }
-
-    const snap = await http('GET', `/v1/runs/${encodeURIComponent(runId)}`);
-    if (snap.status === 200 && snap.json && typeof snap.json.status === 'string') {
-      lastStatus = snap.json.status;
-      if (TERMINAL.has(lastStatus)) break;
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  console.log(`  ${toolCallCount} tool-related event(s) observed across ${pollCount} polls`);
-
-  // When the user explicitly set OPENWOP_WORKFLOW_ID, they expect the run
-  // to reach terminal — a stalled run is a real failure. The discovery-
-  // only path (no WORKFLOW_ID) returns earlier above and never hits here.
-  if (!TERMINAL.has(lastStatus)) {
-    fail(`✗ Run ${runId} did not reach terminal within 30s; last status: ${lastStatus}`);
-    process.exit(1);
-  }
-  if (lastStatus !== 'completed') {
-    fail(`✗ Expected completed, got ${lastStatus}`);
+  console.log(`→ tools/call { name: "${TOOL}" }`);
+  const call = await mcp(serverUrl, revision, 'tools/call', { name: TOOL, arguments: {} });
+  const text = (call.content ?? []).find((p) => p.type === 'text')?.text ?? '';
+  let result;
+  try { result = JSON.parse(text); } catch { result = {}; }
+  console.log(`  isError: ${call.isError === true}`);
+  console.log(`  runId:   ${result.runId ?? '<none>'}`);
+  console.log(`  status:  ${result.status ?? '<none>'}`);
+  if (call.isError === true || typeof result.runId !== 'string') {
+    fail(`✗ Expected a completed run from tools/call, got ${text.slice(0, 200)}`);
     process.exit(1);
   }
 
-  if (toolCallCount === 0) {
-    console.log(`  Note: workflow completed without observable tool-call events.`);
-    console.log(`        Host may emit tool events under non-standard type names.`);
+  console.log(`→ GET /runs/${projectId(result.runId)}/events/poll  (the same run, over REST)`);
+  const res = await fetch(`${BASE_URL}/runs/${projectId(result.runId)}/events/poll`, {
+    headers: { ...V2, Authorization: `Bearer ${API_KEY}` },
+  });
+  if (!res.ok) throw new Error(`events poll failed: ${res.status}`);
+  const { events = [] } = await res.json();
+  for (const e of events) console.log(`  [${e.sequence}] ${e.type}${e.nodeId ? ` node=${e.nodeId}` : ''}`);
+  const started = events.find((e) => e.type === 'run.started');
+  console.log(`  run.started transport: ${started?.payload?.transport ?? '<unrecorded>'}`);
+  if (started?.payload?.transport !== 'mcp') {
+    fail('✗ Expected run.started to record transport: mcp');
+    process.exit(1);
   }
 
   console.log('');
-  ok(`✓ MCP probe + observation complete`);
+  ok('✓ MCP tools/list + tools/call round-trip observed on the OpenWOP wire');
 }
 
 main().catch((err) => {

@@ -209,14 +209,14 @@
   "metadata": {
     "tags": ["market-intel", "voc", "ads", "vendor.myndhyve"],
     "packs": [
-      "vendor.myndhyve.market-intel-query-builder@1.0.0",
-      "vendor.myndhyve.market-intel-discovery@1.0.0",
-      "vendor.myndhyve.market-intel-content-extraction@1.0.0",
-      "vendor.myndhyve.market-intel-voc@1.0.0",
-      "vendor.myndhyve.market-intel-opportunity-scoring@1.0.0",
-      "vendor.myndhyve.market-intel-ad-angles@1.0.0",
-      "vendor.myndhyve.market-intel-audience-targeting@1.0.0",
-      "vendor.myndhyve.ads-copy-generate@1.0.0"
+      "vendor.myndhyve.market-intel-query-builder@1.0.1",
+      "vendor.myndhyve.market-intel-discovery@1.0.1",
+      "vendor.myndhyve.market-intel-content-extraction@1.0.1",
+      "vendor.myndhyve.market-intel-voc@1.0.1",
+      "vendor.myndhyve.market-intel-opportunity-scoring@1.0.1",
+      "vendor.myndhyve.market-intel-ad-angles@1.0.1",
+      "vendor.myndhyve.market-intel-audience-targeting@1.0.1",
+      "vendor.myndhyve.ads-copy-generate@1.0.1"
     ],
     "hostCapabilities": ["aiProviders"]
   },

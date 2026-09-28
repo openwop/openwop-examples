@@ -90,7 +90,7 @@ OPENWOP_MCP_STDIO_CMD=python3 \
 
 ## See also
 
-- [`spec/v1/mcp-integration.md`](https://github.com/openwop/openwop/blob/main/spec/v1/mcp-integration.md) — openwop's MCP integration contract.
+- [`spec/v2/core/interop.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/interop.md) — openwop's MCP and A2A interop contract (the `mcp` family, the operation mappings in [`spec/v2/interop-map.json`](https://github.com/openwop/openwop/blob/main/spec/v2/interop-map.json)).
 - [`conformance/src/scenarios/mcp-tool-roundtrip.test.ts`](https://github.com/openwop/openwop/blob/main/conformance/src/scenarios/mcp-tool-roundtrip.test.ts) — the probe this bridge feeds.
 - [`INTEROP-MATRIX.md`](../../INTEROP-MATRIX.md) §"Composition partners" — real-impl evidence row for MCP.
 - [`gRPC HTTP/2 transport spec`](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md) — analogous shim pattern for protocols that need wire-format adaptation.

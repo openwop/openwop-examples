@@ -1,183 +1,174 @@
-// Node-pack publishing example — build manifest, sign with Ed25519,
-// validate locally, optionally PUT to a registry.
+// Node-pack publishing example — build a v2 manifest, sign it, verify it,
+// and show how it would reach a registry.
 //
-// Defaults to --dry-run mode (no network). Real publishing requires
-// super-admin auth which most readers don't have, so the default is
-// to demonstrate the steps locally:
+// Defaults to --dry-run (no network):
 //
-//   1. Generate (or load) an Ed25519 keypair.
-//   2. Construct a manifest under the `private.local-example` scope
-//      (a real public registry won't accept this scope — safe-by-default).
-//   3. Sign the manifest's canonical JSON with the private key.
-//   4. (Optional, --print-publish-cmd) print the curl PUT command
-//      that a super-admin operator would run to publish the binary
-//      tarball + manifest to the registry at OPENWOP_PACK_REGISTRY_URL
-//      with OPENWOP_PACK_PUBLISH_KEY Bearer auth.
+//   1. Generate an Ed25519 keypair.
+//   2. Build a v2 node-pack manifest (`pack.json`) under the
+//      `private.local-example` scope — `private.*` MUST NOT appear in a public
+//      registry, so the example is safe by default.
+//   3. Sign the RFC 8785 (JCS) bytes of `pack.json` with the private key:
+//      the one v2 scheme, `ed25519-canonical-json` (packs.md §Signing).
+//   4. Verify the signature with the public key.
 //
-//      The flag was previously named --live; that name implied the
-//      example would do the actual PUT, which it doesn't (the example
-//      doesn't ship a buildable pack source). --live is accepted as
-//      a deprecated alias.
+// --print-publish-cmd additionally reads the registry's
+// `/.well-known/openwop-registry.json` and prints where this version would
+// live in the registry's v2 tree and how that registry accepts submissions.
+// Registry paths are resolved through that document's `endpoints.v2`, never
+// constructed (packs.md §"The registry tree"). `--live` is a deprecated alias.
 //
-// Profile required: openwop-node-packs (for --print-publish-cmd mode).
-// CI runs --dry-run only.
+// Configuration via env vars (--print-publish-cmd only):
+//   OPENWOP_PACK_REGISTRY_URL  default https://packs.openwop.dev
 //
-// @see spec/v1/node-packs.md §"Manifest format" + §"Registry HTTP API"
-// @see spec/v1/registry-operations.md §"Submission validation"
+// @see spec/v2/core/packs.md (§"The engine range", §Signing, §"The registry tree")
+// @see schemas/v2/node-pack-manifest.schema.json
 
-import { generateKeyPairSync, sign as ed25519Sign } from 'node:crypto';
+import { generateKeyPairSync, sign as ed25519Sign, verify as ed25519Verify } from 'node:crypto';
 
 // Tiny ANSI helpers — colors when stdout is a TTY, no-op when piped/CI.
 const _tty = process.stdout.isTTY;
 const _c = _tty
   ? { dim: '\x1b[2m', red: '\x1b[31m', green: '\x1b[32m', reset: '\x1b[0m' }
   : { dim: '', red: '', green: '', reset: '' };
-const skip = (msg) => console.log(`${_c.dim}${msg}${_c.reset}`);
 const fail = (msg) => console.error(`${_c.red}${msg}${_c.reset}`);
 const ok = (msg) => console.log(`${_c.green}${msg}${_c.reset}`);
 
 const args = new Set(process.argv.slice(2));
-// `--live` was renamed to `--print-publish-cmd` per code-review #7
-// (the previous --live flag prints documentation, not actual PUT).
-// `--live` is accepted as a deprecated alias.
-const LIVE = args.has('--print-publish-cmd') || args.has('--live');
+const PRINT_PUBLISH = args.has('--print-publish-cmd') || args.has('--live');
+const REGISTRY_URL = (process.env.OPENWOP_PACK_REGISTRY_URL || 'https://packs.openwop.dev').replace(/\/$/, '');
+const KEY_ID = 'local-example-1';
 
-const REGISTRY_URL = process.env.OPENWOP_PACK_REGISTRY_URL ?? '';
-const PUBLISH_KEY = process.env.OPENWOP_PACK_PUBLISH_KEY ?? '';
-
-function canonicalJson(obj) {
-  // Deterministic JSON encoding for signing — sort keys recursively.
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
-  if (Array.isArray(obj)) return '[' + obj.map(canonicalJson).join(',') + ']';
-  const sortedKeys = Object.keys(obj).sort();
-  const entries = sortedKeys.map((k) => JSON.stringify(k) + ':' + canonicalJson(obj[k]));
-  return '{' + entries.join(',') + '}';
+/**
+ * RFC 8785 (JCS) for the values a manifest holds — objects with keys sorted by
+ * UTF-16 code unit, arrays in order, strings and integers as JSON.stringify
+ * writes them. A manifest MUST be I-JSON (conformance.md §"Canonical JSON"):
+ * no non-integer numbers here, so no JCS number formatting is needed.
+ */
+function canonicalJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const keys = Object.keys(value).filter((k) => value[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
 }
 
 function buildManifest() {
-  // Pack name uses the `private.local-example.*` scope so a real
-  // public registry won't accept it (per spec/v1/node-packs.md §Naming).
-  // This is intentional — the example is safe by default.
   return {
+    kind: 'node',
     name: 'private.local-example.echo-tool',
     version: '1.0.0',
-    description: 'Reference example pack — single core.noop-style node, demonstration only.',
+    description: 'Reference example pack — one pure echo node, demonstration only.',
     license: 'Apache-2.0',
-    runtime: { engine: 'openwop-v1' },
+    // A `>=` lower bound and an explicit `<` major ceiling (packs.md §"The engine range").
+    engines: { openwop: '>=2.0.0 <3.0.0' },
+    runtime: { language: 'javascript', entry: 'dist/index.js', format: 'esm' },
     nodes: [
       {
-        id: 'echo',
-        typeId: 'core.noop',
-        // Real packs have node code under `dist/` referenced by entry.
-        // The dry-run example doesn't actually build a tarball; it
-        // just prints what the manifest would contain.
-        entry: 'dist/echo.js',
+        typeId: 'private.local-example.echo-tool.echo',
+        version: '1.0.0',
+        label: 'Echo',
+        category: 'data',
+        role: 'pure',
+        capabilities: ['cacheable'],
       },
     ],
-    signing: {
-      algorithm: 'ed25519',
-      // signatureRef is host-resolved per spec/v1/node-packs.md §Signing;
-      // the registry serves the signature blob via GET .sig endpoint.
-      signatureRef: 'detached',
-    },
+    // Optional on a bare manifest; when present, the closed { keyId, scheme } block.
+    signing: { keyId: KEY_ID, scheme: 'ed25519-canonical-json' },
   };
 }
 
-function buildSignature(manifest, privateKey) {
-  const canonical = canonicalJson(manifest);
-  const signature = ed25519Sign(null, Buffer.from(canonical, 'utf-8'), privateKey);
-  return {
-    canonical,
-    signatureBase64: signature.toString('base64'),
-  };
-}
-
-async function dryRun(manifest, signed, publicKey) {
-  console.log(`→ Built manifest:`);
+function dryRun(manifest, canonical, signature, publicKey) {
+  console.log('→ Built pack.json:');
+  console.log(`  kind:     ${manifest.kind}`);
   console.log(`  name:     ${manifest.name}`);
   console.log(`  version:  ${manifest.version}`);
-  console.log(`  scope:    private.local-example (won't accept on public registries)`);
-  console.log(`  signing:  ${manifest.signing.algorithm} / ${manifest.signing.signatureRef}`);
+  console.log(`  engines:  openwop ${manifest.engines.openwop}`);
+  console.log('  scope:    private.local-example (MUST NOT appear in a public registry)');
+  console.log(`  signing:  ${manifest.signing.scheme} / keyId ${manifest.signing.keyId}`);
   console.log('');
-  console.log(`→ Canonical JSON (${signed.canonical.length} bytes):`);
-  console.log(`  ${signed.canonical.slice(0, 120)}${signed.canonical.length > 120 ? '...' : ''}`);
+  console.log(`→ JCS bytes (${Buffer.byteLength(canonical)}):`);
+  console.log(`  ${canonical.slice(0, 120)}${canonical.length > 120 ? '...' : ''}`);
   console.log('');
-  console.log(`→ Ed25519 signature (base64): ${signed.signatureBase64.slice(0, 40)}...`);
+  console.log(`→ Ed25519 signature (64 bytes, base64): ${signature.toString('base64').slice(0, 40)}...`);
+  console.log(`→ Public key (raw 32 bytes, base64):    ${rawPublicKey(publicKey)}`);
   console.log('');
-  console.log(`→ Public key (DER, base64):  ${publicKey.export({ type: 'spki', format: 'der' }).toString('base64').slice(0, 40)}...`);
-  console.log('');
-  console.log('To publish to a real registry:');
-  console.log('  1. Pre-register your public key with the registry operator');
-  console.log('     (super-admin action; out of scope for this example).');
-  console.log('  2. Build the actual pack tarball:');
-  console.log('       cd your-pack-source && tar czf pack.tgz manifest.json dist/');
-  console.log('  3. PUT the tarball:');
-  console.log(`       curl -X PUT \\
-         "$OPENWOP_PACK_REGISTRY_URL/v1/packs/${manifest.name}/-/${manifest.version}" \\
-         -H "Authorization: Bearer $OPENWOP_PACK_PUBLISH_KEY" \\
-         -H "Content-Type: application/gzip" \\
-         --data-binary @pack.tgz`);
-  console.log('  4. Re-run this example with --print-publish-cmd to print');
-  console.log('     the populated curl above; the example does not run the PUT itself.');
-  console.log('');
-  ok('✓ Dry-run complete (no network calls made).');
 }
 
-async function liveRun(manifest, signed, publicKey) {
-  if (!REGISTRY_URL) {
-    fail('✗ --print-publish-cmd requires OPENWOP_PACK_REGISTRY_URL');
-    process.exit(1);
-  }
-  if (!PUBLISH_KEY) {
-    fail('✗ --print-publish-cmd requires OPENWOP_PACK_PUBLISH_KEY (super-admin Bearer)');
-    process.exit(1);
-  }
+function rawPublicKey(publicKey) {
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  return der.subarray(der.length - 32).toString('base64');
+}
 
-  console.log(`→ Probing registry: ${REGISTRY_URL}/.well-known/openwop`);
-  const discovery = await fetch(`${REGISTRY_URL}/.well-known/openwop`);
-  if (!discovery.ok) {
-    fail(`✗ discovery failed: ${discovery.status}`);
+async function printPublish(manifest) {
+  console.log(`→ Registry: ${REGISTRY_URL}/.well-known/openwop-registry.json`);
+  const res = await fetch(`${REGISTRY_URL}/.well-known/openwop-registry.json`);
+  if (!res.ok) {
+    fail(`✗ registry metadata fetch failed: ${res.status}`);
     process.exit(1);
   }
-  const caps = await discovery.json();
-  console.log(`  Host: ${caps.implementation?.name ?? 'unknown'}`);
-
-  // Real PUT requires actual binary tarball — dry-run example doesn't
-  // ship one. The --live mode here is documentation for the path; a
-  // production publishing tool builds the tarball from a project dir.
+  const meta = await res.json();
+  const v2 = meta.endpoints?.v2;
+  if (!v2) {
+    fail('✗ This registry names no v2 tree (`endpoints.v2`); it cannot serve a v2 pack.');
+    process.exit(1);
+  }
+  const fill = (t) => t.replace('{name}', manifest.name).replace('{version}', manifest.version);
+  console.log(`  name: ${meta.name ?? '<unnamed>'}`);
+  console.log(`  signing schemes: [${(meta.supportedSigningSchemes ?? []).join(', ')}]`);
+  console.log('  This version would live in the v2 tree at:');
+  for (const k of ['versionManifest', 'versionTarball', 'versionSignature', 'versionSbom']) {
+    if (v2[k]) console.log(`    ${k.padEnd(16)} ${REGISTRY_URL}${fill(v2[k])}`);
+  }
+  const write = meta.writeApi ?? {};
   console.log('');
-  skip('⊘ --print-publish-cmd mode requires a built pack tarball — the example doesn\'t');
-  skip('  ship a buildable pack source. To complete live publish:');
-  skip('  1. Build a tarball from your pack source dir.');
-  skip('  2. PUT it via the curl command printed in --dry-run mode.');
+  if (write.supported === true) {
+    console.log(`  Submissions: ${write.publishMethod ?? 'write API'} at ${write.publishUrl ?? '<unnamed>'}`);
+  } else {
+    console.log(`  Submissions: no write API; publish by ${write.publishMethod ?? 'the operator\'s process'}${write.publishUrl ? ` at ${write.publishUrl}` : ''}.`);
+  }
+  console.log('  Before submitting: register your keyId with the registry operator (its');
+  console.log('  signingKeys[] entry names the namespaces the key may sign), use a public');
+  console.log('  scope (vendor.<org>.* / community.<author>.*), and build a deterministic');
+  console.log('  tarball containing pack.json and the runtime entry. The registry refuses a');
+  console.log('  republished version, a bad signature, or an engine range without a ceiling.');
   console.log('');
-  console.log('  This split is intentional: the example demonstrates manifest');
-  console.log('  + signing flow safely; the actual build + PUT is a per-pack');
-  console.log('  operation, not a single canonical example.');
-  process.exit(0);
+  ok('✓ Publish plan printed (no submission made).');
 }
 
 async function main() {
-  console.log('=== OpenWOP node-pack publishing example ===');
-  console.log(`Mode: ${LIVE ? 'print-publish-cmd' : 'dry-run (default)'}`);
+  console.log('=== OpenWOP v2 node-pack publishing example ===');
+  console.log(`Mode: ${PRINT_PUBLISH ? 'print-publish-cmd' : 'dry-run (default)'}`);
   console.log('');
 
-  // Step 1: keypair
   console.log('→ Generating Ed25519 keypair...');
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   console.log('  ✓ keypair generated');
 
-  // Step 2: manifest
   const manifest = buildManifest();
+  const canonical = canonicalJson(manifest);
+  const signature = ed25519Sign(null, Buffer.from(canonical, 'utf8'), privateKey);
+  dryRun(manifest, canonical, signature, publicKey);
 
-  // Step 3: sign
-  const signed = buildSignature(manifest, privateKey);
+  console.log('→ Verifying the signature against the public key...');
+  if (!ed25519Verify(null, Buffer.from(canonical, 'utf8'), publicKey, signature)) {
+    fail('✗ signature did not verify');
+    process.exit(1);
+  }
+  const tampered = canonicalJson({ ...manifest, version: '1.0.1' });
+  if (ed25519Verify(null, Buffer.from(tampered, 'utf8'), publicKey, signature)) {
+    fail('✗ a changed manifest still verified');
+    process.exit(1);
+  }
+  console.log('  ✓ verifies; a manifest with a changed version does not');
+  console.log('');
 
-  if (!LIVE) {
-    await dryRun(manifest, signed, publicKey);
+  if (!PRINT_PUBLISH) {
+    console.log('Re-run with --print-publish-cmd to see where this version would live in a');
+    console.log("registry's v2 tree and how that registry accepts submissions.");
+    console.log('');
+    ok('✓ Dry-run complete (no network calls made).');
     return;
   }
-  await liveRun(manifest, signed, publicKey);
+  await printPublish(manifest);
 }
 
 main().catch((err) => {

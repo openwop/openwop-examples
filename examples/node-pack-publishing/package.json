@@ -2,7 +2,7 @@
   "name": "@openwop/openwop-example-node-pack-publishing",
   "version": "1.1.7",
   "private": true,
-  "description": "OpenWOP node-pack publishing walkthrough: build a manifest, sign with Ed25519, and publish via PUT. Defaults to --dry-run because live publishing requires registry credentials.",
+  "description": "OpenWOP v2 node-pack publishing walkthrough: build a v2 manifest, sign its JCS bytes with Ed25519, verify, and show where a registry's v2 tree would serve it. Defaults to --dry-run (no network).",
   "type": "module",
   "scripts": {
     "start": "node node-pack-publishing.mjs",
