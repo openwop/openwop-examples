@@ -70,13 +70,17 @@ The reference pack parses `inputs.name` by hand (looking for `"name":"..."`) to 
 
 This pack uses no WASI imports. It declares only `openwop_log` under the `openwop` import namespace. Hosts that don't provide a WASI shim still load this pack correctly.
 
-## Signing
+## Manifest and publishing
 
-Following `node-packs.md` §Signing, this pack will be signed with the project's Ed25519 root key when published to a registry. The `.wasm` bytes are signed as-is; the host verifies the signature before instantiation. Signing is out of scope for the local-development workflow above — when running from `examples/packs/`, the host trusts the filesystem.
+`pack.json` is a v2 manifest ([`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md)): `kind: "node"`, an `engines.openwop` ceiling that admits major 2 (`>=1.1.0 <3.0.0`), and no `signing` block. The ABI version is read from the module's `openwop_abi_version()` export and the memory cap comes from the host (`nodePackRuntimes.wasm` in discovery, [`spec/v2/core/node-pack-runtimes.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/node-pack-runtimes.md)), so the manifest carries neither.
+
+When run from `examples/packs/`, the in-memory host loads the `.wasm` straight from disk and trusts the filesystem. There is no signature check.
+
+This pack is not in the registry's v2 tree. Its v1 artifact (`registry/v1/…/vendor.openwop.rust-hello/-/1.0.0`) is yanked. The registry's `scripts/build-pack-tarball.mjs` packages JavaScript pack sources only (`pack.json`, `README.md`, `LICENSE`, `index.mjs`, `schemas/`), so it cannot publish a WASM pack yet. To start a new pack, use `node scripts/new-pack.mjs <name>` in [`openwop-registry`](https://github.com/openwop/openwop-registry), which scaffolds from the registry's v2 template; see the [pack author quickstart](https://github.com/openwop/openwop/blob/main/docs/PACK-AUTHOR-QUICKSTART.md).
 
 ## See also
 
 - [`RFCS/0008-wasm-abi.md`](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md) — the ABI spec this pack implements
-- [`spec/v1/node-packs.md`](https://github.com/openwop/openwop/blob/main/spec/v1/node-packs.md) — pack manifest format + distribution
+- [`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) — pack manifest format + distribution
 - [`examples/hosts/in-memory/src/wasm-loader.ts`](../../hosts/in-memory/src/wasm-loader.ts) — the loader that bridges this pack to the runtime
 - [`conformance/fixtures/conformance-wasm-pack-roundtrip.json`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-wasm-pack-roundtrip.json) — fixture that exercises the pack end-to-end
