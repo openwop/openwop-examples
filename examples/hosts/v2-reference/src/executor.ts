@@ -197,7 +197,7 @@ function interruptFor(host: Host, node: WorkflowNode, run: RunRow): InterruptPay
 function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<string, unknown> {
   const c = node.config;
   if (c['lifecycle'] !== 'open-exchange-close' || c['mockAutoResume'] !== true) {
-    throw new NodeFailure('capability_not_provided', 'core.conversationGate is executed only as open-exchange-close with mockAutoResume (the conformance mock)', { typeId: node.typeId });
+    throw new NodeFailure('node_config_invalid', 'core.conversationGate is executed only as open-exchange-close with mockAutoResume (the conformance mock)', { typeId: node.typeId });
   }
   const conversationId = `${run.run_id.split('/')[1] ?? run.run_id}:${node.id}`;
   appendEvent(host, run, 'conversation.opened', { conversationId }, { nodeId: node.id });
@@ -285,7 +285,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         } else if (method === 'serverHealth') {
           result = await mcp.serverHealth({ serverId });
         } else {
-          throw new NodeFailure('validation_error', `unknown ctx.mcp method ${JSON.stringify(method)}`);
+          throw new NodeFailure('node_config_invalid', `unknown ctx.mcp method ${JSON.stringify(method)}`);
         }
         return { outputs: { result } };
       } catch (e) {

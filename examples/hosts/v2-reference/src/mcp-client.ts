@@ -17,12 +17,11 @@
  *         or session state: MCP 2026-07-28 has neither.
  *
  * Each call rejects ONLY for an unknown `serverId` (`not_found`), an MCP error
- * response (`example.mcp_error`, the MCP `Error` carried unaltered in
- * `details.error`), or a transport failure (`example.mcp_unreachable`). The
- * rejection code becomes the node's `node.failed` code, so the two the registry
- * does not hold are vendor codes under the registered `example` org (errors.md
- * §The registry, openwop#1698); `mcp_error` moves to the registered code once
- * the RFC registering it merges.
+ * response (`mcp_error`, registered by RFC 0226, the MCP `Error` carried
+ * unaltered in `details.error`), or a transport failure
+ * (`example.mcp_unreachable`). The rejection code becomes the node's
+ * `node.failed` code, so the one the registry does not hold is a vendor code
+ * under the registered `example` org (errors.md §The registry, openwop#1698).
  *
  * The transport is the same guarded egress path every other outbound call
  * uses, and the revision is decided by the same `decide()` and audited with
@@ -44,7 +43,7 @@ const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_CLIENT_CAPS = 'io.modelcontextprotocol/clientCapabilities';
 
 export class McpClientError extends Error {
-  constructor(readonly code: 'not_found' | 'example.mcp_error' | 'example.mcp_unreachable' | 'interop_version_unsupported' | 'mcp_mrtr_rounds_exceeded', message: string, readonly details?: Record<string, unknown>) { super(message); }
+  constructor(readonly code: 'not_found' | 'mcp_error' | 'example.mcp_unreachable' | 'interop_version_unsupported' | 'mcp_mrtr_rounds_exceeded', message: string, readonly details?: Record<string, unknown>) { super(message); }
 }
 
 /** `mcp.client` is advertised only when the INSTALLED contract defines it (the host implements the contract it ships) and at least one server is bound. */
@@ -69,7 +68,7 @@ async function rpc(host: Host, url: string, method: string, params: Json, revisi
   let json: Json | null = null;
   try { json = res.body ? (JSON.parse(res.body) as Json) : null; } catch { json = null; }
   const error = json?.['error'];
-  if (error !== undefined && error !== null) return { ok: false, error: new McpClientError('example.mcp_error', `the MCP server answered ${method} with an error`, { error }) };
+  if (error !== undefined && error !== null) return { ok: false, error: new McpClientError('mcp_error', `the MCP server answered ${method} with an error`, { error }) };
   const result = json?.['result'];
   if (result === null || typeof result !== 'object' || Array.isArray(result)) return { ok: false, error: new McpClientError('example.mcp_unreachable', `the MCP server answered ${method} with HTTP ${res.status} and no JSON-RPC result`) };
   return { ok: true, result: result as Json };
@@ -166,7 +165,7 @@ export function createCtxMcp(host: Host, run: RunRow | null): CtxMcp {
       const probe = await discover(host, serverId, url);
       if (!probe.ok) {
         // A server that ANSWERED -32022 is reachable at a revision this host does not speak.
-        const answered = probe.error.code === 'example.mcp_error';
+        const answered = probe.error.code === 'mcp_error';
         return { state: answered ? 'incompatible' : 'unreachable' };
       }
       const offers = Array.isArray(probe.result['supportedVersions']) ? (probe.result['supportedVersions'] as unknown[]).map(String) : [];

@@ -46,13 +46,12 @@ export type SandboxReply = { result: unknown } | { error: SandboxError };
 export function sandboxPackIds(): string[] { return Object.keys(PACKS); }
 
 /**
- * Pack code that failed in a way the registry has no code for (it threw, or the
- * child died without a reply). No registered row fits, so it is a vendor code
- * under the registered `example` org (errors.md §The registry, openwop#1698);
- * its siblings sandbox_timeout / sandbox_memory_exceeded / sandbox_escape_attempt
- * are registered and used as is. child.cjs spells the same code.
+ * Pack code that failed outside the canonical sandbox catalog (it threw, or the
+ * child died without a reply): `sandbox_invocation_error`, registered by RFC 0226
+ * beside sandbox_timeout / sandbox_memory_exceeded / sandbox_escape_attempt.
+ * child.cjs spells the same code.
  */
-export const SANDBOX_INVOCATION_ERROR = 'example.sandbox_invocation_error';
+export const SANDBOX_INVOCATION_ERROR = 'sandbox_invocation_error';
 
 export async function invokeSandboxed(host: Host, typeId: string, args: Record<string, unknown>, allowedHostCalls: string[]): Promise<SandboxReply> {
   const source = PACKS[typeId];
