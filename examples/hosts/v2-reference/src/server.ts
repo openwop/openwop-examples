@@ -25,7 +25,7 @@ import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
 import { startA2APush, a2aServerRoutes } from './a2a-server.js';
 import { agentRoutes } from './agents.js';
 import { mcpServerRoutes } from './mcp-server.js';
-import { OAUTH_DDL, OAUTH_USE_TYPE, oauthRoutes, oauthSupported } from './oauth.js';
+import { OAUTH_DDL, OAUTH_USE_TYPE, migrateOAuth, oauthRoutes, oauthSupported } from './oauth.js';
 import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { startApprovalTimeoutSweep } from './executor.js';
@@ -106,6 +106,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   const validate = await createValidator(artifacts.schemasDir, config.devValidate);
   const a2ui = await createA2uiAdmission(artifacts.schemasDir, config.envelopeStrictness);
   store.db.exec(OAUTH_DDL);
+  migrateOAuth(store.db);
   const audit = artifacts.auditLogIntegrityFamily ? new AuditLog(store.db, config.dbPath, { checkpointIntervalEntries: config.auditCheckpointEntries, checkpointIntervalSeconds: config.auditCheckpointSeconds }) : null;
   const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0), startedAt: new Date().toISOString(), validate, a2ui, audit };
   // conformance-credential needs `oauth` (RFC 0199), which needs a contract that carries it.
