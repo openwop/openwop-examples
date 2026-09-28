@@ -508,6 +508,10 @@ export class Store {
   rotateWebhookSecret(id: string, secret: string, prevSecret: string, prevExpiresAt: number): void {
     this.db.prepare('UPDATE webhooks SET secret = ?, prev_secret = ?, prev_secret_expires_at = ? WHERE webhook_id = ?').run(secret, prevSecret, prevExpiresAt, id);
   }
+  /** host-sample-test-seams.md §29 — move the stored overlap expiry (epoch ms); the signer reads this column. */
+  setWebhookPrevSecretExpiry(id: string, prevExpiresAt: number): void {
+    this.db.prepare('UPDATE webhooks SET prev_secret_expires_at = ? WHERE webhook_id = ?').run(prevExpiresAt, id);
+  }
   getWebhook(id: string): WebhookRow | undefined {
     return this.db.prepare('SELECT * FROM webhooks WHERE webhook_id = ?').get(id) as WebhookRow | undefined;
   }

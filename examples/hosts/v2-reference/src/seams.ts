@@ -6,6 +6,7 @@
  *   POST sample/event-log/seed                  seedEra2EventLog (RFC 0176)
  *   POST sample/event-log/append                appendEra2Event — RFC 0176 §A writer-rule witness (§27): the PRODUCTION writer, seeded runs only
  *   POST sample/webhooks/receive                receiveWebhookDelivery (RFC 0176 §D.2)
+ *   POST sample/webhooks/rotation-overlap       shortenRotationOverlap — RFC 0201 §E.20 post-overlap witness (§29): moves the stored expiry the PRODUCTION signer reads
  *   POST sample/auth/credential/{mint,revoke}   the per-lane revoke seam (RFC 0170 §B.3)
  *   POST sample/test/idempotency/hold            armIdempotencyHold — RFC 0213 §B in-flight witness (idempotency-hold.ts)
  *   POST sample/test/workload-identity/resolve  §20 workload identity (RFC 0154 / 0170 §B.4)
@@ -28,7 +29,7 @@ import { scheduleRun } from './executor.js';
 import { EVENT_LOG_SCHEMA_VERSION } from './config.js';
 import { TERMINAL } from './host.js';
 import { route, type Ctx, type Reply, type Route } from './router.js';
-import { verifyInbound } from './webhooks.js';
+import { shortenRotationOverlap, verifyInbound } from './webhooks.js';
 import { appendEvent } from './events.js';
 import type { Host } from './host.js';
 import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
@@ -183,6 +184,14 @@ async function effectRetryRoute(ctx: Ctx): Promise<Reply> {
  * for `holdMs`. The seam answers only its own 201; the 409 a concurrent same-key
  * create receives comes from `withIdempotency`'s real in-flight branch.
  */
+async function rotationOverlapRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ webhookId?: unknown; overlapSeconds?: unknown }>();
+  for (const k of Object.keys(body)) if (k !== 'webhookId' && k !== 'overlapSeconds') throw err('validation_error', `unknown key ${k}`);
+  if (typeof body.webhookId !== 'string' || body.webhookId.length === 0) throw err('validation_error', 'webhookId is REQUIRED');
+  if (typeof body.overlapSeconds !== 'number' || !Number.isInteger(body.overlapSeconds) || body.overlapSeconds < 1 || body.overlapSeconds > 60) throw err('validation_error', 'overlapSeconds MUST be an integer in 1..60');
+  return { status: 200, body: shortenRotationOverlap(ctx.host, ctx.subject?.tenant ?? ctx.host.config.tenant, body.webhookId, body.overlapSeconds) };
+}
+
 async function idempotencyHoldRoute(ctx: Ctx): Promise<Reply> {
   const body = await ctx.json<{ key?: unknown; holdMs?: unknown }>();
   for (const k of Object.keys(body)) if (k !== 'key' && k !== 'holdMs') throw err('validation_error', `unknown key ${k}`);
@@ -385,6 +394,7 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/event-log/seed`, true, seedEra2),
     route('POST', `${p}/sample/event-log/append`, true, appendEra2),
     route('POST', `${p}/sample/webhooks/receive`, true, receive),
+    route('POST', `${p}/sample/webhooks/rotation-overlap`, true, rotationOverlapRoute),
     route('POST', `${p}/sample/effect-seams/fire`, true, fireEffectSeamRoute),
     route('POST', `${p}/sample/test/idempotency/effect-retry`, true, effectRetryRoute),
     route('POST', `${p}/sample/test/idempotency/hold`, true, idempotencyHoldRoute),
