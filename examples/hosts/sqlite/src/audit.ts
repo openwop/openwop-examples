@@ -72,7 +72,7 @@ interface CheckpointRow {
 export interface VerifyResult {
   readonly fromSeq: number;
   readonly toSeq: number;
-  /** Chain-level integrity: every entry's recomputed hash matches the stored entry_hash AND prev_hash links resolve. */
+  /** Aggregate verdict: every entry's recomputed hash matches the stored entry_hash, prev_hash links resolve, AND every checkpoint verifies. False exactly when `anomalies` is non-empty. */
   readonly chainValid: boolean;
   /** Checkpoint integrity: every checkpoint's stored merkle_root matches a recomputation over its entry range AND its Ed25519 signature verifies. */
   readonly checkpointsValid: boolean;
@@ -84,17 +84,31 @@ export interface VerifyResult {
     /** Per-checkpoint verification result — `null` when no signing key was passed to the verifier. */
     readonly verified: boolean | null;
   }>;
-  readonly anomalies: Array<{
-    readonly atSequence: number;
-    readonly kind:
-      | 'hash-mismatch'
-      | 'chain-break'
-      | 'missing-entry'
-      | 'merkle-mismatch'
-      | 'signature-invalid';
-    readonly detail: string;
-  }>;
+  /**
+   * `audit-verify-result.schema.json` `$defs/Anomaly` (RFC 0218 §C): `kind`
+   * fixes the members, and `chainValid` is false exactly when this is non-empty.
+   */
+  readonly anomalies: Anomaly[];
 }
+
+type EntryAnomalyKind = 'hash-mismatch' | 'missing-entry';
+type CheckpointAnomalyKind = 'merkle-mismatch' | 'signature-invalid';
+
+export type Anomaly =
+  | {
+      readonly atSeq: number;
+      readonly kind: 'chain-break';
+      readonly expectedPrevHash: string | null;
+      readonly actualPrevHash: string | null;
+      readonly detail: string;
+    }
+  | { readonly atSeq: number; readonly kind: EntryAnomalyKind; readonly detail: string }
+  | {
+      readonly atSeq: number;
+      readonly kind: CheckpointAnomalyKind;
+      readonly checkpoint: string;
+      readonly detail: string;
+    };
 
 export interface SigningKey {
   readonly keyId: string;
@@ -456,7 +470,7 @@ export function verifyAuditChain(
   for (const row of rows) {
     if (row.seq !== expectedSeq) {
       anomalies.push({
-        atSequence: expectedSeq,
+        atSeq: expectedSeq,
         kind: 'missing-entry',
         detail: `expected seq ${expectedSeq}, found ${row.seq}`,
       });
@@ -465,8 +479,10 @@ export function verifyAuditChain(
     }
     if (row.prev_hash !== expectedPrev) {
       anomalies.push({
-        atSequence: row.seq,
+        atSeq: row.seq,
         kind: 'chain-break',
+        expectedPrevHash: expectedPrev,
+        actualPrevHash: row.prev_hash,
         detail: `prev_hash ${row.prev_hash} does not match prior entry hash ${expectedPrev}`,
       });
       chainValid = false;
@@ -483,7 +499,7 @@ export function verifyAuditChain(
     });
     if (recomputed !== row.entry_hash) {
       anomalies.push({
-        atSequence: row.seq,
+        atSeq: row.seq,
         kind: 'hash-mismatch',
         detail: `recomputed ${recomputed} != stored ${row.entry_hash}`,
       });
@@ -547,8 +563,9 @@ export function verifyAuditChain(
 
     if (recomputedRoot !== cp.merkle_root) {
       anomalies.push({
-        atSequence: cp.at_sequence,
+        atSeq: cp.at_sequence,
         kind: 'merkle-mismatch',
+        checkpoint: cp.checkpoint_id,
         detail: `recomputed merkle root ${recomputedRoot} != stored ${cp.merkle_root}`,
       });
       merkleOk = false;
@@ -568,8 +585,9 @@ export function verifyAuditChain(
       }
       if (!signatureOk) {
         anomalies.push({
-          atSequence: cp.at_sequence,
+          atSeq: cp.at_sequence,
           kind: 'signature-invalid',
+          checkpoint: cp.checkpoint_id,
           detail: `Ed25519 signature does not verify under signing key ${signingKey.keyId}`,
         });
         checkpointsValid = false;
@@ -588,7 +606,9 @@ export function verifyAuditChain(
   return {
     fromSeq: lo,
     toSeq: hi,
-    chainValid,
+    // The aggregate verdict (RFC 0218 §C): a forged checkpoint is a failure
+    // even when every entry links. `checkpointsValid` says which half failed.
+    chainValid: chainValid && checkpointsValid,
     checkpointsValid,
     checkpoints: verifiedCheckpoints,
     anomalies,

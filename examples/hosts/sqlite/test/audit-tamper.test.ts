@@ -34,6 +34,34 @@ import {
   verifyAuditChain,
 } from '../src/audit.js';
 
+/**
+ * The member set `audit-verify-result.schema.json` `$defs/Anomaly` allows for
+ * each `kind` (RFC 0218 §C). The schema closes the object, so an extra or a
+ * missing member is a non-conforming anomaly, not a harmless one.
+ */
+const ANOMALY_MEMBERS: Record<string, readonly string[]> = {
+  'chain-break': ['actualPrevHash', 'atSeq', 'detail', 'expectedPrevHash', 'kind'],
+  'hash-mismatch': ['atSeq', 'detail', 'kind'],
+  'missing-entry': ['atSeq', 'detail', 'kind'],
+  'merkle-mismatch': ['atSeq', 'checkpoint', 'detail', 'kind'],
+  'signature-invalid': ['atSeq', 'checkpoint', 'detail', 'kind'],
+};
+
+function assertSchemaShaped(anomalies: ReadonlyArray<object>, chainValid: boolean): void {
+  assert.equal(chainValid, anomalies.length === 0, 'chainValid MUST be false exactly when anomalies is non-empty');
+  for (const a of anomalies as ReadonlyArray<Record<string, unknown>>) {
+    const expected = ANOMALY_MEMBERS[String(a.kind)];
+    assert.ok(expected !== undefined, `unknown anomaly kind: ${JSON.stringify(a)}`);
+    assert.deepEqual(Object.keys(a).sort(), expected, `anomaly members for ${String(a.kind)}: ${JSON.stringify(a)}`);
+    assert.ok(Number.isInteger(a.atSeq) && (a.atSeq as number) >= 0, `atSeq is a sequence number: ${JSON.stringify(a)}`);
+    if ('checkpoint' in a) assert.ok(typeof a.checkpoint === 'string' && a.checkpoint.length > 0, `checkpoint is an id: ${JSON.stringify(a)}`);
+    if (a.kind === 'chain-break') {
+      assert.ok(typeof a.expectedPrevHash === 'string' || a.expectedPrevHash === null, `expectedPrevHash: ${JSON.stringify(a)}`);
+      assert.ok(typeof a.actualPrevHash === 'string' || a.actualPrevHash === null, `actualPrevHash: ${JSON.stringify(a)}`);
+    }
+  }
+}
+
 const workdir = mkdtempSync(join(tmpdir(), 'openwop-audit-tamper-'));
 try {
   const dbPath = join(workdir, 'audit.sqlite');
@@ -62,6 +90,7 @@ try {
   assert.equal(cleanResult.chainValid, true, 'pre-tamper chain MUST be valid');
   assert.equal(cleanResult.checkpointsValid, true, 'pre-tamper checkpoints MUST be valid');
   assert.equal(cleanResult.anomalies.length, 0, 'pre-tamper chain MUST have zero anomalies');
+  assertSchemaShaped(cleanResult.anomalies, cleanResult.chainValid);
   assert.ok(cleanResult.checkpoints.length >= 1, 'pre-tamper checkpoint MUST be present');
   assert.equal(
     cleanResult.checkpoints[0]?.verified,
@@ -84,14 +113,14 @@ try {
 
   // Entry-level: hash-mismatch at seq=3 + chain-break at seq=4 (downstream propagation).
   const hashMismatch = tamperedResult.anomalies.find(
-    (a) => a.kind === 'hash-mismatch' && a.atSequence === 3,
+    (a) => a.kind === 'hash-mismatch' && a.atSeq === 3,
   );
   assert.ok(
     hashMismatch !== undefined,
     `expected hash-mismatch anomaly at seq=3, got: ${JSON.stringify(tamperedResult.anomalies)}`,
   );
   const chainBreak = tamperedResult.anomalies.find(
-    (a) => a.kind === 'chain-break' && a.atSequence === 4,
+    (a) => a.kind === 'chain-break' && a.atSeq === 4,
   );
   assert.ok(
     chainBreak !== undefined,
@@ -109,12 +138,14 @@ try {
     merkleMismatch !== undefined,
     `expected merkle-mismatch anomaly, got: ${JSON.stringify(tamperedResult.anomalies)}`,
   );
+  assertSchemaShaped(tamperedResult.anomalies, tamperedResult.chainValid);
 
   // TAMPER 2: mutate the checkpoint's signature directly. Reset entries first
   // so the entry chain is clean; the only tamper is on audit_checkpoints.
   db.prepare("UPDATE audit_log SET details_json = ? WHERE seq = 3").run(
     JSON.stringify({ ordinal: 3 }),
   );
+  const originalSig = (db.prepare('SELECT signature FROM audit_checkpoints ORDER BY at_sequence LIMIT 1').get() as { signature: string }).signature;
   db.prepare(
     "UPDATE audit_checkpoints SET signature = 'AAAA' || substr(signature, 5)",
   ).run();
@@ -122,8 +153,8 @@ try {
   const sigTampered = verifyAuditChain(db, 0, 100, signingKey);
   assert.equal(
     sigTampered.chainValid,
-    true,
-    'after entry-restore, chain MUST be valid even with bad checkpoint signature',
+    false,
+    'a forged checkpoint signature MUST make chainValid false even with every entry linked (RFC 0218 §C)',
   );
   assert.equal(
     sigTampered.checkpointsValid,
@@ -135,6 +166,25 @@ try {
     sigInvalid !== undefined,
     `expected signature-invalid anomaly, got: ${JSON.stringify(sigTampered.anomalies)}`,
   );
+  assert.deepEqual(
+    sigTampered.anomalies.map((a) => a.kind),
+    ['signature-invalid'],
+    'only the signature was forged, so it is the only anomaly',
+  );
+  assertSchemaShaped(sigTampered.anomalies, sigTampered.chainValid);
+
+  // TAMPER 3: restore the signature and delete a middle entry. The gap is a
+  // missing-entry, the entry after it no longer links, and the checkpoint's
+  // root no longer recomputes.
+  db.prepare("UPDATE audit_checkpoints SET signature = ? ").run(originalSig);
+  db.prepare('DELETE FROM audit_log WHERE seq = 2').run();
+  const deleted = verifyAuditChain(db, 0, 100, signingKey);
+  assert.deepEqual(
+    deleted.anomalies.map((a) => `${a.kind}@${a.atSeq}`).sort(),
+    ['chain-break@3', 'merkle-mismatch@5', 'missing-entry@2'],
+    `a deleted entry: ${JSON.stringify(deleted.anomalies)}`,
+  );
+  assertSchemaShaped(deleted.anomalies, deleted.chainValid);
 
   db.close();
 
