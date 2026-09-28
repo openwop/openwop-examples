@@ -54,10 +54,13 @@ export function validateConfigurable(c: unknown): void {
   }
 }
 
-/** The snapshot as the caller's contract renders it — the owner echo is the one field that differs (codemap.ts ownerForMajor). */
+/** The snapshot as the caller's contract renders it — the owner echo (codemap.ts ownerForMajor) and a fork's parentRunId (v1 ids carry no tenant segment) differ. */
 function snapshotForMajor(ctx: Ctx, run: RunRow): Record<string, unknown> {
   const snap = snapshot(ctx.host, run);
-  return ctx.major === 1 ? { ...snap, owner: ownerForMajor(snap['owner'] as Record<string, unknown>, 1) } : snap;
+  if (ctx.major !== 1) return snap;
+  const v1: Record<string, unknown> = { ...snap, owner: ownerForMajor(snap['owner'] as Record<string, unknown>, 1) };
+  if (typeof snap['parentRunId'] === 'string') v1['parentRunId'] = wireRunId(ctx, snap['parentRunId']);
+  return v1;
 }
 
 export function snapshot(host: Host, run: RunRow): Record<string, unknown> {
@@ -73,6 +76,7 @@ export function snapshot(host: Host, run: RunRow): Record<string, unknown> {
     variables: JSON.parse(run.inputs_json),
   };
   if (run.current_node_id !== null) snap['currentNodeId'] = run.current_node_id;
+  if (run.source_run_id !== null) snap['parentRunId'] = run.source_run_id;
   if (run.started_at !== null) snap['startedAt'] = run.started_at;
   if (run.completed_at !== null) snap['completedAt'] = run.completed_at;
   if (run.error_json !== null) snap['error'] = JSON.parse(run.error_json);
@@ -387,8 +391,10 @@ async function fork(ctx: Ctx): Promise<Reply> {
 
 async function ancestry(ctx: Ctx): Promise<Reply> {
   const run = loadRun(ctx, ctx.params['runId'] as string);
-  const parent = run.source_run_id === null ? null : { runId: run.source_run_id, hostId: HOST_ID, cause: 'core.subWorkflow' };
-  const body = { runId: run.run_id, hostId: HOST_ID, parent };
+  // runs.md §Diff and ancestry: `parent` names a composition parent (`cause`).
+  // A fork is not dispatched; its lineage is the snapshot's `parentRunId`. This
+  // host dispatches no child runs, so no run it serves has an ancestry parent.
+  const body = { runId: run.run_id, hostId: HOST_ID, parent: null };
   ctx.host.validate('run-ancestry-response', body, `ancestry ${run.run_id}`);
   return { status: 200, body };
 }

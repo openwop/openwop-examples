@@ -490,7 +490,9 @@ describe('persistence + replay', () => {
     expect(f.s).toBe(201); expect(f.b.fromSeq).toBe(0);
     const snap = await waitStatus(f.b.runId, ['completed']);
     expect(snap.owner).toEqual((await call('GET', `/runs/${enc(c.b.runId)}`)).b.owner);
-    expect((await call('GET', `/runs/${enc(f.b.runId)}/ancestry`)).b.parent.runId).toBe(c.b.runId);
+    // A fork is not a composition child: its lineage is parentRunId, never an ancestry parent.
+    expect((await call('GET', `/runs/${enc(f.b.runId)}/ancestry`)).b.parent).toBeNull();
+    expect(snap.parentRunId).toBe(c.b.runId);
     const m = await call('GET', '/host/effect-seams');
     expect(m.b.seams.every((s: any) => s.guarded === true)).toBe(true);
     const bad = await call('POST', `/runs/${enc(c.b.runId)}:fork`, { mode: 'branch', fromSeq: 999 });
