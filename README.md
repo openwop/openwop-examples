@@ -17,7 +17,8 @@ protocol repo stays a lean spec + conformance contract.
   - `python/` — v1 host in Python (stdlib)
   - `wasm-sandbox/` — RFC 0035 sandboxed-execution reference
 - `examples/` (top level) — runnable workflow samples (`tiny-workflow`, `approval-workflow`,
-  `streaming-client`, `mcp-tool`, …). Samples are `fetch`-only and default to the in-memory host.
+  `streaming-client`, `mcp-tool`, …). Samples are `fetch`-only. `tiny-workflow` and `streaming-client`
+  speak v2 and default to the v2 reference host; the others default to the in-memory v1 host.
 
 > **v1 and v2.** v1 hosts are not retired: through the overlap a host advertises both majors and
 > keeps `preferredVersion` on `1.x` by MUST (`spec/v2/core/versioning.md` §1.1), so the v1 hosts
@@ -27,11 +28,11 @@ protocol repo stays a lean spec + conformance contract.
 ## Quick start
 
 ```bash
-# boot the dependency-free reference host
-( cd examples/hosts/in-memory && npm install && npm start )   # serves http://127.0.0.1:3737
+# boot the v2 reference host
+( cd examples/hosts/v2-reference && npm install --legacy-peer-deps && npm start )   # serves http://127.0.0.1:3838
 
-# in another shell, run a sample against it
-( cd examples/tiny-workflow && OPENWOP_BASE_URL=http://127.0.0.1:3737 npm test )
+# in another shell, run a v2 sample against it
+( cd examples/tiny-workflow && npm test )
 ```
 
 ## Conformance

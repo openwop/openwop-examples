@@ -6,8 +6,8 @@ Runnable example projects that demonstrate the openwop wire contract. Each examp
 
 | Example | Profile required | Host target | CI runs against |
 |---|---|---|---|
-| [`tiny-workflow/`](./tiny-workflow/) | `openwop-core` | Any | in-memory host |
-| [`streaming-client/`](./streaming-client/) | `openwop-stream-sse` | Any | in-memory host |
+| [`tiny-workflow/`](./tiny-workflow/) | `openwop-core-standard` (v2) | Any v2 host | v2 reference host |
+| [`streaming-client/`](./streaming-client/) | `openwop-core-standard` (v2 SSE) | Any v2 host | v2 reference host |
 | [`idempotent-runs/`](./idempotent-runs/) | `openwop-core` | Any | in-memory host |
 | [`approval-workflow/`](./approval-workflow/) | `openwop-interrupts` | Any host claiming the profile | skip-equivalent without `OPENWOP_BASE_URL` |
 | [`branch-fork/`](./branch-fork/) | `openwop-replay-fork` (with `branch` mode) | Any host claiming the profile | skip-equivalent without `OPENWOP_BASE_URL` |
@@ -33,10 +33,12 @@ Each example reads from a small set of well-defined env vars. Defaults target th
 ## Running locally
 
 ```bash
-# Terminal 1 — start the in-memory reference host (most examples use this)
-cd examples/hosts/in-memory && npm install && npm start
+# Terminal 1 — start the v2 reference host (tiny-workflow, streaming-client)
+cd examples/hosts/v2-reference && npm install --legacy-peer-deps && npm start
+#   …or the in-memory v1 host for the other in-memory-targeting examples:
+#   cd examples/hosts/in-memory && npm install && npm start
 
-# Terminal 2 — run any in-memory-targeting example
+# Terminal 2 — run an example
 cd examples/tiny-workflow && npm install && npm start
 
 # To exercise external-host examples, supply credentials:

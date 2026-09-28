@@ -2,7 +2,7 @@
   "name": "@openwop/openwop-example-streaming-client",
   "version": "1.1.7",
   "private": true,
-  "description": "OpenWOP SSE event-stream consumer. Connects to a run's event stream and prints each event as it arrives.",
+  "description": "OpenWOP v2 SSE event-stream consumer. Connects to a run's event stream and prints each event as it arrives.",
   "type": "module",
   "scripts": {
     "start": "node streaming-client.mjs",
