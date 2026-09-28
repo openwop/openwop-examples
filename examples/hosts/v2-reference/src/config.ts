@@ -186,6 +186,10 @@ export interface HostConfig {
   readonly lowScopeApiKey: string | null;
   /** The scopes `lowScopeApiKey` holds (`OPENWOP_LOW_SCOPE_SCOPES`, comma-separated). */
   readonly lowScopeScopes: readonly string[];
+  /** RFC 0224 — `auditLogIntegrity.checkpointIntervalEntries` (`OPENWOP_AUDIT_CHECKPOINT_ENTRIES`); the advertised bound IS the enforced one. */
+  readonly auditCheckpointEntries: number;
+  /** RFC 0224 — `auditLogIntegrity.checkpointIntervalSeconds` (`OPENWOP_AUDIT_CHECKPOINT_SECONDS`). */
+  readonly auditCheckpointSeconds: number;
 }
 
 /** `id=url,id=url` → a map; a malformed entry is refused at boot rather than dropped. */
@@ -263,6 +267,9 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     oidcAudience: env('OPENWOP_OIDC_AUDIENCE', HOST_ID),
     lowScopeApiKey: process.env['OPENWOP_LOW_SCOPE_API_KEY']?.trim() || null,
     lowScopeScopes: env('OPENWOP_LOW_SCOPE_SCOPES', 'runs:read').split(',').map((x) => x.trim()).filter((x) => x.length > 0),
+    // The RECOMMENDED cadence of the earlier major's profile: 1000 entries or 5 minutes, whichever is sooner.
+    auditCheckpointEntries: Math.max(1, envInt('OPENWOP_AUDIT_CHECKPOINT_ENTRIES', 1000)),
+    auditCheckpointSeconds: Math.max(1, envInt('OPENWOP_AUDIT_CHECKPOINT_SECONDS', 300)),
     ...overrides,
   };
 }

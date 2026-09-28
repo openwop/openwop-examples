@@ -54,6 +54,8 @@ export interface Route {
   readonly contract?: 1 | 2 | 'both';
   /** RFC 0200 §B.1 — the ONE scope this operation requires, or null where none is specified (`scopes.ts`). */
   readonly scope?: string | null;
+  /** The literal pattern `route()` was called with — the audit entry's action (audit.ts). */
+  readonly path?: string;
 }
 
 /** The path parameters that carry a tenant-bound id (identity.md §5 table) — the only ones the `~` projection applies to; `nodeId` admits a literal `~`. */
@@ -82,7 +84,7 @@ export function route(method: string, pattern: string, auth: boolean, handler: H
   // RFC 0200: the scope is resolved HERE, from the literal pattern, so a route and its
   // scope cannot drift — `scopeForRoute` throws at boot for an unlisted, non-exempt route.
   const scope = auth ? scopeForRoute(method, pattern) : null;
-  return contract === undefined ? { method, pattern: re, auth, handler, scope } : { method, pattern: re, auth, handler, contract, scope };
+  return contract === undefined ? { method, pattern: re, auth, handler, scope, path: pattern } : { method, pattern: re, auth, handler, contract, scope, path: pattern };
 }
 
 function versionMajor(raw: string | null): { major: number | null; malformed: boolean } {
@@ -273,6 +275,11 @@ export class Router {
       };
       const reply = await matched.handler(ctx);
       if (reply === STREAMED) return;
+      // RFC 0224 (audit.ts): every successful authenticated write is an audit entry. Seams are a
+      // test surface, not an operation, and reads are not appended.
+      if (this.host.audit !== null && authed !== null && method !== 'GET' && reply.status < 300 && !(matched.path ?? '').startsWith('/conformance/')) {
+        this.host.audit.append({ actor: `${authed.subject.issuer}#${authed.subject.subjectId}`, action: `${method} ${matched.path ?? path}`, target: path, details: { tenant: authed.subject.tenant, status: reply.status } });
+      }
       send(reply);
     } catch (e) {
       fail(e);
