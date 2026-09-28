@@ -11,7 +11,8 @@
  *     anywhere in a pack-authored document (never rejected)
  *
  * This host registers and validates packs; it does not execute third-party
- * pack code (it advertises no `sandbox`), which security-defaults.md permits.
+ * pack code. It does advertise `sandbox` (isolationModel `process`, sandbox.ts),
+ * whose §8 seam runs only the host's own synthetic escape-attempt packs.
  */
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
