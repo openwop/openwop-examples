@@ -1,2 +1,5 @@
 node_modules/
 dist/
+keys/*.pem
+!keys/host.pub.pem
+bundle-v3.json.new
