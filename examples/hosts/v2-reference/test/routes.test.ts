@@ -503,6 +503,23 @@ describe('persistence + replay', () => {
     expect(attempts.every((a: any) => a.keying === 'business-identity')).toBe(true);
     expect(attempts.map((a: any) => a.attempt).sort()).toEqual([1, 2]);
   });
+
+  it('retries a gateway 5xx under the same identity — a tunnel turns a reset into a 502', async () => {
+    const { createServer } = await import('node:http');
+    const keys: string[] = [];
+    let first = true;
+    const srv = createServer((req, res) => { req.on('data', () => undefined); req.on('end', () => { keys.push(String(req.headers['idempotency-key'])); res.writeHead(first ? 502 : 204); first = false; res.end(); }); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    try {
+      const r = await call('POST', '/conformance/seams/sample/test/idempotency/effect-retry', { providerUrl: `http://127.0.0.1:${(srv.address() as { port: number }).port}/` });
+      expect(r.s).toBe(201);
+      const ledger = await call('GET', `/runs/${enc(r.b.runId)}/effects`);
+      const attempts = ledger.b.effects.filter((e: any) => e.effectId === r.b.effectId);
+      expect(attempts.map((a: any) => a.attempt).sort()).toEqual([1, 2]);
+      expect(keys.length).toBe(2);
+      expect(new Set(keys).size).toBe(1);
+    } finally { srv.close(); }
+  });
 });
 
 describe('webhooks + identity + packs + workspace', () => {
