@@ -167,16 +167,17 @@ if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture ans
 # ---- cut
 # Strict mode (--require-behavior, wired in suite 2.4.5 — before that the flag
 # was a silent no-op) demands that every capability-gated scenario either find
-# its family ADVERTISED or find an explicit opt-out. Four families this host
+# its family ADVERTISED or find an explicit opt-out. Three families this host
 # deliberately does not implement, declared here rather than left to soft-skip:
 #   family.forms   — obliges field validation and i18n labels at a form-bearing
 #                    surface this host does not have (the ninth host-tier id).
 #   family.memory  — no agent-memory layer.
 #   connections.packsSupported — no connection-provider surface.
-#   family.packs   — no registry resolution of pack references, which packs.md
-#                    makes the condition for advertising `packs` (#104).
+# `family.packs` was a fourth until suite 2.43.1 (openwop#1706): the manifest
+# and pack-isolation scenarios now gate on the seams profile, not on the packs
+# record this host rightly does not advertise (#104), so they run again.
 # An opt-out is a CLAIM, not a hiding place: it appears in the bundle.
-OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported,family.packs \
+OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported \
 OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 \
 OPENWOP_MCP_FAKE_SERVER=true OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_FAKE_PORT" \
 OPENWOP_TEST_SAML_IDP_URL="$IDP_FOR_HOST" \
