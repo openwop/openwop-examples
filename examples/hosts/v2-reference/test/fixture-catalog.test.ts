@@ -3,9 +3,10 @@
  * installed suite does not ship is never loaded and never an error; the same
  * id is loaded as soon as a fixtures directory carries it (openwop#1700).
  */
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { loadWorkflows } from '../src/server.js';
@@ -15,11 +16,12 @@ const TIMEOUT = 'conformance-approval-timeout';
 
 describe('fixture catalog', () => {
   it('an honoured fixture absent from every fixtures directory is skipped, not thrown', () => {
+    // Suites from 2.43.1 ship both fixtures, so "absent" is decided by the installed suite's own directory.
+    const suiteFixtures = join(dirname(createRequire(import.meta.url).resolve('@openwop/openwop-conformance/package.json')), 'fixtures');
     const empty = mkdtempSync(join(tmpdir(), 'owp-fixtures-empty-'));
     const ids = [...loadWorkflows(loadConfig({ fixturesDir: empty })).keys()];
     expect(ids).toContain('conformance-approval');
-    expect(ids).not.toContain(ROUTED);
-    expect(ids).not.toContain(TIMEOUT);
+    for (const id of [ROUTED, TIMEOUT]) expect(ids.includes(id), id).toBe(existsSync(join(suiteFixtures, `${id}.json`)));
   });
   it('the same ids load when a fixtures directory carries them', () => {
     const dir = mkdtempSync(join(tmpdir(), 'owp-fixtures-'));
