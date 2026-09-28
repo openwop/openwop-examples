@@ -33,10 +33,10 @@ describe('ctx.mcp', () => {
     expect((r['_meta'] as Record<string, unknown>)['io.modelcontextprotocol/serverInfo']).toBeDefined();
   });
 
-  it('an unknown serverId rejects not_found; an MCP error rejects example.mcp_error with the error unaltered', async () => {
+  it('an unknown serverId rejects not_found; an MCP error rejects mcp_error with the error unaltered', async () => {
     const mcp = createCtxMcp(running.host, null);
     await expect(mcp.callTool({ serverId: 'no-such', name: 'echo', idempotencyKey: 'k2' })).rejects.toMatchObject({ code: 'not_found' });
-    await expect(mcp.callTool({ serverId: 'conformance', name: 'no-such-tool', idempotencyKey: 'k3' })).rejects.toMatchObject({ code: 'example.mcp_error', details: { error: { code: -32602 } } });
+    await expect(mcp.callTool({ serverId: 'conformance', name: 'no-such-tool', idempotencyKey: 'k3' })).rejects.toMatchObject({ code: 'mcp_error', details: { error: { code: -32602 } } });
   });
 
   it('serverHealth is reachable / unreachable, never a session state', async () => {

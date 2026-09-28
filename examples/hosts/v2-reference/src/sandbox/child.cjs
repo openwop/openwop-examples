@@ -45,7 +45,7 @@ function mapAccessDenied(e) {
     return escape('host-process-escape', `pack code attempted ${p || 'a denied host capability'}`);
   }
   if (e instanceof SandboxError) return e;
-  return new SandboxError('example.sandbox_invocation_error', { message: e && e.message ? String(e.message) : String(e) });
+  return new SandboxError('sandbox_invocation_error', { message: e && e.message ? String(e.message) : String(e) });
 }
 
 let raw = '';
