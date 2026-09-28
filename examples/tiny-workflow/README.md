@@ -1,45 +1,43 @@
-# Tiny Workflow
+# tiny-workflow
 
-Smallest possible openwop run lifecycle: discover → create run → poll until terminal.
+The smallest possible OpenWOP v2 run lifecycle: discover the host, start a run, poll it until it ends.
 
 ## Run
 
-Against the in-memory reference host (start it in another terminal first — see `examples/hosts/in-memory/`):
+Against the v2 reference host (start it in another terminal first — see `examples/hosts/v2-reference/`):
 
 ```bash
 npm start
 ```
 
-Output:
+Sample output:
 
 ```
-→ Discovery: http://127.0.0.1:3737/.well-known/openwop
-  protocolVersion: 1.0
-  implementation:  openwop-host-in-memory
-→ POST /v1/runs { workflowId: "conformance-noop" }
-  runId:  run-...
+→ Discovery: http://127.0.0.1:3838/.well-known/openwop (OpenWOP-Version: 2)
+  served as:         OpenWOP-Version 2.0
+  protocolVersions:  1.11, 2.0
+  implementation:   openwop-host-v2-reference
+→ POST /runs { workflowId: "conformance-noop" }
+  runId:  openwop-reference-tenant/xvp5OfaiTM7qfOfYcDktgA4k
   status: pending
 → Polling until terminal...
   status: completed
-  ended:  2026-05-01T12:34:56.000Z
 ✓ Run completed successfully
 ```
 
-Against any other OpenWOP host:
+Against any other v2 host:
 
 ```bash
 OPENWOP_BASE_URL=https://your-host.example OPENWOP_API_KEY=your-key npm start
 ```
 
-## What this teaches
+## What it shows
 
-- Discovery (`GET /.well-known/openwop`) is the entrypoint to any OpenWOP host.
-- Run creation is `POST /v1/runs` with `{ workflowId }`.
-- Snapshot polling via `GET /v1/runs/{runId}` is the lowest-common-denominator way to track a run.
-- Terminal statuses are `completed` / `failed` / `cancelled`.
+- Every request carries `OpenWOP-Version: 2`. Through the v1 overlap, a discovery request without it is answered as v1 (`spec/v2/core/versioning.md` §1.3).
+- Run creation is `POST /runs` with `{ workflowId }` and an `Idempotency-Key`, so a retry returns the same run.
+- Run ids are tenant-bound (`tenant/opaque`). In a path they travel as one projected segment, `tenant~2Fopaque` (`spec/v2/core/identity.md` §5).
+- Polling `GET /runs/{runId}` is the simplest way to track a run. For live events, see `examples/streaming-client/`.
 
-## ~80 lines, zero dependencies
+## One file, zero dependencies
 
-The example uses only Node 20+'s built-in `fetch`. No SDK, no transport library. The point is to show the protocol is small enough to write a client in a single file.
-
-For a more production-grade client, use `@openwop/openwop` (TypeScript), `openwop-client` (Python), or the Go SDK at `github.com/openwop/openwop/sdk/go`.
+The example uses only Node 20+'s built-in `fetch`: no SDK, no transport library. The point is that the protocol is small enough to write a client in one file. For a production client, use the v2 SDKs in [`openwop-sdks`](https://github.com/openwop/openwop-sdks) (`@openwop/openwop@2` for TypeScript, `openwop-client>=2` for Python).

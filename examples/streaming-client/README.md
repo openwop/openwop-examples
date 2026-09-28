@@ -1,43 +1,47 @@
-# Streaming Client
+# streaming-client
 
-OpenWOP SSE event-stream consumer. Connects to a run's `/events` endpoint and prints each event as it arrives, exiting on the terminal event.
+Consume a run's OpenWOP v2 event stream over SSE: create a run, connect to its stream, print each event until the terminal one.
 
 ## Run
 
-Against the in-memory reference host (start it in another terminal first — see `examples/hosts/in-memory/`):
+Against the v2 reference host (start it in another terminal first — see `examples/hosts/v2-reference/`):
 
 ```bash
 npm start
 ```
 
-Output:
+Sample output:
 
 ```
-→ POST /v1/runs { workflowId: "conformance-noop" }
-  runId: run-...
-→ Streaming /v1/runs/run-.../events
+→ POST /runs { workflowId: "conformance-noop" }
+  runId: openwop-reference-tenant/Zt8B4tXEcuST8as0BS46MFLM
+→ Streaming /runs/openwop-reference-tenant~2FZt8B4tXEcuST8as0BS46MFLM/events
   [0] run.started
   [1] node.started node=noop
   [2] node.completed node=noop
   [3] run.completed
-✓ Stream closed after 4 events
+✓ Stream ended with run.completed after 4 events
 ```
 
-Override the workflow:
+Against any other v2 host:
+
+```bash
+OPENWOP_BASE_URL=https://your-host.example OPENWOP_API_KEY=your-key npm start
+```
+
+Stream a different workflow:
 
 ```bash
 OPENWOP_WORKFLOW=conformance-cancellable npm start
 ```
 
-## What this teaches
+## What it shows
 
-- SSE connect: `Accept: text/event-stream` + read response body as a stream.
-- Frame parsing: events are `event:` + `data:` lines separated by blank lines.
-- Backlog replay: on connect, the host replays prior events before catching up to live.
-- Terminal close: the host closes the connection after `run.completed` / `run.failed` / `run.cancelled` so the client's loop exits cleanly without explicit polling.
+- Every request carries `OpenWOP-Version: 2` (`spec/v2/core/versioning.md` §1.3).
+- The host replays the backlog on connect and closes the stream after the terminal event (`run.completed`, `run.failed` or `run.cancelled`), so no polling loop is needed (`spec/v2/core/events.md` §SSE frames).
+- Each frame's `id:` is the event's sequence. Reconnecting with `Last-Event-ID: <id>` resumes after that event and never repeats it.
+- A client that sees the stream close without a terminal event should treat the run as still in progress and reconnect.
 
-## ~110 lines, zero dependencies
+## One file, zero dependencies
 
-Pure Node `fetch` + a hand-written 25-line SSE parser. Real SDKs use `eventsource` (npm) or equivalent — but the protocol is small enough that a one-file implementation is correct.
-
-For a more production-grade client with reconnect-with-Last-Event-ID semantics, use `@openwop/openwop` which handles reconnection automatically.
+Node's `fetch` and a small hand-written SSE parser. Production clients use an SSE library, but the protocol is small enough that a one-file client is correct. For automatic reconnection with `Last-Event-ID`, use the TypeScript SDK (`@openwop/openwop@2`, `client.runs.events`).
