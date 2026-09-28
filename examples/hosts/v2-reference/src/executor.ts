@@ -717,18 +717,18 @@ function failNode(host: Host, run: RunRow, def: WorkflowDefinition | undefined, 
 
 /**
  * interrupt.md §Rejection — the timeout disposition. An approval gate whose
- * non-zero `timeoutMs` elapsed unresolved, with `onTimeout` absent or `reject`,
- * is resolved rejected by the host itself: `action: timeout`, `decision:
- * rejected`, `reason: timeout`, no `resolvedBy`. It then fails like any reject.
- * `approve` / `escalate` are not implemented: such a gate keeps today's expiry.
+ * non-zero `timeoutMs` elapsed unresolved is resolved rejected by the host
+ * itself, WHATEVER `onTimeout` holds: `action: timeout`, `decision: rejected`,
+ * `reason: timeout`, no `resolvedBy`. It then fails like any reject. A timeout
+ * MUST NOT grant a gate: `approve` is treated as reject, and `escalate` may
+ * notify but MUST NOT extend or grant (openwop#1696) — this host notifies no one.
  * Swept on a timer, so a deadline that passed while the process was down is
  * applied at the first tick after boot.
  */
 export function sweepApprovalTimeouts(host: Host): void {
   for (const row of host.store.expiredPendingInterrupts('approval', nowIso())) {
     const payload = payloadOf(row);
-    const onTimeout = payload.data?.['onTimeout'];
-    if (!(typeof payload.timeoutMs === 'number' && payload.timeoutMs > 0) || (onTimeout !== undefined && onTimeout !== 'reject')) continue;
+    if (!(typeof payload.timeoutMs === 'number' && payload.timeoutMs > 0)) continue;
     const run = host.store.getRun(row.run_id);
     if (!run || TERMINAL.has(run.status) || !run.status.startsWith('waiting-')) continue;
     if (!host.store.resolveInterrupt(row.interrupt_id, 'null')) continue; // a caller's resolve won

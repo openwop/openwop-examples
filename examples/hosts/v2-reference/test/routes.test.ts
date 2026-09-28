@@ -348,12 +348,15 @@ describe('interrupt.md §Rejection — a rejected gate fails closed, and the fai
     expect(okEvs.filter((e) => e.type === 'node.skipped').map((e) => e.nodeId)).toEqual(['notify']);
     expect(okEvs.filter((e) => e.type === 'node.completed').map((e) => e.nodeId).sort()).toEqual(['audit', 'clean', 'gate', 'next']);
   });
-  it('a gate whose timeoutMs elapses with onTimeout absent or reject resolves rejected by the host (action timeout, reason timeout)', async () => {
+  it('a gate whose timeoutMs elapses resolves rejected by the host whatever onTimeout holds (action timeout, reason timeout)', async () => {
+    // openwop#1696: a timeout MUST NOT grant a gate — `approve` is treated as reject, and
+    // `escalate` MUST NOT extend or grant, so every onTimeout value fails the gate the same way.
     register('rfc0223-timeout', [gateNode({ timeoutMs: 300 })]);
     register('rfc0223-timeout-reject', [gateNode({ timeoutMs: 300, onTimeout: 'reject' })]);
     register('rfc0223-timeout-approve', [gateNode({ timeoutMs: 300, onTimeout: 'approve' })]);
-    const ids = await Promise.all(['rfc0223-timeout', 'rfc0223-timeout-reject', 'rfc0223-timeout-approve'].map((w) => suspend(w)));
-    for (const runId of ids.slice(0, 2)) {
+    register('rfc0223-timeout-escalate', [gateNode({ timeoutMs: 300, onTimeout: 'escalate' })]);
+    const ids = await Promise.all(['rfc0223-timeout', 'rfc0223-timeout-reject', 'rfc0223-timeout-approve', 'rfc0223-timeout-escalate'].map((w) => suspend(w)));
+    for (const runId of ids) {
       const snap = await waitStatus(runId, ['failed'], 4000);
       expect(snap.status).toBe('failed');
       expect(snap.error.code).toBe('approval_rejected');
@@ -364,10 +367,6 @@ describe('interrupt.md §Rejection — a rejected gate fails closed, and the fai
       expect(types(evs).slice(4)).toEqual(['interrupt.resolved', 'approval.rejected', 'node.failed', 'run.failed']);
       expect(evs.find((e) => e.type === 'run.failed').payload.failedNodeId).toBe('gate');
     }
-    // `approve` is not the absent / reject disposition: the host does not resolve it.
-    expect((await call('GET', `/runs/${enc(ids[2] as string)}`)).b.status).toBe('waiting-approval');
-    expect(types(await eventsOf(ids[2] as string))).not.toContain('interrupt.resolved');
-    await call('POST', `/runs/${enc(ids[2] as string)}/cancel`, {});
   });
   it('majority quorum: rejects decide only past half of requiredApprovals; a non-deciding vote emits nothing', async () => {
     expect((await call('GET', '/.well-known/openwop')).b.fixtures).toContain('conformance-interrupt-quorum');

@@ -52,7 +52,9 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
     // RFC 0223: the quorum gate (requiredApprovals 3, majority), counted by tallyVote; a reject
     // routed over a failure-admitting edge; and a gate the timeout sweep resolves (openwop#1700).
     // An honoured id whose file the installed suite does not ship is simply never loaded.
-    'conformance-interrupt-quorum', 'conformance-approval-reject-routed', 'conformance-approval-timeout']);
+    'conformance-interrupt-quorum', 'conformance-approval-reject-routed', 'conformance-approval-timeout',
+    // openwop#1696: a gate whose onTimeout is `approve` — a timeout still rejects it.
+    'conformance-approval-timeout-approve']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];
