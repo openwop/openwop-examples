@@ -38,7 +38,7 @@ import { unregisterChainPack } from './chains.js';
 import { admitSurface } from './a2ui.js';
 import { loadRun } from './runs.js';
 import { armHold, MAX_HOLD_MS } from './idempotency-hold.js';
-import { beginGrant, configureProvider, expireAccessToken, oauthSupported, registerReachProvider } from './oauth.js';
+import { beginGrant, configureProvider, expireAccessToken, oauthSupported, registerReachProvider, type ProviderRow } from './oauth.js';
 
 const SEED_STATUS = new Set(['running', 'completed', 'failed', 'cancelled']);
 /** The seam's own fixture destination: reserved by RFC 2606, never resolvable. */
@@ -341,17 +341,20 @@ async function authorizeStartRoute(ctx: Ctx): Promise<Reply> {
   if (typeof body['provider'] !== 'string' || body['provider'].length === 0) throw err('validation_error', 'provider is REQUIRED');
   const str = (k: string): string | undefined => (typeof body[k] === 'string' ? (body[k] as string) : undefined);
   const scopes = Array.isArray(body['scopes']) ? (body['scopes'] as unknown[]).map(String) : ['openwop.read'];
+  let configured: ProviderRow | undefined;
   if (body['connection'] !== undefined) {
     const pack = body['connection'];
     if (pack === null || typeof pack !== 'object' || Array.isArray(pack)) throw err('validation_error', 'connection MUST be a connection-pack manifest');
     const row = await registerReachProvider(ctx.host, pack as Record<string, unknown>);
     if (row.id !== body['provider']) throw err('validation_error', 'provider MUST be the connection pack\'s provider.id');
+    configured = row;
   } else {
     const v: { authUrl?: string; tokenUrl?: string; issuer?: string; pkce?: string } = {};
     for (const k of ['authUrl', 'tokenUrl', 'issuer', 'pkce'] as const) { const x = str(k); if (x !== undefined) v[k] = x; }
-    await configureProvider(ctx.host, body['provider'], v);
+    configured = await configureProvider(ctx.host, body['provider'], v);
   }
-  const authorizationUrl = await beginGrant(ctx.host, ctx.subject as NonNullable<Ctx['subject']>, body['provider'], scopes, null);
+  // The grant is built from the configuration THIS call set, not a re-read of the shared row (#115).
+  const authorizationUrl = await beginGrant(ctx.host, ctx.subject as NonNullable<Ctx['subject']>, body['provider'], scopes, null, configured);
   return { status: 201, body: { authorizationUrl } };
 }
 

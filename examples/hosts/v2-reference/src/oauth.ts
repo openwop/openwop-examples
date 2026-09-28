@@ -226,9 +226,17 @@ export const redirectUriFor = (host: Host, providerId: string): string => `${pub
 /**
  * Begin an authorization-code grant for `subject`. PRODUCTION: a connectUrl
  * and the conformance seam both call this, and nothing else builds the URL.
+ *
+ * The grant is BOUND to the provider configuration it was built from: the
+ * state row keeps a snapshot, and the callback checks `iss` against, and
+ * exchanges the code at, the authorization server this grant was sent to — not
+ * whatever the shared provider row says by then (openwop-examples#115: two
+ * flows on one provider id, repointed between them, judged each other's
+ * callbacks). `configured` is the row a caller has just computed, so nothing
+ * re-reads the shared row between configuring and building.
  */
-export async function beginGrant(host: Host, subject: Subject, providerId: string, scopes: string[], connect: string | null): Promise<string> {
-  let row = provider(host, providerId);
+export async function beginGrant(host: Host, subject: Subject, providerId: string, scopes: string[], connect: string | null, configured?: ProviderRow): Promise<string> {
+  let row = configured ?? provider(host, providerId);
   if (!row) throw err('oauth_provider_unsupported', `provider ${providerId} is not in oauth.providers`, { provider: providerId });
   row = await recheckPin(host, row);
   const state = b64u(32);
@@ -243,14 +251,17 @@ export async function beginGrant(host: Host, subject: Subject, providerId: strin
   url.searchParams.set('state', state);
   if (pkce) { url.searchParams.set('code_challenge', S256(verifier)); url.searchParams.set('code_challenge_method', 'S256'); }
   if (row.resource !== null) url.searchParams.set('resource', row.resource);
-  host.store.db.prepare(`INSERT INTO oauth_states (state, provider, subject_key, verifier, redirect_uri, scopes_json, created_ms, consumed, connect_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`).run(state, row.id, subjectKey(subject), pkce ? verifier : null, redirectUri, JSON.stringify(scopes), Date.now(), connect);
+  host.store.db.prepare(`INSERT INTO oauth_states (state, provider, subject_key, verifier, redirect_uri, scopes_json, created_ms, consumed, connect_id, provider_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`).run(state, row.id, subjectKey(subject), pkce ? verifier : null, redirectUri, JSON.stringify(scopes), Date.now(), connect, JSON.stringify(row));
   return url.toString();
 }
 
 // ── credentials ─────────────────────────────────────────────────────────────
 
-interface CredentialRow { subject_key: string; provider: string; ref: string; access_token: string; refresh_token: string | null; access_expires_ms: number; scopes_json: string }
+interface CredentialRow { subject_key: string; provider: string; ref: string; access_token: string; refresh_token: string | null; access_expires_ms: number; scopes_json: string; provider_json: string | null }
+
+/** The provider configuration a grant or credential was bound to; a row written before the binding existed falls back to the shared one. */
+const boundProvider = (host: Host, id: string, json: string | null | undefined): ProviderRow | undefined => (json ? (JSON.parse(json) as ProviderRow) : provider(host, id));
 
 function credentialOf(host: Host, key: string, providerId: string): CredentialRow | undefined {
   return host.store.db.prepare('SELECT * FROM oauth_credentials WHERE subject_key = ? AND provider = ?').get(key, providerId) as CredentialRow | undefined;
@@ -286,7 +297,8 @@ export async function acquireForNode(host: Host, run: RunRow, providerId: string
   if (!c) return { ok: false, reason: 'missing' };
   if (!covers(c, scopes)) return { ok: false, reason: 'insufficient_scope', credentialRef: c.ref };
   if (c.access_expires_ms > Date.now()) return { ok: true, credentialRef: c.ref };
-  const row = provider(host, providerId);
+  // A refresh token belongs to the authorization server that issued it.
+  const row = boundProvider(host, providerId, c.provider_json);
   const refreshed = row && c.refresh_token !== null ? await tokenRequest(host, row, { grant_type: 'refresh_token', refresh_token: c.refresh_token, client_id: CLIENT_ID, ...(row.resource !== null ? { resource: row.resource } : {}) }) : null;
   if (refreshed && typeof refreshed['access_token'] === 'string') {
     const expiresIn = typeof refreshed['expires_in'] === 'number' ? refreshed['expires_in'] : 3600;
@@ -302,15 +314,17 @@ export async function acquireForNode(host: Host, run: RunRow, providerId: string
 /** Mint the connectUrl of a credential interrupt: host-owned, bound to the run's Subject, carrying no token. */
 export function connectUrlFor(host: Host, run: RunRow, nodeId: string, providerId: string, scopes: string[]): string {
   const id = b64u(24);
-  host.store.db.prepare('INSERT INTO oauth_connect (connect_id, run_id, node_id, subject_key, provider, scopes_json) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, run.run_id, nodeId, subjectKey(ownerOf(host, run).subject), providerId, JSON.stringify(scopes));
+  // The link is bound to the provider configuration current when the interrupt was raised.
+  const bound = provider(host, providerId);
+  host.store.db.prepare('INSERT INTO oauth_connect (connect_id, run_id, node_id, subject_key, provider, scopes_json, provider_json) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, run.run_id, nodeId, subjectKey(ownerOf(host, run).subject), providerId, JSON.stringify(scopes), bound ? JSON.stringify(bound) : null);
   return `${publicBase(host)}/oauth/connect/${id}`;
 }
 
 // ── routes: connectUrl and the callback ─────────────────────────────────────
 
-interface StateRow { state: string; provider: string; subject_key: string; verifier: string | null; redirect_uri: string; scopes_json: string; created_ms: number; consumed: number; connect_id: string | null }
-interface ConnectRow { connect_id: string; run_id: string; node_id: string; subject_key: string; provider: string; scopes_json: string }
+interface StateRow { state: string; provider: string; subject_key: string; verifier: string | null; redirect_uri: string; scopes_json: string; created_ms: number; consumed: number; connect_id: string | null; provider_json: string | null }
+interface ConnectRow { connect_id: string; run_id: string; node_id: string; subject_key: string; provider: string; scopes_json: string; provider_json: string | null }
 
 /** Set by server.ts: the host-side resolve of a credential interrupt once its grant completed (executor.ts). */
 let onGrantCompleted: ((host: Host, runId: string, nodeId: string, subject: Subject) => void) | null = null;
@@ -324,7 +338,7 @@ async function connect(ctx: Ctx): Promise<Reply> {
   if (row.subject_key !== subjectKey(subject)) throw err('forbidden', 'this connect link belongs to another Subject');
   const run = ctx.host.store.getRun(row.run_id);
   if (!run || TERMINAL.has(run.status) || !ctx.host.store.pendingInterruptForNode(row.run_id, row.node_id)) throw err('interrupt_already_resolved', 'the credential interrupt this link belongs to is no longer open');
-  const url = await beginGrant(ctx.host, subject, row.provider, JSON.parse(row.scopes_json) as string[], row.connect_id);
+  const url = await beginGrant(ctx.host, subject, row.provider, JSON.parse(row.scopes_json) as string[], row.connect_id, boundProvider(ctx.host, row.provider, row.provider_json));
   return { status: 302, headers: { Location: url, 'Cache-Control': 'no-store' } };
 }
 
@@ -344,9 +358,10 @@ async function callback(ctx: Ctx): Promise<Reply> {
   if (row.subject_key !== subjectKey(subject)) throw err('forbidden', 'the callback is authenticated as a Subject other than the one that began the grant');
   // From here the state is spent, whatever happens (a mix-up attempt burns it).
   if (host.store.db.prepare('UPDATE oauth_states SET consumed = 1 WHERE state = ? AND consumed = 0').run(state).changes !== 1) throw err('validation_error', 'the state was already used', { field: 'state' });
-  const p = provider(host, providerId);
+  // The authorization server this grant was sent to (beginGrant's snapshot), never the shared row as it is now.
+  const p = boundProvider(host, providerId, row.provider_json);
   if (!p) throw err('oauth_provider_unsupported', `provider ${providerId} is not in oauth.providers`);
-  // Rule 4: RFC 9207 §2.4, before any token request.
+  // Rule 4: RFC 9207 §2.4, before any token request — against that server's issuer.
   const iss = q.get('iss');
   if (p.issuer !== null) {
     if (iss !== null && iss !== p.issuer) throw err('validation_error', 'the authorization response names another issuer (RFC 9207)', { field: 'iss' });
@@ -366,9 +381,9 @@ async function callback(ctx: Ctx): Promise<Reply> {
   const granted = typeof tokens['scope'] === 'string' && tokens['scope'].length > 0 ? tokens['scope'].split(' ') : scopes;
   const ref = credentialOf(host, row.subject_key, p.id)?.ref ?? `cred_${opaque()}`;
   const expiresIn = typeof tokens['expires_in'] === 'number' ? tokens['expires_in'] : 3600;
-  host.store.db.prepare(`INSERT INTO oauth_credentials (subject_key, provider, ref, access_token, refresh_token, access_expires_ms, scopes_json) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(subject_key, provider) DO UPDATE SET access_token = excluded.access_token, refresh_token = excluded.refresh_token, access_expires_ms = excluded.access_expires_ms, scopes_json = excluded.scopes_json`)
-    .run(row.subject_key, p.id, ref, tokens['access_token'], typeof tokens['refresh_token'] === 'string' ? tokens['refresh_token'] : null, Date.now() + expiresIn * 1000, JSON.stringify(granted));
+  host.store.db.prepare(`INSERT INTO oauth_credentials (subject_key, provider, ref, access_token, refresh_token, access_expires_ms, scopes_json, provider_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(subject_key, provider) DO UPDATE SET access_token = excluded.access_token, refresh_token = excluded.refresh_token, access_expires_ms = excluded.access_expires_ms, scopes_json = excluded.scopes_json, provider_json = excluded.provider_json`)
+    .run(row.subject_key, p.id, ref, tokens['access_token'], typeof tokens['refresh_token'] === 'string' ? tokens['refresh_token'] : null, Date.now() + expiresIn * 1000, JSON.stringify(granted), JSON.stringify(p));
   if (row.connect_id !== null && onGrantCompleted !== null) {
     const link = host.store.db.prepare('SELECT * FROM oauth_connect WHERE connect_id = ?').get(row.connect_id) as ConnectRow | undefined;
     const run = link ? host.store.getRun(link.run_id) : undefined;
@@ -396,19 +411,29 @@ CREATE TABLE IF NOT EXISTS oauth_providers (
 CREATE TABLE IF NOT EXISTS oauth_packs (provider_id TEXT PRIMARY KEY, pack_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS oauth_states (
   state TEXT PRIMARY KEY, provider TEXT NOT NULL, subject_key TEXT NOT NULL, verifier TEXT NULL, redirect_uri TEXT NOT NULL,
-  scopes_json TEXT NOT NULL, created_ms INTEGER NOT NULL, consumed INTEGER NOT NULL DEFAULT 0, connect_id TEXT NULL
+  scopes_json TEXT NOT NULL, created_ms INTEGER NOT NULL, consumed INTEGER NOT NULL DEFAULT 0, connect_id TEXT NULL,
+  provider_json TEXT NULL
 );
 CREATE TABLE IF NOT EXISTS oauth_credentials (
   subject_key TEXT NOT NULL, provider TEXT NOT NULL, ref TEXT NOT NULL, access_token TEXT NOT NULL, refresh_token TEXT NULL,
-  access_expires_ms INTEGER NOT NULL, scopes_json TEXT NOT NULL, PRIMARY KEY (subject_key, provider)
+  access_expires_ms INTEGER NOT NULL, scopes_json TEXT NOT NULL, provider_json TEXT NULL, PRIMARY KEY (subject_key, provider)
 );
 CREATE TABLE IF NOT EXISTS oauth_connect (
-  connect_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_id TEXT NOT NULL, subject_key TEXT NOT NULL, provider TEXT NOT NULL, scopes_json TEXT NOT NULL
+  connect_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_id TEXT NOT NULL, subject_key TEXT NOT NULL, provider TEXT NOT NULL, scopes_json TEXT NOT NULL,
+  provider_json TEXT NULL
 );
 -- RFC 0199 §D.2(d): a host-owned page that resolves one interrupt for its Subject (MCP URL mode for a schema form mode may not carry).
 CREATE TABLE IF NOT EXISTS interrupt_pages (
   page_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_id TEXT NOT NULL, subject_key TEXT NOT NULL
 );
 `;
+
+/** A database created before grants were bound to their provider configuration (#115): add the snapshot columns. */
+export function migrateOAuth(db: { prepare(sql: string): { all(): unknown[] }; exec(sql: string): unknown }): void {
+  for (const table of ['oauth_states', 'oauth_credentials', 'oauth_connect']) {
+    const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
+    if (!cols.includes('provider_json')) db.exec(`ALTER TABLE ${table} ADD COLUMN provider_json TEXT NULL`);
+  }
+}
 
 export { subjectKey };
