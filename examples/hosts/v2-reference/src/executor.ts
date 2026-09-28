@@ -260,7 +260,8 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         return { outputs: { ...r.outputs, effectId: r.effectId } };
       } catch (e) {
         const code = (e as { code?: string }).code;
-        throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'http_fetch_failed', (e as Error).message);
+        // No registered row for a failed fetch: a vendor code under the registered `example` org (openwop#1698).
+        throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'example.http_fetch_failed', (e as Error).message);
       }
     }
     case 'core.conformance.mcp-client': {
