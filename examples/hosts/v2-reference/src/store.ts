@@ -90,6 +90,8 @@ export interface InterruptRow {
   resolved_at: string | null;
   resume_json: string | null;
   created_at: string;
+  /** interrupt.md §Rejection — the quorum votes cast so far, `{ voter: decision }`; null until the first. */
+  votes_json?: string | null;
 }
 
 export interface WebhookRow {
@@ -249,6 +251,7 @@ CREATE TABLE IF NOT EXISTS interrupts (
   resolved_at TEXT NULL,
   resume_json TEXT NULL,
   created_at TEXT NOT NULL,
+  votes_json TEXT NULL,
   UNIQUE (run_id, key)
 );
 CREATE TABLE IF NOT EXISTS webhooks (
@@ -370,6 +373,8 @@ export class Store {
     this.db.exec(DDL);
     // A database created before subscriptions recorded their contract: add the column, defaulting to the major-1 rendering those rows always received.
     const webhookColumns = (this.db.prepare('PRAGMA table_info(webhooks)').all() as Array<{ name: string }>).map((c) => c.name);
+    const interruptColumns = (this.db.prepare('PRAGMA table_info(interrupts)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!interruptColumns.includes('votes_json')) this.db.exec('ALTER TABLE interrupts ADD COLUMN votes_json TEXT NULL');
     if (!webhookColumns.includes('contract_major')) this.db.exec('ALTER TABLE webhooks ADD COLUMN contract_major INTEGER NOT NULL DEFAULT 1');
     // RFC 0201: rows from before the opt-in existed are v1-only subscriptions (NULL), exactly what they always were.
     if (!webhookColumns.includes('signature_algorithms_json')) this.db.exec('ALTER TABLE webhooks ADD COLUMN signature_algorithms_json TEXT NULL');
@@ -482,6 +487,14 @@ export class Store {
   resolveInterrupt(interruptId: string, resumeJson: string): boolean {
     const r = this.db.prepare('UPDATE interrupts SET resolved_at = ?, resume_json = ? WHERE interrupt_id = ? AND resolved_at IS NULL').run(new Date().toISOString(), resumeJson, interruptId);
     return r.changes > 0;
+  }
+  /** Record a non-deciding quorum vote; false when the interrupt was resolved meanwhile. */
+  recordInterruptVotes(interruptId: string, votesJson: string): boolean {
+    return this.db.prepare('UPDATE interrupts SET votes_json = ? WHERE interrupt_id = ? AND resolved_at IS NULL').run(votesJson, interruptId).changes > 0;
+  }
+  /** Unresolved interrupts of `kind` whose deadline has passed (interrupt.md §Rejection, the timeout disposition). */
+  expiredPendingInterrupts(kind: string, nowIso: string): InterruptRow[] {
+    return this.db.prepare('SELECT * FROM interrupts WHERE kind = ? AND resolved_at IS NULL AND expires_at <= ?').all(kind, nowIso) as InterruptRow[];
   }
   invalidateInterruptsForRun(runId: string): void {
     this.db.prepare(`UPDATE interrupts SET resolved_at = ?, resume_json = COALESCE(resume_json, '{"invalidated":true}') WHERE run_id = ? AND resolved_at IS NULL`).run(new Date().toISOString(), runId);

@@ -13,7 +13,7 @@
 import { appendEvent, ownerOf, readEvents } from './events.js';
 import { buildCompensationPlan, compensationState, performHttpFetch, recordAttempt } from './effects.js';
 import { err } from './errors.js';
-import { mintInterrupt, payloadOf, validateResolve, type InterruptPayload } from './interrupts.js';
+import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
 import { McpClientError, createCtxMcp } from './mcp-client.js';
 import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
@@ -33,14 +33,55 @@ function waitingStatusFor(kind: string): string {
   return 'waiting-approval';
 }
 
+interface Link { from: string; to: string; triggerRule: string }
+
+/** The definition's edges between known nodes, whichever spelling they use; `triggerRule` defaults to `all_success`. */
+function links(def: WorkflowDefinition): Link[] {
+  const ids = new Set(def.nodes.map((n) => n.id));
+  const out: Link[] = [];
+  for (const e of def.edges) {
+    const edge = e as { from?: string; to?: string; source?: string; target?: string; sourceNodeId?: string; targetNodeId?: string; triggerRule?: unknown };
+    const from = edge.from ?? edge.source ?? edge.sourceNodeId; const to = edge.to ?? edge.target ?? edge.targetNodeId;
+    if (!from || !to || !ids.has(from) || !ids.has(to)) continue;
+    out.push({ from, to, triggerRule: typeof edge.triggerRule === 'string' ? edge.triggerRule : 'all_success' });
+  }
+  return out;
+}
+
+/** The two `triggerRule` values a failed source can satisfy (interrupt.md §Rejection). */
+const ADMITS_FAILED = new Set(['all_complete', 'any_failed']);
+
+/** A failure the definition routes: the node has an outgoing edge that admits a failed source. */
+function failureRouted(def: WorkflowDefinition, nodeId: string): boolean {
+  return links(def).some((l) => l.from === nodeId && ADMITS_FAILED.has(l.triggerRule));
+}
+
+/**
+ * Whether a node fires, from the states of its incoming edges' sources (the
+ * scheduler reads `triggerRule` from the target's incoming edges, RFC 0125). A
+ * node with no incoming edge always fires. One rule governs a target; if its
+ * incoming edges disagree, the first edge's rule does.
+ */
+function fires(def: WorkflowDefinition, nodeId: string, state: { completed: string[]; failed: string[]; skipped: string[] }): { fires: boolean; rule: string } {
+  const incoming = links(def).filter((l) => l.to === nodeId);
+  if (incoming.length === 0) return { fires: true, rule: 'none' };
+  const rule = (incoming[0] as Link).triggerRule;
+  const ok = incoming.filter((l) => state.completed.includes(l.from)).length;
+  const bad = incoming.filter((l) => state.failed.includes(l.from)).length;
+  const done = incoming.filter((l) => state.completed.includes(l.from) || state.failed.includes(l.from) || state.skipped.includes(l.from)).length;
+  const verdict = rule === 'any_success' ? ok > 0
+    : rule === 'all_complete' ? done === incoming.length
+    : rule === 'none_failed' ? bad === 0 && done === incoming.length
+    : rule === 'any_failed' ? bad > 0
+    : ok === incoming.length; // all_success
+  return { fires: verdict, rule };
+}
+
 function orderNodes(def: WorkflowDefinition): WorkflowNode[] {
   const byId = new Map(def.nodes.map((n) => [n.id, n] as const));
   const indeg = new Map<string, number>(def.nodes.map((n) => [n.id, 0]));
   const out = new Map<string, string[]>();
-  for (const e of def.edges) {
-    const edge = e as { from?: string; to?: string; source?: string; target?: string; sourceNodeId?: string; targetNodeId?: string };
-    const from = edge.from ?? edge.source ?? edge.sourceNodeId; const to = edge.to ?? edge.target ?? edge.targetNodeId;
-    if (!from || !to || !byId.has(from) || !byId.has(to)) continue;
+  for (const { from, to } of links(def)) {
     out.set(from, [...(out.get(from) ?? []), to]);
     indeg.set(to, (indeg.get(to) ?? 0) + 1);
   }
@@ -129,7 +170,12 @@ function interruptFor(host: Host, node: WorkflowNode, run: RunRow): InterruptPay
     if (typeof c['description'] === 'string') data['description'] = c['description'];
     if (Array.isArray(c['approversList'])) data['approversList'] = c['approversList'];
     if (typeof c['requiredApprovals'] === 'number') data['requiredApprovals'] = c['requiredApprovals'];
-    return { kind: 'approval', key, data };
+    if (c['rejectionPolicy'] === 'single-veto' || c['rejectionPolicy'] === 'majority') data['rejectionPolicy'] = c['rejectionPolicy'];
+    if (typeof c['onTimeout'] === 'string') data['onTimeout'] = c['onTimeout'];
+    const payload: InterruptPayload = { kind: 'approval', key, data };
+    // interrupt.md §Rejection: a non-zero timeoutMs is the gate's deadline (sweepApprovalTimeouts).
+    if (typeof c['timeoutMs'] === 'number' && c['timeoutMs'] > 0) payload.timeoutMs = c['timeoutMs'];
+    return payload;
   }
   if (node.typeId === 'core.clarificationGate') {
     return { kind: 'clarification', key, data: { questions: Array.isArray(c['questions']) ? c['questions'] : [{ id: 'q1', question: String(c['question'] ?? 'Please clarify') }] } };
@@ -275,6 +321,12 @@ interface Folded {
   resolved: Map<string, Record<string, unknown>>;
   /** `node.resumed` recorded and the node not yet completed, with its resumeValue. */
   resumed: Map<string, unknown>;
+  /** `approval.rejected` already recorded for a resolution not yet applied — a fork cut after it. */
+  rejectedEmitted: Set<string>;
+  /** Nodes that failed while the run went on: an edge admitting a failed source routed the failure. */
+  failed: string[];
+  /** Nodes whose incoming edges' triggerRule was not satisfied. */
+  skipped: string[];
   startedAt: string | null;
 }
 
@@ -285,6 +337,9 @@ function fold(host: Host, run: RunRow): Folded {
   const resolved = new Map<string, Record<string, unknown>>();
   const resumed = new Map<string, unknown>();
   const requested = new Map<string, string>();
+  const rejectedEmitted = new Set<string>();
+  const failed: string[] = [];
+  const skipped: string[] = [];
   let started = false;
   let suspended: string | null = null;
   let startedAt: string | null = null;
@@ -296,11 +351,14 @@ function fold(host: Host, run: RunRow): Folded {
     if (e.type === 'node.suspended' && e.nodeId) suspended = e.nodeId;
     if (e.type === 'interrupt.requested' && e.nodeId && typeof payload['key'] === 'string') requested.set(e.nodeId, payload['key']);
     if (e.type === 'interrupt.resolved' && e.nodeId) { requested.delete(e.nodeId); resolved.set(e.nodeId, payload); }
+    if (e.type === 'approval.rejected' && e.nodeId) rejectedEmitted.add(e.nodeId);
+    if (e.type === 'node.failed' && e.nodeId && !failed.includes(e.nodeId)) failed.push(e.nodeId);
+    if (e.type === 'node.skipped' && e.nodeId && !skipped.includes(e.nodeId)) skipped.push(e.nodeId);
     if (e.type === 'node.resumed' && e.nodeId) { resolved.delete(e.nodeId); resumed.set(e.nodeId, payload['resumeValue']); }
-    if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) { requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); }
+    if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) { requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); rejectedEmitted.delete(e.nodeId); }
     if (e.type === 'node.resumed' || e.type === 'node.completed' || e.type === 'node.failed') suspended = null;
   }
-  return { started, completed, attempts, suspended, requested, resolved, resumed, startedAt };
+  return { started, completed, attempts, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, startedAt };
 }
 
 function setStatus(host: Host, run: RunRow, status: string, patch: Partial<RunRow> = {}): void {
@@ -387,8 +445,10 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     setStatus(host, run, 'running');
   }
   const completed = [...state.completed];
+  const failed = [...state.failed];
+  const skipped = [...state.skipped];
   for (const node of orderNodes(def)) {
-    if (completed.includes(node.id)) continue;
+    if (completed.includes(node.id) || failed.includes(node.id) || skipped.includes(node.id)) continue;
     run = host.store.getRun(runId) as RunRow;
     if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (run.pause_requested === 1) {
@@ -399,6 +459,15 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       pausePolicy.delete(runId);
       setStatus(host, run, 'paused', { pause_requested: 0 });
       return;
+    }
+    // The scheduler: a node fires only when its incoming edges' triggerRule is
+    // satisfied by its sources' outcomes — so a failed source satisfies an
+    // `all_complete` / `any_failed` edge and never an `all_success` one.
+    const gate = fires(def, node.id, { completed, failed, skipped });
+    if (!gate.fires) {
+      appendEvent(host, run, 'node.skipped', { nodeId: node.id, reason: `triggerRule ${gate.rule} not satisfied` }, { nodeId: node.id });
+      skipped.push(node.id);
+      continue;
     }
     // Re-entry past a recorded resolution (interrupt.md §"Re-entry and resume
     // values"): a fork whose fixed history already resolved this node's interrupt
@@ -421,8 +490,9 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       }
     }
     if (recorded !== undefined) {
-      if (applyResolution(host, run, node.id, recorded) === 'failed') return;
-      completed.push(node.id);
+      const applied = applyResolution(host, run, node.id, recorded, state.rejectedEmitted.has(node.id));
+      if (applied === 'failed') return;
+      (applied === 'routed' ? failed : completed).push(node.id);
       continue;
     }
     const attempt = state.attempts.get(node.id) ?? 0;
@@ -436,13 +506,9 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       const failure = e instanceof NodeFailure ? e : new NodeFailure('internal_error', (e as Error).message);
       const error: Record<string, unknown> = { code: failure.code, message: failure.message };
       if (failure.details) error['details'] = failure.details;
-      appendEvent(host, run, 'node.failed', { nodeId: node.id, error, attempts: attempt + 1 }, { nodeId: node.id });
-      run = host.store.getRun(runId) as RunRow;
-      unwind(host, run, def, completed);
-      appendEvent(host, run, 'run.failed', { error, failedNodeId: node.id, durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
-      host.store.invalidateInterruptsForRun(run.run_id);
-      setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
-      return;
+      if (failNode(host, host.store.getRun(runId) as RunRow, def, node.id, error, attempt + 1) === 'failed') return;
+      failed.push(node.id);
+      continue;
     }
     if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (result === 'paused') {
@@ -467,8 +533,9 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
         appendEvent(host, run, 'interrupt.requested', result.suspend, { nodeId: node.id });
         appendEvent(host, run, 'node.suspended', replayed.suspended, { nodeId: node.id });
         appendEvent(host, run, 'interrupt.resolved', replayed.resolved, { nodeId: node.id });
-        if (applyResolution(host, run, node.id, replayed.resolved) === 'failed') return;
-        completed.push(node.id);
+        const applied = applyResolution(host, run, node.id, replayed.resolved);
+        if (applied === 'failed') return;
+        (applied === 'routed' ? failed : completed).push(node.id);
         continue;
       }
       const { row } = mintInterrupt(host, run, node.id, result.suspend);
@@ -566,44 +633,113 @@ export function requestResume(host: Host, run: RunRow, reason: string | undefine
   return { resumedAt: nowIso() };
 }
 
-/** Both resolve surfaces converge here: validate, claim atomically, record, resume. */
+/** Both resolve surfaces converge here: validate, count the vote, claim atomically, record, resume. */
 export function resolveAndResume(host: Host, run: RunRow, row: InterruptRow, resumeValue: unknown, subject: Subject | null): { runId: string; nodeId: string; status: string } {
   const outcome = validateResolve(host, run, row, resumeValue, subject);
   if (!outcome.exitsSuspend) return { runId: run.run_id, nodeId: row.node_id, status: run.status };
-  if (!host.store.resolveInterrupt(row.interrupt_id, JSON.stringify(resumeValue ?? null))) throw err('interrupt_already_resolved', 'a concurrent resolve won');
   const payload = payloadOf(row);
+  let decision = outcome.decision;
+  let reason: string | undefined;
+  if (payload.kind === 'approval' && decision !== undefined) {
+    // A vote that does not decide a quorum gate records nothing on the log (interrupt.md §Rejection).
+    const tally = tallyVote(host, row, resumeValue, subject, decision);
+    if (tally === null) return { runId: run.run_id, nodeId: row.node_id, status: run.status };
+    decision = tally.decision;
+    reason = tally.reason;
+  }
+  if (!host.store.resolveInterrupt(row.interrupt_id, JSON.stringify(resumeValue ?? null))) throw err('interrupt_already_resolved', 'a concurrent resolve won');
   const resolved: Record<string, unknown> = { nodeId: row.node_id, interruptId: row.interrupt_id, kind: payload.kind, resumeValue };
   if (subject !== null) resolved['resolvedBy'] = subject;
-  if (outcome.decision !== undefined) resolved['decision'] = outcome.decision;
-  appendEvent(host, run, 'interrupt.resolved', resolved, { nodeId: row.node_id });
-  if (applyResolution(host, run, row.node_id, resolved) === 'failed') return { runId: run.run_id, nodeId: row.node_id, status: 'failed' };
+  if (decision !== undefined) resolved['decision'] = decision;
+  if (payload.kind === 'approval') {
+    // interrupt.md §Events (RFC 0183) / §Rejection (RFC 0223): the applied action, and the field it requires.
+    const rv = resumeValue as { action?: unknown; refineFeedback?: unknown; editedArtifactData?: unknown };
+    resolved['action'] = rv.action;
+    if (rv.action === 'refine') resolved['refineFeedback'] = rv.refineFeedback;
+    if (rv.action === 'edit-accept') resolved['editedArtifactData'] = rv.editedArtifactData;
+  }
+  if (reason !== undefined) resolved['reason'] = reason;
+  return { runId: run.run_id, nodeId: row.node_id, status: recordResolution(host, run, row.node_id, resolved) };
+}
+
+/** Append a claimed resolution, apply it, and put the run back in the scheduler unless it ended. */
+function recordResolution(host: Host, run: RunRow, nodeId: string, resolved: Record<string, unknown>): string {
+  appendEvent(host, run, 'interrupt.resolved', resolved, { nodeId });
+  if (applyResolution(host, run, nodeId, resolved) === 'failed') return 'failed';
   setStatus(host, run, 'running', { current_node_id: null });
   scheduleRun(host, run.run_id);
-  return { runId: run.run_id, nodeId: row.node_id, status: 'running' };
+  return 'running';
 }
 
 /**
  * What an `interrupt.resolved` does to its node, whether it was just recorded by
  * a resolve or is being re-entered from the log by a fork (the same events either
- * way, so a replay reproduces its source): the node resumes and completes with
- * the resumeValue, or a rejection / declined credential fails it and the run.
+ * way, so a replay reproduces its source and never re-decides): the node resumes
+ * and completes with the resumeValue, or a rejection / declined credential fails
+ * it through the scheduler — `routed` when an edge admits the failed source,
+ * `failed` when the run ended.
  */
-function applyResolution(host: Host, run: RunRow, nodeId: string, resolved: Record<string, unknown>): 'resumed' | 'failed' {
+function applyResolution(host: Host, run: RunRow, nodeId: string, resolved: Record<string, unknown>, rejectedEmitted = false): 'resumed' | 'routed' | 'failed' {
   const resumeValue = resolved['resumeValue'];
-  let error: { code: string; message: string } | null = null;
+  let error: Record<string, unknown> | null = null;
   // RFC 0199 §C.4 — `declined` fails the node with connector_auth_declined.
   if (resolved['kind'] === 'credential' && (resumeValue as { outcome?: unknown } | null)?.outcome === 'declined') error = { code: 'connector_auth_declined', message: 'the user declined the credential interrupt' };
-  else if (resolved['decision'] === 'rejected') error = { code: 'approval_rejected', message: 'the approval was rejected' };
-  if (error !== null) {
-    appendEvent(host, run, 'node.failed', { nodeId, error, attempts: 1 }, { nodeId });
-    appendEvent(host, run, 'run.failed', { error, failedNodeId: nodeId });
-    host.store.invalidateInterruptsForRun(run.run_id);
-    setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
-    return 'failed';
+  else if (resolved['decision'] === 'rejected') {
+    // interrupt.md §Rejection (RFC 0223): approval.rejected (SHOULD), then the gate fails
+    // not retryable — and it is never retried: nothing re-executes a failed node.
+    if (resolved['kind'] === 'approval' && !rejectedEmitted) appendEvent(host, run, 'approval.rejected', resolved, { nodeId });
+    error = { code: 'approval_rejected', message: resolved['action'] === 'timeout' ? 'the approval gate timed out and resolved rejected' : 'the approval was rejected', retryable: false };
   }
+  if (error !== null) return failNode(host, run, host.workflows.get(run.workflow_id), nodeId, error, 1);
   appendEvent(host, run, 'node.resumed', { nodeId, interruptId: resolved['interruptId'], resumeValue }, { nodeId });
   appendEvent(host, run, 'node.completed', { nodeId, outputs: { resumeValue } }, { nodeId });
   return 'resumed';
+}
+
+/**
+ * A node's terminal failure, decided by the scheduler. `node.failed` is always
+ * recorded; when an outgoing edge admits a failed source (`all_complete`,
+ * `any_failed`) the failure is routed and the run goes on (`routed`). Otherwise
+ * the run ends: compensation unwinds, then `run.failed { failedNodeId }` (`failed`).
+ */
+function failNode(host: Host, run: RunRow, def: WorkflowDefinition | undefined, nodeId: string, error: Record<string, unknown>, attempts: number): 'routed' | 'failed' {
+  appendEvent(host, run, 'node.failed', { nodeId, error, attempts }, { nodeId });
+  if (def !== undefined && failureRouted(def, nodeId)) return 'routed';
+  const state = fold(host, run);
+  if (def !== undefined) unwind(host, run, def, state.completed);
+  appendEvent(host, run, 'run.failed', { error, failedNodeId: nodeId, durationMs: state.startedAt ? Math.max(0, Date.now() - Date.parse(state.startedAt)) : 0 });
+  host.store.invalidateInterruptsForRun(run.run_id);
+  // The snapshot's `error` is closed over { code, message, details? }: `retryable` belongs to the event error object.
+  const { retryable: _retryable, ...snapshotError } = error;
+  setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(snapshotError) });
+  return 'failed';
+}
+
+/**
+ * interrupt.md §Rejection — the timeout disposition. An approval gate whose
+ * non-zero `timeoutMs` elapsed unresolved, with `onTimeout` absent or `reject`,
+ * is resolved rejected by the host itself: `action: timeout`, `decision:
+ * rejected`, `reason: timeout`, no `resolvedBy`. It then fails like any reject.
+ * `approve` / `escalate` are not implemented: such a gate keeps today's expiry.
+ * Swept on a timer, so a deadline that passed while the process was down is
+ * applied at the first tick after boot.
+ */
+export function sweepApprovalTimeouts(host: Host): void {
+  for (const row of host.store.expiredPendingInterrupts('approval', nowIso())) {
+    const payload = payloadOf(row);
+    const onTimeout = payload.data?.['onTimeout'];
+    if (!(typeof payload.timeoutMs === 'number' && payload.timeoutMs > 0) || (onTimeout !== undefined && onTimeout !== 'reject')) continue;
+    const run = host.store.getRun(row.run_id);
+    if (!run || TERMINAL.has(run.status) || !run.status.startsWith('waiting-')) continue;
+    if (!host.store.resolveInterrupt(row.interrupt_id, 'null')) continue; // a caller's resolve won
+    recordResolution(host, run, row.node_id, { nodeId: row.node_id, interruptId: row.interrupt_id, kind: 'approval', decision: 'rejected', action: 'timeout', reason: 'timeout' });
+  }
+}
+
+export function startApprovalTimeoutSweep(host: Host): () => void {
+  const timer = setInterval(() => { try { sweepApprovalTimeouts(host); } catch (e) { process.stderr.write(`[executor] approval timeout sweep: ${String((e as Error)?.stack ?? e)}\n`); } }, 100);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 /** persistence.md §Runs pinned to v1 — applied at first v2 read of a non-terminal era-2 run. */

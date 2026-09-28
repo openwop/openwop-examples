@@ -128,6 +128,8 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
   if (payload.kind === 'approval') {
     const rv = resumeValue as { action?: unknown } | null;
     const action = rv !== null && typeof rv === 'object' ? String(rv.action ?? '') : '';
+    // interrupt.md §Rejection: `timeout` is minted by the host's own timer and is never a resume.
+    if (action === 'timeout') throw err('validation_error', 'resumeValue.action timeout is record-only: only the host\'s timer resolves a gate with it (interrupt.md §Rejection)', { field: 'resumeValue.action' });
     const actions = Array.isArray(data['actions']) ? (data['actions'] as unknown[]).map(String) : ['accept', 'reject'];
     if (!actions.includes(action)) throw err('validation_error', `resumeValue.action MUST be one of ${actions.join(' | ')}`, { actions });
     const approvers = Array.isArray(data['approversList']) ? (data['approversList'] as unknown[]) : [];
@@ -173,4 +175,35 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
     for (const q of questions) if (q.id !== undefined && (resumeValue as Record<string, unknown>)[q.id] === undefined) throw err('validation_error', `answer ${q.id} is missing`, { questionId: q.id });
   }
   return { payload, exitsSuspend: true };
+}
+
+/**
+ * interrupt.md §Approval / §Rejection — the quorum. A gate with `requiredApprovals`
+ * above 1 counts one vote per voter and resolves only on the deciding one: rejected
+ * on one `reject` under `single-veto`, or when rejects exceed half of
+ * `requiredApprovals` under `majority`; granted when accepts reach
+ * `requiredApprovals`. A vote that decides nothing is recorded on the interrupt and
+ * returns null, so the caller emits no `interrupt.resolved`.
+ *
+ * The voter is the resolving principal. With the seams profile mounted the resume
+ * value's `voter` stands in for it, so the suite can cast distinct votes on one
+ * bearer (as the major-1 interrupt-quorum-resolution leg does); a production caller
+ * cannot name who voted.
+ */
+export function tallyVote(host: Host, row: InterruptRow, resumeValue: unknown, subject: Subject | null, decision: string): { decision: string; reason?: string } | null {
+  const data = payloadOf(row).data ?? {};
+  const required = typeof data['requiredApprovals'] === 'number' && data['requiredApprovals'] > 1 ? data['requiredApprovals'] : 1;
+  if (required === 1) return { decision };
+  const named = (resumeValue as { voter?: unknown } | null)?.voter;
+  const voter = host.config.seamsProfile && typeof named === 'string' && named.length > 0 ? named : subject !== null ? principalRef(subject) : 'token-holder';
+  const fresh = host.store.getInterrupt(row.interrupt_id);
+  if (!fresh || fresh.resolved_at !== null) throw err('interrupt_already_resolved', 'the interrupt was already resolved');
+  const votes = { ...(JSON.parse(fresh.votes_json ?? '{}') as Record<string, string>), [voter]: decision };
+  const rejects = Object.values(votes).filter((d) => d === 'rejected').length;
+  const accepts = Object.values(votes).filter((d) => d === 'granted').length;
+  const vetoes = data['rejectionPolicy'] === 'majority' ? rejects > required / 2 : rejects >= 1;
+  if (vetoes) return { decision: 'rejected', reason: 'quorum-reject' };
+  if (accepts >= required) return { decision: 'granted' };
+  if (!host.store.recordInterruptVotes(row.interrupt_id, JSON.stringify(votes))) throw err('interrupt_already_resolved', 'the interrupt was already resolved');
+  return null;
 }
