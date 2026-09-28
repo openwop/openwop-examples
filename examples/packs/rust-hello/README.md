@@ -76,7 +76,7 @@ This pack uses no WASI imports. It declares only `openwop_log` under the `openwo
 
 When run from `examples/packs/`, the in-memory host loads the `.wasm` straight from disk and trusts the filesystem. There is no signature check.
 
-This pack is not in the registry's v2 tree. Its v1 artifact (`registry/v1/…/vendor.openwop.rust-hello/-/1.0.0`) is yanked. The registry's `scripts/build-pack-tarball.mjs` packages JavaScript pack sources only (`pack.json`, `README.md`, `LICENSE`, `index.mjs`, `schemas/`), so it cannot publish a WASM pack yet. To start a new pack, use `node scripts/new-pack.mjs <name>` in [`openwop-registry`](https://github.com/openwop/openwop-registry), which scaffolds from the registry's v2 template; see the [pack author quickstart](https://github.com/openwop/openwop/blob/main/docs/PACK-AUTHOR-QUICKSTART.md).
+This pack is not in the registry's v2 tree. Its v1 artifact (`registry/v1/…/vendor.openwop.rust-hello/-/1.0.0`) is yanked. The registry's `scripts/build-pack-tarball.mjs` bundles the file `runtime.entry` names (openwop-registry #78), so a WASM pack publishes once its module is built (`cargo build --target wasm32-unknown-unknown --release`). To start a new pack, use `node scripts/new-pack.mjs <name>` in [`openwop-registry`](https://github.com/openwop/openwop-registry), which scaffolds from the registry's v2 template; see the [pack author quickstart](https://github.com/openwop/openwop/blob/main/docs/PACK-AUTHOR-QUICKSTART.md).
 
 ## See also
 
