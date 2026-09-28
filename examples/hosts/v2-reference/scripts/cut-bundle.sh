@@ -67,7 +67,7 @@ if [ -n "$PUBLIC" ]; then
   echo "POSTURE: PUBLIC - egress guard CLOSED, no relaxation; this cut can certify"
 else
   ALLOW_PRIVATE=1; IDP_FOR_HOST="$IDP"; A2A_PUSH=0
-  RELAXATIONS='[{"obligation":"webhooks.egress-guard","durability":"session","reason":"loopback conformance cut: OPENWOP_WEBHOOK_ALLOW_PRIVATE opens this host egress guard (scheme and private-address refusal) for webhook registration and delivery, the http.fetch effect, SAML/SCIM and A2A/MCP interop, because every suite fixture is a loopback listener"}]'
+  RELAXATIONS='[{"obligation":"webhooks.egress-guard","durability":"session","reason":"loopback conformance cut: OPENWOP_WEBHOOK_ALLOW_PRIVATE and OPENWOP_OAUTH_ALLOW_PRIVATE open this host egress guard (scheme and private-address refusal) for webhook registration and delivery, the http.fetch effect, SAML/SCIM and A2A/MCP interop, and the OAuth client metadata and token requests, because every suite fixture is a loopback listener"}]'
   echo "POSTURE: LOOPBACK REGRESSION LANE - egress guard OPEN and DECLARED; openwop-core-standard will NOT certify. Use PUBLIC=1 for evidence."
 fi
 SHA="$(git rev-parse HEAD)"
@@ -88,6 +88,12 @@ trap cleanup EXIT
 # run` pick up dist/test/*.js and fail. Typecheck with `npx tsc --noEmit` instead.
 # ALLOW_PRIVATE is required, not optional: the suite's webhook receivers and the
 # synthetic IdP are both on loopback, and the egress guard refuses them without it.
+# It drives BOTH of the host's private-egress switches. The OAuth one
+# (src/oauth.ts tokenRequest) was missing from this lane since RFC 0199's doubles
+# arrived; CI set it (openwop-examples#89) and this script did not, so every
+# loopback rehearsal failed seven RFC 0199 positive controls with "the token
+# endpoint refused the exchange" while CI stayed green. Under PUBLIC=1 it is 0
+# with the rest: the doubles are fronted over https.
 #
 # RFC 0158: the host runs UNDER THE RESTART SUPERVISOR with the durability seam
 # mounted, because two of the rung's rows SIGKILL it and a black-box suite cannot
@@ -104,7 +110,7 @@ CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 # public base; under PUBLIC=1 that is the host tunnel (suite: OPENWOP_HOST_PUBLIC_URL).
 OPENWOP_PUBLIC_BASE_URL="${OPENWOP_HOST_PUBLIC_URL:-}" \
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 \
-OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
+OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_OAUTH_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
 OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" \
   node scripts/supervisor.mjs --restart-ms 1000 --log "$SUP_LOG" >/tmp/cut-host.log 2>&1 &
 HOST_PID=$!
