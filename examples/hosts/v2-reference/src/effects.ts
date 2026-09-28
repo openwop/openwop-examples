@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto';
 import { HOST_NAME } from './config.js';
 import { guardedRequest, validateEgressUrl } from './egress.js';
 import { err } from './errors.js';
+import { readEvents } from './events.js';
 import { nowIso, opaque } from './ids.js';
 import type { Host, WorkflowNode } from './host.js';
 import type { EffectRow, RunRow } from './store.js';
@@ -138,17 +139,30 @@ function requestOf(run: RunRow, node: WorkflowNode): { method: string; url: stri
  * The `http.fetch` seam. One logical invocation = one effect identity
  * (`effectId`, `providerKey`), assigned once and presented on every transport
  * attempt; each attempt is its own ledger row. A `replay` fork never calls out:
- * the SOURCE run's recorded outcome for `(sourceRunId, nodeId, attempt)` is the
+ * the SOURCE run's recorded outcome for `(sourceRunId, nodeId, n)` is the
  * result, or the node fails closed with `replay_source_missing`.
+ *
+ * `attempt` is the executor's count of this node's earlier `node.started` events
+ * in the run's log — inherited fork prefix, retries and later visits included —
+ * so `n = attempt + 1` is this execution's ordinal (replay.md §Suppression rule
+ * 2, openwop#1745). Every ledger row records it, and a replay of execution n
+ * resolves execution n's outcome, never simply the last one.
  */
 export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNode, attempt: number): Promise<{ outputs: Record<string, unknown>; effectId: string }> {
   const request = requestOf(run, node);
   const key = businessKey(run, node, request);
+  const execution = attempt + 1;
 
   if (run.fork_mode === 'replay' && run.source_run_id !== null) {
-    const recorded = host.store.effectOutcome(run.source_run_id, node.id, attempt);
+    let recorded = host.store.effectOutcome(run.source_run_id, node.id, execution);
+    if (recorded === undefined) {
+      // Execution n recorded no row of its own when it resolved to an earlier
+      // execution's record of the same business identity; its node.completed names that effect.
+      const effectId = executionEffectId(host, run.source_run_id, node.id, execution);
+      if (effectId !== undefined) recorded = host.store.effectOutcomeById(run.source_run_id, effectId);
+    }
     if (recorded === undefined || recorded.outcome_json === null) {
-      throw Object.assign(new Error(`no recorded outcome for (${run.source_run_id}, ${node.id}, ${attempt}) — the effect is not performed`), { code: 'replay_source_missing' });
+      throw Object.assign(new Error(`no recorded outcome for (${run.source_run_id}, ${node.id}, ${execution}) — the effect is not performed`), { code: 'replay_source_missing' });
     }
     const outcome = JSON.parse(recorded.outcome_json) as FetchOutcome;
     // The fork's own ledger carries the SOURCE run's attempts for this node as
@@ -159,9 +173,11 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
     // one row stamped `attempt: 1`, `state: completed`, `at: now()`, which read
     // on GET /runs/{fork}/effects as a new attempt the host never made — a
     // re-fire on the host's own ledger (RFC 0173 §C.2, suite 2.42.2).
-    for (const src of host.store.effectsForRun(run.source_run_id).filter((e) => e.node_id === node.id)) {
+    for (const src of host.store.effectsForRun(run.source_run_id).filter((e) => e.node_id === node.id && (e.execution ?? 1) === execution)) {
       host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
     }
+    // A recorded failure replays as the same failure: the outcome is derived, never re-decided.
+    if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed in the source run (recorded, not performed): ${outcome.error}`);
     return { outputs: { status: outcome.status, suppressed: true, sourceEffectId: recorded.effect_id }, effectId: recorded.effect_id };
   }
 
@@ -175,14 +191,14 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
   // false (a branch reaching the same operation re-uses the record).
   const done = host.store.completedEffect(key);
   if (done !== undefined && done.run_id !== run.run_id) {
-    const mirror = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: 1, keying: 'business-identity', state: 'completed', provider_key: providerKey, invocation_id: `deduplicated-of:${done.run_id}`, at: nowIso(), business_key: key, outcome_json: done.outcome_json });
+    const mirror = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: 1, keying: 'business-identity', state: 'completed', provider_key: providerKey, invocation_id: `deduplicated-of:${done.run_id}`, at: nowIso(), business_key: key, outcome_json: done.outcome_json, execution });
     return { outputs: { ...(JSON.parse(done.outcome_json as string) as FetchOutcome), deduplicated: true }, effectId: mirror.row.effect_id };
   }
   let outcome: FetchOutcome = { status: 0, error: 'not attempted' };
   let ledgerAttempt = 0;
   for (let i = 0; i <= request.transportRetries; i++) {
     ledgerAttempt = i + 1;
-    const claim = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: ledgerAttempt, keying: 'business-identity', state: 'claimed', provider_key: providerKey, invocation_id: null, at: nowIso(), business_key: key, outcome_json: null });
+    const claim = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: ledgerAttempt, keying: 'business-identity', state: 'claimed', provider_key: providerKey, invocation_id: null, at: nowIso(), business_key: key, outcome_json: null, execution });
     if (!claim.won && claim.row?.outcome_json !== null && claim.row !== undefined) {
       // Another executor already completed this attempt: resolve to its outcome.
       return { outputs: { ...(JSON.parse(claim.row.outcome_json as string) as FetchOutcome), deduplicated: true }, effectId };
@@ -233,6 +249,23 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
   }
   if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed after ${ledgerAttempt} transport attempt(s): ${outcome.error}`);
   return { outputs: { status: outcome.status, attempts: ledgerAttempt }, effectId };
+}
+
+/** The effectId the source run's n-th execution of `nodeId` completed with (its node.completed outputs), if any. */
+function executionEffectId(host: Host, sourceRunId: string, nodeId: string, execution: number): string | undefined {
+  const source = host.store.getRun(sourceRunId);
+  if (!source) return undefined;
+  let seen = 0;
+  for (const e of readEvents(host, source)) {
+    if (e.nodeId !== nodeId) continue;
+    if (e.type === 'node.started') seen++;
+    if (seen === execution && e.type === 'node.completed') {
+      const id = ((e.payload as { outputs?: { effectId?: unknown } } | null)?.outputs)?.effectId;
+      return typeof id === 'string' ? id : undefined;
+    }
+    if (seen > execution) return undefined;
+  }
+  return undefined;
 }
 
 const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
