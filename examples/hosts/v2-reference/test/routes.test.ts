@@ -268,7 +268,7 @@ describe('interrupts', () => {
     expect((await call('POST', `/runs/${enc(c.b.runId)}/interrupts/gate`, { resumeValue: { action: 'reject' } })).s).toBe(200);
     expect((await waitStatus(c.b.runId, ['failed'])).status).toBe('failed');
     const types = ((await call('GET', `/runs/${enc(c.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type);
-    for (const fromSeq of [0, 4, 5]) {
+    for (const fromSeq of [0, 4, 5, 6]) {
       const f = await call('POST', `/runs/${enc(c.b.runId)}:fork`, { mode: 'replay', fromSeq });
       const snap = await waitStatus(f.b.runId, ['completed', 'failed'], 2000);
       expect(snap.status, `fromSeq ${fromSeq}`).toBe('failed');
@@ -276,6 +276,122 @@ describe('interrupts', () => {
       expect(((await call('GET', `/runs/${enc(f.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(types);
     }
   }, 30_000);
+});
+
+describe('interrupt.md §Rejection — a rejected gate fails closed, and the failure is routable (RFC 0223)', () => {
+  const types = (evs: any[]) => evs.map((e) => e.type);
+  const eventsOf = async (runId: string): Promise<any[]> => (await call('GET', `/runs/${enc(runId)}/events/poll?timeout=1`)).b.events;
+  const gateNode = (config: Record<string, unknown> = {}) => ({ id: 'gate', typeId: 'core.approvalGate', config: { title: 'Gate', actions: ['accept', 'reject'], ...config }, inputs: {} });
+  const register = (id: string, nodes: unknown[], edges: unknown[] = []) => {
+    (running.host.workflows as Map<string, unknown>).set(id, { id, name: id, version: '1.0', nodes, edges, variables: [] });
+  };
+  const suspend = async (workflowId: string): Promise<string> => {
+    const c = await call('POST', '/runs', { workflowId });
+    expect(c.s).toBe(201);
+    expect((await waitStatus(c.b.runId, ['waiting-approval'])).status).toBe('waiting-approval');
+    return c.b.runId as string;
+  };
+
+  it('an unrouted reject: resolved { action, decision } → approval.rejected → node.failed not retryable → run.failed naming the gate', async () => {
+    const runId = await suspend('conformance-approval');
+    expect((await call('POST', `/runs/${enc(runId)}/interrupts/gate`, { resumeValue: { action: 'reject' } })).s).toBe(200);
+    const snap = await waitStatus(runId, ['failed']);
+    expect(snap.status).toBe('failed');
+    expect(snap.error).toEqual({ code: 'approval_rejected', message: 'the approval was rejected' });
+    const evs = await eventsOf(runId);
+    expect(types(evs).slice(4)).toEqual(['interrupt.resolved', 'approval.rejected', 'node.failed', 'run.failed']);
+    const resolved = evs.find((e) => e.type === 'interrupt.resolved').payload;
+    expect({ action: resolved.action, decision: resolved.decision }).toEqual({ action: 'reject', decision: 'rejected' });
+    expect(evs.find((e) => e.type === 'approval.rejected').payload).toEqual(resolved);
+    expect(evs.find((e) => e.type === 'node.failed').payload).toMatchObject({ nodeId: 'gate', error: { code: 'approval_rejected', retryable: false }, attempts: 1 });
+    expect(evs.find((e) => e.type === 'run.failed').payload).toMatchObject({ error: { code: 'approval_rejected' }, failedNodeId: 'gate' });
+    // Never retried: exactly one attempt of the gate.
+    expect(evs.filter((e) => e.type === 'node.started').length).toBe(1);
+  });
+  it('an accept records action accept and decision granted', async () => {
+    const runId = await suspend('conformance-approval');
+    expect((await call('POST', `/runs/${enc(runId)}/interrupts/gate`, { resumeValue: { action: 'accept' } })).s).toBe(200);
+    expect((await waitStatus(runId, ['completed'])).status).toBe('completed');
+    const resolved = (await eventsOf(runId)).find((e) => e.type === 'interrupt.resolved').payload;
+    expect({ action: resolved.action, decision: resolved.decision }).toEqual({ action: 'accept', decision: 'granted' });
+  });
+  it('refuses action timeout on a resume request: it is record-only', async () => {
+    const runId = await suspend('conformance-approval');
+    const r = await call('POST', `/runs/${enc(runId)}/interrupts/gate`, { resumeValue: { action: 'timeout' } });
+    expect(r.s).toBe(400);
+    expect(r.b.error).toBe('validation_error');
+    expect((await call('GET', `/runs/${enc(runId)}`)).b.status).toBe('waiting-approval');
+    expect(types(await eventsOf(runId))).not.toContain('interrupt.resolved');
+    await call('POST', `/runs/${enc(runId)}/cancel`, {});
+  });
+  it('a reject is routed by triggerRule: any_failed / all_complete fire, all_success / none_failed are skipped, and the run completes', async () => {
+    const noop = (id: string) => ({ id, typeId: 'core.noop', config: {}, inputs: {} });
+    register('rfc0223-routed', [gateNode(), noop('notify'), noop('audit'), noop('next'), noop('clean')], [
+      { id: 'e1', sourceNodeId: 'gate', targetNodeId: 'notify', triggerRule: 'any_failed' },
+      { id: 'e2', sourceNodeId: 'gate', targetNodeId: 'audit', triggerRule: 'all_complete' },
+      { id: 'e3', sourceNodeId: 'gate', targetNodeId: 'next' },
+      { id: 'e4', sourceNodeId: 'gate', targetNodeId: 'clean', triggerRule: 'none_failed' },
+    ]);
+    const runId = await suspend('rfc0223-routed');
+    expect((await call('POST', `/runs/${enc(runId)}/interrupts/gate`, { resumeValue: { action: 'reject' } })).s).toBe(200);
+    expect((await waitStatus(runId, ['completed', 'failed'])).status).toBe('completed');
+    const evs = await eventsOf(runId);
+    expect(evs.find((e) => e.type === 'node.failed').payload).toMatchObject({ nodeId: 'gate', error: { code: 'approval_rejected', retryable: false } });
+    expect(evs.filter((e) => e.type === 'node.completed').map((e) => e.nodeId).sort()).toEqual(['audit', 'notify']);
+    expect(evs.filter((e) => e.type === 'node.skipped').map((e) => e.nodeId).sort()).toEqual(['clean', 'next']);
+    expect(types(evs)).not.toContain('run.failed');
+    // Accepted, the same gate succeeds: the failure-only branch is skipped and the others run.
+    const ok = await suspend('rfc0223-routed');
+    expect((await call('POST', `/runs/${enc(ok)}/interrupts/gate`, { resumeValue: { action: 'accept' } })).s).toBe(200);
+    expect((await waitStatus(ok, ['completed', 'failed'])).status).toBe('completed');
+    const okEvs = await eventsOf(ok);
+    expect(okEvs.filter((e) => e.type === 'node.skipped').map((e) => e.nodeId)).toEqual(['notify']);
+    expect(okEvs.filter((e) => e.type === 'node.completed').map((e) => e.nodeId).sort()).toEqual(['audit', 'clean', 'gate', 'next']);
+  });
+  it('a gate whose timeoutMs elapses with onTimeout absent or reject resolves rejected by the host (action timeout, reason timeout)', async () => {
+    register('rfc0223-timeout', [gateNode({ timeoutMs: 300 })]);
+    register('rfc0223-timeout-reject', [gateNode({ timeoutMs: 300, onTimeout: 'reject' })]);
+    register('rfc0223-timeout-approve', [gateNode({ timeoutMs: 300, onTimeout: 'approve' })]);
+    const ids = await Promise.all(['rfc0223-timeout', 'rfc0223-timeout-reject', 'rfc0223-timeout-approve'].map((w) => suspend(w)));
+    for (const runId of ids.slice(0, 2)) {
+      const snap = await waitStatus(runId, ['failed'], 4000);
+      expect(snap.status).toBe('failed');
+      expect(snap.error.code).toBe('approval_rejected');
+      const evs = await eventsOf(runId);
+      const resolved = evs.find((e) => e.type === 'interrupt.resolved').payload;
+      expect(resolved).toMatchObject({ nodeId: 'gate', kind: 'approval', action: 'timeout', decision: 'rejected', reason: 'timeout' });
+      expect(resolved.resolvedBy).toBeUndefined();
+      expect(types(evs).slice(4)).toEqual(['interrupt.resolved', 'approval.rejected', 'node.failed', 'run.failed']);
+      expect(evs.find((e) => e.type === 'run.failed').payload.failedNodeId).toBe('gate');
+    }
+    // `approve` is not the absent / reject disposition: the host does not resolve it.
+    expect((await call('GET', `/runs/${enc(ids[2] as string)}`)).b.status).toBe('waiting-approval');
+    expect(types(await eventsOf(ids[2] as string))).not.toContain('interrupt.resolved');
+    await call('POST', `/runs/${enc(ids[2] as string)}/cancel`, {});
+  });
+  it('majority quorum: rejects decide only past half of requiredApprovals; a non-deciding vote emits nothing', async () => {
+    expect((await call('GET', '/.well-known/openwop')).b.fixtures).toContain('conformance-interrupt-quorum');
+    const runId = await suspend('conformance-interrupt-quorum');
+    const vote = (voter: string, action: string) => call('POST', `/runs/${enc(runId)}/interrupts/gate`, { resumeValue: { action, voter } });
+    expect((await vote('approver-1', 'reject')).b.status).toBe('waiting-approval');
+    expect((await vote('approver-1', 'reject')).b.status).toBe('waiting-approval'); // one voter counts once
+    expect((await vote('approver-2', 'accept')).b.status).toBe('waiting-approval');
+    expect(types(await eventsOf(runId))).not.toContain('interrupt.resolved');
+    expect((await vote('approver-3', 'reject')).s).toBe(200);
+    const snap = await waitStatus(runId, ['failed']);
+    expect(snap.error.code).toBe('approval_rejected');
+    const evs = await eventsOf(runId);
+    expect(evs.filter((e) => e.type === 'interrupt.resolved').length).toBe(1);
+    expect(evs.find((e) => e.type === 'interrupt.resolved').payload).toMatchObject({ action: 'reject', decision: 'rejected', reason: 'quorum-reject' });
+    // Three accepts release it.
+    const ok = await suspend('conformance-interrupt-quorum');
+    for (const v of ['a', 'b']) expect((await call('POST', `/runs/${enc(ok)}/interrupts/gate`, { resumeValue: { action: 'accept', voter: v } })).b.status).toBe('waiting-approval');
+    expect((await call('POST', `/runs/${enc(ok)}/interrupts/gate`, { resumeValue: { action: 'accept', voter: 'c' } })).s).toBe(200);
+    expect((await waitStatus(ok, ['completed'])).status).toBe('completed');
+  });
+  it('the quorum fixture is a v2 claim only: the v1 document does not advertise it', async () => {
+    expect((await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Version': '1' })).b.fixtures).not.toContain('conformance-interrupt-quorum');
+  });
 });
 
 describe('persistence + replay', () => {

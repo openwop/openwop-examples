@@ -28,6 +28,7 @@ import { mcpServerRoutes } from './mcp-server.js';
 import { OAUTH_DDL, OAUTH_USE_TYPE, oauthRoutes, oauthSupported } from './oauth.js';
 import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
+import { startApprovalTimeoutSweep } from './executor.js';
 import { Store } from './store.js';
 import { AuditLog } from './audit.js';
 import { createValidator } from './validate.js';
@@ -47,7 +48,9 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
     'conformance-artifact-emit', 'conformance-conversation-lifecycle',
     // RFC 0199: the credential fixture (advertised only when oauth is — see below) and the two §D.2(d)
     // clarifications whose answer schema form mode may not carry (nested; format password).
-    'conformance-credential', 'conformance-clarification-nested', 'conformance-clarification-sensitive']);
+    'conformance-credential', 'conformance-clarification-nested', 'conformance-clarification-sensitive',
+    // RFC 0223: the quorum gate (requiredApprovals 3, majority), counted by tallyVote.
+    'conformance-interrupt-quorum']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];
@@ -199,6 +202,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   subscribeFanout(host);
   startA2APush(host);
   const stopWorker = startDeliveryWorker(host);
+  const stopTimeouts = startApprovalTimeoutSweep(host);
   // Runs left non-terminal by a previous process re-enter the loop (durability across restart),
   // and a run that had started is RECORDED as recovered (`workflow.restored`) — durability.ts.
   recoverInFlightRuns(host);
@@ -213,6 +217,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     port,
     close: async () => {
       stopWorker();
+      stopTimeouts();
       await new Promise<void>((ok) => server.close(() => ok()));
       store.close();
     },

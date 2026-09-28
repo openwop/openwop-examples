@@ -37,8 +37,10 @@ const EXPERIMENTAL_UNTIL = '2.1';
 
 export function advertisedFixtures(host: Host, major: 1 | 2 = 2): string[] {
   // The v1 contract refuses core.conversationGate (conversationPrimitive is a v2-root claim here),
-  // so a fixture that needs it is not advertised on the v1 document.
-  return [...host.workflows.entries()].filter(([, d]) => major === 2 || !d.nodes.some((n) => n.typeId === 'core.conversationGate')).map(([id]) => id).sort();
+  // so a fixture that needs it is not advertised on the v1 document. Nor is the quorum fixture:
+  // this host implements the v2 quorum rule (interrupt.md §Rejection), not the v1
+  // openwop-interrupt-quorum profile's incremental vote events.
+  return [...host.workflows.entries()].filter(([id, d]) => major === 2 || (id !== 'conformance-interrupt-quorum' && !d.nodes.some((n) => n.typeId === 'core.conversationGate'))).map(([id]) => id).sort();
 }
 
 /** runs.md §Conversation — presence is the claim; made only when a fixture exercises the gate. */
