@@ -69,6 +69,12 @@ describe('discovery + negotiation', () => {
     expect(again.status).toBe(304);
     expect(v2.headers.get('capabilities-etag')).toBeNull();
   });
+  it('does not advertise packs: this host resolves no pack reference through a registry (packs.md §"The packs capability", #104)', async () => {
+    const d2 = await (await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0' } })).json() as Record<string, unknown>;
+    expect(d2['packs']).toBeUndefined();
+    // The test catalog stays reachable the way the spec prefers: the seams profile.
+    expect((d2['conformance'] as { seamsProfile?: string }).seamsProfile).toBe('openwop-conformance-seams-v2');
+  });
   it('406 for an unlisted major, 400 for a header on a /v1/ path, 426 below minClientVersion', async () => {
     const r406 = await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Version': '9.0' });
     expect(r406.s).toBe(406); expect(r406.b.error).toBe('protocol_version_unsupported'); expect(r406.b.details.protocolVersions).toEqual(['1.11', '2.0']);
@@ -446,6 +452,32 @@ describe('webhooks + identity + packs + workspace', () => {
     const headers = { 'X-openwop-Webhook-Id': 'w', 'X-openwop-Event-Type': 'run.completed', 'X-openwop-Timestamp': t, 'X-openwop-Signature': `sha256=${sig}`, 'X-openwop-Signature-Algorithm': 'v1' };
     expect((await call('POST', '/conformance/seams/sample/webhooks/receive', { secret: 'k', headers, body })).b.accepted).toBe(true);
     expect((await call('POST', '/conformance/seams/sample/webhooks/receive', { secret: 'k', headers: { ...headers, 'X-openwop-Signature': 'sha256=00' }, body })).b.accepted).toBe(false);
+  });
+  it('returns a generated secret once in the 201, signs with it, and never echoes a supplied one (webhooks.md §Surfaces, RFC 0221, #103)', async () => {
+    const { createServer } = await import('node:http');
+    const hits: Array<{ headers: Record<string, string>; body: string }> = [];
+    const srv = createServer((req, res) => { let body = ''; req.on('data', (c: Buffer) => { body += c.toString(); }); req.on('end', () => { hits.push({ headers: req.headers as never, body }); res.writeHead(204); res.end(); }); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/`;
+    try {
+      const gen = await call('POST', '/webhooks', { url, events: ['run.completed'] });
+      expect(gen.s).toBe(201);
+      expect(Object.keys(gen.b).sort()).toEqual(['secret', 'webhookId']);
+      expect(typeof gen.b.secret).toBe('string');
+      expect(gen.b.secret.length).toBeGreaterThan(0);
+      const c = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+      await waitStatus(c.b.runId, ['completed']);
+      for (let i = 0; i < 60 && hits.length < 1; i++) await new Promise((r) => setTimeout(r, 50));
+      const d = hits[0] as { headers: Record<string, string>; body: string };
+      expect(d.headers['openwop-signature']).toBe(`sha256=${createHmac('sha256', gen.b.secret).update(`${d.headers['openwop-timestamp']}.${d.body}`).digest('hex')}`);
+      const supplied = await call('POST', '/webhooks', { url, events: ['run.completed'], secret: 'caller-supplied-secret' });
+      expect(supplied.s).toBe(201);
+      expect(Object.keys(supplied.b)).toEqual(['webhookId']);
+      expect(JSON.stringify(supplied.b)).not.toContain('caller-supplied-secret');
+      for (const id of [gen.b.webhookId, supplied.b.webhookId]) expect((await call('DELETE', `/webhooks/${enc(id)}`)).s).toBe(204);
+    } finally {
+      srv.close();
+    }
   });
   it('rejects a private receiver with the registered webhook_url_rejected when the egress guard is on', async () => {
     const guarded = await startHost({ port: 0, dbPath: ':memory:', apiKey: K, devValidate: 'strict', webhookAllowPrivate: false });

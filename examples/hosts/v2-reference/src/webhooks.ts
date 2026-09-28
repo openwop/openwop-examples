@@ -98,7 +98,7 @@ async function verifyEndpoint(host: Host, url: string, secret: string): Promise<
   }
 }
 
-export async function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): Promise<{ webhookId: string; signatureAlgorithms?: string[] }> {
+export async function registerWebhook(host: Host, tenant: string, body: Record<string, unknown>, major: 1 | 2): Promise<{ webhookId: string; signatureAlgorithms?: string[]; secret?: string }> {
   const allowed = new Set(['url', 'events', 'secret', 'tags', 'signatureAlgorithms']);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw err('validation_error', `unknown key ${k} — the registration body is closed { url, events[], secret?, tags?, signatureAlgorithms? }`, { key: k });
   if (typeof body['url'] !== 'string') throw err('validation_error', 'url is REQUIRED');
@@ -151,8 +151,13 @@ export async function registerWebhook(host: Host, tenant: string, body: Record<s
     prev_secret_expires_at: null,
   };
   host.store.insertWebhook(row);
-  // §B.7 — echo the applied list whenever the request carried one; never the secret (§B.6).
-  return algorithms === undefined ? { webhookId: row.webhook_id } : { webhookId: row.webhook_id, signatureAlgorithms: algorithms };
+  // §B.7 — echo the applied list whenever the request carried one. A supplied secret is
+  // never echoed (§B.6); one the host generated is returned here and nowhere else
+  // (webhooks.md §Surfaces, RFC 0221), or no subscriber could verify a delivery.
+  const response: { webhookId: string; signatureAlgorithms?: string[]; secret?: string } = { webhookId: row.webhook_id };
+  if (algorithms !== undefined) response.signatureAlgorithms = algorithms;
+  if (body['secret'] === undefined) response.secret = row.secret;
+  return response;
 }
 
 /**

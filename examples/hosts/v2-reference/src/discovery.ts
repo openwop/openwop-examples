@@ -121,7 +121,12 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // workflow-chain-packs.md: registering, expanding and bounding chains is the
     // obligation; the advertised maxDepth IS the enforced one (chains.ts).
     workflowChainPacks: record('witnessable-gated', { subChains: { maxDepth: c.chainMaxDepth } }),
-    packs: record('claims-check', { testMode: { isolated: true, scopes: ['core', 'vendor', 'community', 'private', 'local'] } }),
+    // No `packs` record. packs.md §"The packs capability": a host MUST NOT advertise
+    // `packs` unless it resolves pack references through a registry reachable from its
+    // discovery document, and this one resolves none — it validates packs installed
+    // through the seams-profile test catalog (`conformance.seamsProfile` below), which is
+    // how the spec says a test catalog is exposed. The record carried only the
+    // DEPRECATED `testMode` facet, which MUST NOT be a second way to claim that seam.
     // security-defaults.md §Sandbox isolation: the family binds the eight node-pack-sandbox-* invariants; the seam (§8) is how the suite drives them.
     sandbox: record('seam-gated', { isolationModel: SANDBOX_FACET.isolationModel, allowedHostCalls: [...SANDBOX_FACET.allowedHostCalls], memoryLimitBytes: c.sandboxMemoryLimitBytes, wallClockLimitMs: c.sandboxWallClockLimitMs }),
     workspace: record('witnessable-gated', { versioned: false, maxFileBytes: 262_144, maxFiles: 256 }),
