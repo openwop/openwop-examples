@@ -216,7 +216,7 @@ describe('runs', () => {
   it('fails a run on core.fail and records an annotation side-store', async () => {
     const c = await call('POST', '/runs', { workflowId: 'conformance-failure' });
     const snap = await waitStatus(c.b.runId, ['failed']);
-    expect(snap.status).toBe('failed'); expect(snap.error.code).toBe('fixture_failure');
+    expect(snap.status).toBe('failed'); expect(snap.error.code).toBe('example.conformance_failure');
     const a = await call('POST', `/runs/${enc(c.b.runId)}/annotations`, { signal: { kind: 'label', label: 'x' }, note: 'sk-abcdefghijklmnop' });
     expect(a.s).toBe(201); expect(a.b.note).toBe('[redacted]');
     expect((await call('GET', `/runs/${enc(c.b.runId)}/annotations`)).b.annotations.length).toBe(1);

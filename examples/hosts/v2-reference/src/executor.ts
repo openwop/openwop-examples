@@ -197,7 +197,7 @@ function interruptFor(host: Host, node: WorkflowNode, run: RunRow): InterruptPay
 function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<string, unknown> {
   const c = node.config;
   if (c['lifecycle'] !== 'open-exchange-close' || c['mockAutoResume'] !== true) {
-    throw new NodeFailure('unsupported_node_type', 'core.conversationGate is executed only as open-exchange-close with mockAutoResume (the conformance mock)', { typeId: node.typeId });
+    throw new NodeFailure('capability_not_provided', 'core.conversationGate is executed only as open-exchange-close with mockAutoResume (the conformance mock)', { typeId: node.typeId });
   }
   const conversationId = `${run.run_id.split('/')[1] ?? run.run_id}:${node.id}`;
   appendEvent(host, run, 'conversation.opened', { conversationId }, { nodeId: node.id });
@@ -248,7 +248,8 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       return r === 'done' ? { outputs: { sleptMs: ms } } : r;
     }
     case 'core.fail':
-      throw new NodeFailure('fixture_failure', String(node.config['message'] ?? 'the fixture node fails by design'));
+      // fixtures.md §core.fail: a vendor code under the registered `example` org (errors.md §The registry, openwop#1698).
+      throw new NodeFailure('example.conformance_failure', String(node.config['message'] ?? 'Intentional conformance failure'));
     case 'core.approvalGate':
     case 'core.clarificationGate':
     case 'core.interrupt':
@@ -306,7 +307,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
     case OAUTH_USE_TYPE:
       return useCredential(host, run, node);
     default:
-      throw new NodeFailure('unsupported_node_type', `${node.typeId} is not executed by this host (capability not provided)`, { typeId: node.typeId });
+      throw new NodeFailure('capability_not_provided', `${node.typeId} is not executed by this host (capability not provided)`, { typeId: node.typeId });
   }
 }
 
