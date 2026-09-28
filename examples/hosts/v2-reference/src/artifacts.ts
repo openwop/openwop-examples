@@ -45,6 +45,8 @@ export interface SpecArtifacts {
   readonly toolAnnotations: boolean;
   /** RFC 0202: the installed `a2a` facet defines `agentCards` (per-agent A2A cards over the agent inventory). */
   readonly agentCardsFacet: boolean;
+  /** RFC 0224: the installed v2 root defines the `auditLogIntegrity` family. */
+  readonly auditLogIntegrityFamily: boolean;
 }
 
 function resolveRoot(): string {
@@ -118,6 +120,7 @@ export function loadArtifacts(): SpecArtifacts {
     mcpClientFacet: caps.properties['mcp']?.properties?.['client'] !== undefined,
     toolAnnotations: descriptor.properties['annotations'] !== undefined,
     agentCardsFacet: caps.properties['a2a']?.properties?.['agentCards'] !== undefined,
+    auditLogIntegrityFamily: caps.properties['auditLogIntegrity'] !== undefined,
   };
   return cached;
 }
