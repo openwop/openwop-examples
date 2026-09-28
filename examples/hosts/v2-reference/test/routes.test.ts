@@ -69,6 +69,12 @@ describe('discovery + negotiation', () => {
     expect(again.status).toBe(304);
     expect(v2.headers.get('capabilities-etag')).toBeNull();
   });
+  it('does not advertise packs: this host resolves no pack reference through a registry (packs.md §"The packs capability", #104)', async () => {
+    const d2 = await (await fetch(`${B}/.well-known/openwop`, { headers: { 'OpenWOP-Version': '2.0' } })).json() as Record<string, unknown>;
+    expect(d2['packs']).toBeUndefined();
+    // The test catalog stays reachable the way the spec prefers: the seams profile.
+    expect((d2['conformance'] as { seamsProfile?: string }).seamsProfile).toBe('openwop-conformance-seams-v2');
+  });
   it('406 for an unlisted major, 400 for a header on a /v1/ path, 426 below minClientVersion', async () => {
     const r406 = await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Version': '9.0' });
     expect(r406.s).toBe(406); expect(r406.b.error).toBe('protocol_version_unsupported'); expect(r406.b.details.protocolVersions).toEqual(['1.11', '2.0']);
