@@ -169,6 +169,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
   }
   // RFC 0072 §A / 0074 (agents.ts): the manifest-agent inventory, tenant-scoped, with the host's bundled
   // agent pack; shipped with RFC 0202's per-agent cards, so advertised on the same contract gate.
+  // RFC 0224 (audit.ts): the chained, checkpointed audit log and GET /audit/verify, when the installed contract defines the family.
+  if (host.audit !== null) doc['auditLogIntegrity'] = record('witnessable-gated', host.audit.facets());
   if (agentCardsAdvertised(host)) doc['agents'] = record('witnessable-gated', { manifestRuntime: { installScope: 'tenant', handoffValidation: false } });
   if (host.a2ui !== null) {
     // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2

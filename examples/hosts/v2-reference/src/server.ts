@@ -30,6 +30,7 @@ import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { startApprovalTimeoutSweep } from './executor.js';
 import { Store } from './store.js';
+import { AuditLog } from './audit.js';
 import { createValidator } from './validate.js';
 import { deadLetterProjection, registerWebhook, rotateWebhookSecret, startDeliveryWorker, subscribeFanout, unregisterWebhook } from './webhooks.js';
 import { installedPacks } from './packs.js';
@@ -103,7 +104,8 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   const validate = await createValidator(artifacts.schemasDir, config.devValidate);
   const a2ui = await createA2uiAdmission(artifacts.schemasDir, config.envelopeStrictness);
   store.db.exec(OAUTH_DDL);
-  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0), startedAt: new Date().toISOString(), validate, a2ui };
+  const audit = artifacts.auditLogIntegrityFamily ? new AuditLog(store.db, config.dbPath, { checkpointIntervalEntries: config.auditCheckpointEntries, checkpointIntervalSeconds: config.auditCheckpointSeconds }) : null;
+  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0), startedAt: new Date().toISOString(), validate, a2ui, audit };
   // conformance-credential needs `oauth` (RFC 0199), which needs a contract that carries it.
   if (!oauthSupported(host)) (host.workflows as Map<string, WorkflowDefinition>).delete('conformance-credential');
   host.bus.setMaxListeners(0);
@@ -180,7 +182,23 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     route('GET', '/tools/{toolId}', true, async (ctx) => ({ status: 200, body: await getTool(ctx.host, ctx.params['toolId'] as string) })),
     ...seamRoutes(host),
     ...durabilityRoutes(host),
+    // RFC 0224 — security-defaults.md §Audit-log integrity. Served only with the family, which the operation's MAY-omit permits.
+    ...(audit !== null ? [route('GET', '/audit/verify', true, async (ctx) => {
+      const bound = (name: string): number => {
+        const raw = ctx.url.searchParams.get(name);
+        if (raw === null || !/^(0|[1-9][0-9]*)$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw err('validation_error', `${name} is REQUIRED, a non-negative integer`, { parameter: name });
+        return Number(raw);
+      };
+      const fromSeq = bound('fromSeq');
+      const toSeq = bound('toSeq');
+      if (toSeq < fromSeq) throw err('validation_error', 'toSeq MUST be >= fromSeq', { fromSeq, toSeq });
+      const result = audit.verify(fromSeq, toSeq);
+      ctx.host.validate('audit-verify-result', result, 'audit verify');
+      return { status: 200, body: result };
+    })] : []),
   );
+  // A fresh host has one signed anchor before its first request.
+  if (audit !== null) { audit.append({ actor: 'system', action: 'host.started', target: config.host, details: { hostBuild: `${config.hostBuild.kind}:${config.hostBuild.id}` } }); audit.checkpoint(); }
   subscribeFanout(host);
   startA2APush(host);
   const stopWorker = startDeliveryWorker(host);

@@ -70,6 +70,7 @@ const SCOPE_BY_ROUTE: Readonly<Record<string, string>> = {
   'GET /webhooks/{webhookId}/dead-letters': 'webhooks:manage',
   'GET /host/effect-seams': 'runs:read',
   'GET /host/events': 'runs:read',
+  'GET /audit/verify': 'audit:read',
 };
 
 /** Route patterns that carry no scope requirement — see the header for why each is exempt. */
