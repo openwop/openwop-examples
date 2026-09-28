@@ -112,10 +112,16 @@ describe('discovery + negotiation', () => {
     // Not mounted by this host: absent, as is a v1 path key.
     expect(v2.b.paths['/prompts']).toBeUndefined();
     expect(v2.b.paths['/v1/runs']).toBeUndefined();
+    // Self-contained: every schema file the canonical document points at is bundled.
+    const refs = JSON.stringify(v2.b).match(/"\$ref":"[^"]*"/g) ?? [];
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs.filter((r) => !r.startsWith('"$ref":"#/'))).toEqual([]);
+    expect(v2.b.components.schemas['error-envelope']).toBeDefined();
     const v1 = await call('GET', '/v1/openapi.json', undefined, { 'OpenWOP-Version': '1' });
     expect(v1.b.info.version).toBe('1.11');
     expect(v1.b.paths['/v1/runs'].post).toBeDefined();
     expect(v1.b.paths['/runs']).toBeUndefined();
+    expect((JSON.stringify(v1.b).match(/"\$ref":"[^"]*"/g) ?? []).filter((r) => !r.startsWith('"$ref":"#/'))).toEqual([]);
   });
 });
 

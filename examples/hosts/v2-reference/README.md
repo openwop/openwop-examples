@@ -124,7 +124,7 @@ Two contradictions **introduced by fixes 3 and 6** remain open and are the only 
 v2-reference/
 ├── src/
 │   ├── server.ts      boot, discovery/host-events/webhook routes, fixture catalog
-│   ├── openapi.ts     GET /openapi.json: the installed canonical OpenAPI, filtered to the routes the router mounts
+│   ├── openapi.ts     GET /openapi.json: the installed canonical OpenAPI, filtered to the routes the router mounts, schema files bundled
 │   ├── router.ts      negotiation, auth, rate limit, error envelope, Layer-1 idempotency
 │   ├── discovery.ts   the v1 document and the closed v2 root
 │   ├── store.ts       better-sqlite3 tables (one per persisted store)
