@@ -262,7 +262,7 @@ Witnessed end to end by the harness (`test/routes.test.ts`): a seeded open era-2
 
 ## The 38 inapplicable rows
 
-`v2-pack-isolation` (10 — no `sandbox`: the host registers and validates packs and executes none), `v2-provider-conflict` (3), `v2-chain-pin-exact` (3), `v2-form-when-reuses-edge-conditions` (2), and the file-level rows of the a2a / mcp / saml scenarios above.
+`v2-pack-isolation` (10 — no `sandbox` at the time of this measurement; the host has advertised `sandbox` (isolationModel `process`) since openwop-examples #50), `v2-provider-conflict` (3), `v2-chain-pin-exact` (3), `v2-form-when-reuses-edge-conditions` (2), and the file-level rows of the a2a / mcp / saml scenarios above.
 
 ## Deviations and open observations
 
