@@ -14,11 +14,12 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadArtifacts } from './artifacts.js';
-import { loadConfig, type HostConfig, PKG_ROOT, V1_VERSION, V2_VERSION, SERVED_VERSIONS, V1_RETIRED } from './config.js';
+import { loadConfig, type HostConfig, PKG_ROOT, SERVED_VERSIONS, V1_RETIRED } from './config.js';
 import { etagOf, v1Document, v2Document } from './discovery.js';
 import { PRM_PATH, prmDocument } from './protected-resource.js';
 import { err } from './errors.js';
 import { ensureDefaultCredential } from './identity.js';
+import { openapiHandler } from './openapi.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
 import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
@@ -124,6 +125,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     return parsed as Record<string, unknown>;
   };
   const router = new Router(host);
+  const openapi = openapiHandler(() => router.mounted());
   router.add(
     route('GET', '/.well-known/openwop', false, discovery, 'both'),
     route('GET', '/.well-known/wop', false, discovery, 'both'),
@@ -239,15 +241,6 @@ async function discovery(ctx: Ctx): Promise<Reply> {
   const inm = ctx.header('if-none-match');
   if (inm !== null && inm.split(',').map((s) => s.trim()).includes(etag)) return { status: 304, headers };
   return { status: 200, raw: text, contentType: 'application/json; charset=utf-8', headers };
-}
-
-async function openapi(ctx: Ctx): Promise<Reply> {
-  const root = ctx.host.artifacts.root;
-  const v2 = resolve(root, 'api', 'v2', 'openapi.yaml');
-  const paths = ctx.major === 1
-    ? ['/v1/runs', '/v1/runs/{runId}', '/v1/runs/{runId}/events', '/v1/runs/{runId}/events/poll', '/v1/runs/{runId}/cancel', '/v1/webhooks', '/v1/webhooks/{webhookId}', '/v1/openapi.json']
-    : ['/.well-known/openwop', '/runs', '/runs/{runId}', '/runs/{runId}/events', '/runs/{runId}/events/poll', '/runs/{runId}/cancel', '/runs:bulk-cancel', '/runs/{runId}:pause', '/runs/{runId}:resume', '/runs/{runId}:fork', '/runs/{runId}/ancestry', '/runs/{runId}/annotations', '/runs/{runId}/compensation', '/runs/{runId}/effects', '/runs/{runId}/interrupts/{nodeId}', '/interrupts/{token}', '/webhooks', '/webhooks/{webhookId}', '/host/effect-seams', '/host/events', '/packs'];
-  return { status: 200, body: { openapi: '3.1.0', info: { title: `OpenWOP v${ctx.major} — ${ctx.host.config.host}`, version: ctx.major === 1 ? V1_VERSION : V2_VERSION, description: ctx.major === 2 ? `The canonical document is @openwop/spec-artifacts ${ctx.host.artifacts.version} api/v2/openapi.yaml (${existsSync(v2) ? 'installed' : 'not installed'}); this host serves the path keys listed.` : 'v1 path keys served through the overlap.' }, paths: Object.fromEntries(paths.map((p) => [p, {}])) } };
 }
 
 /** events.md §Host events — the heartbeat channel at /host/events (content-free of run data). */

@@ -124,6 +124,11 @@ export class Router {
     this.routes.push(...routes);
   }
 
+  /** The mounted operations, as literal patterns — what `GET /openapi.json` filters the contract to (openapi.ts). */
+  mounted(): Array<{ method: string; path: string; contract: 1 | 2 | 'both' }> {
+    return this.routes.filter((r) => r.path !== undefined).map((r) => ({ method: r.method, path: r.path as string, contract: r.contract ?? 2 }));
+  }
+
   private bucketFor(key: string): TokenBucket {
     let b = this.buckets.get(key);
     if (!b) { b = new TokenBucket(this.host.config.rateLimitPerMinute); this.buckets.set(key, b); }

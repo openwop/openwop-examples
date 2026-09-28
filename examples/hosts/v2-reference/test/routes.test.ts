@@ -100,6 +100,23 @@ describe('discovery + negotiation', () => {
     expect((await call('GET', '/v1/openapi.json', undefined, { 'OpenWOP-Version': '1' })).s).toBe(200);
     expect((await call('GET', '/.well-known/wop')).s).toBe(404);
   });
+  it('/openapi.json is the canonical contract filtered to the mounted routes, with real operations and resolvable components', async () => {
+    const v2 = await call('GET', '/openapi.json');
+    expect(v2.h.get('openwop-version')).toBe('2.0');
+    expect(v2.b.info.version).toBe('2.0');
+    expect(Object.keys(v2.b.components.schemas).length).toBeGreaterThan(0);
+    expect(v2.b.paths['/runs'].post.operationId).toBeTypeOf('string');
+    expect(v2.b.paths['/runs/{runId}'].get).toBeDefined();
+    expect(v2.b.paths['/audit/verify'].get).toBeDefined();
+    expect(v2.b.paths['/webhooks/{webhookId}/dead-letters'].get).toBeDefined();
+    // Not mounted by this host: absent, as is a v1 path key.
+    expect(v2.b.paths['/prompts']).toBeUndefined();
+    expect(v2.b.paths['/v1/runs']).toBeUndefined();
+    const v1 = await call('GET', '/v1/openapi.json', undefined, { 'OpenWOP-Version': '1' });
+    expect(v1.b.info.version).toBe('1.11');
+    expect(v1.b.paths['/v1/runs'].post).toBeDefined();
+    expect(v1.b.paths['/runs']).toBeUndefined();
+  });
 });
 
 describe('runs', () => {
