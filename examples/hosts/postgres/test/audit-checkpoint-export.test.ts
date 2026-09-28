@@ -20,6 +20,7 @@
 
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { specRepoPath } from './sibling-repos.js';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,8 +49,8 @@ function pgliteQuerier(db: PGlite): Querier {
   };
 }
 
-const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..');
-const VERIFIER = join(REPO_ROOT, 'scripts', 'verify-audit-checkpoints.mjs');
+// The out-of-band verifier lives in the spec repo since the examples split (test/sibling-repos.ts).
+const VERIFIER = specRepoPath('scripts', 'verify-audit-checkpoints.mjs');
 
 function runVerifier(bundlePath: string): { status: number; stdout: string; stderr: string } {
   const r = spawnSync('node', [VERIFIER, bundlePath], { encoding: 'utf8' });
