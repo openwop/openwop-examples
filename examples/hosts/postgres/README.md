@@ -60,6 +60,18 @@ The host's `setupSchema()` creates `runs`, `events`, and `idempotency` tables if
 
 **Fixture catalog resolution.** The conformance fixture workflows (`conformance-*`) resolve in priority order: `OPENWOP_FIXTURES_DIR` (explicit path to the spec repo's `conformance/fixtures/`) → an upward probe for `conformance/fixtures/` → a sibling-checkout probe (`../openwop/conformance/fixtures`). `OPENWOP_EXTRA_FIXTURES_DIR` additionally loads host-internal smoke fixtures. The host logs the resolved dir + fixture count at boot; if nothing resolves it serves only a synthetic noop fixture (logged loudly).
 
+## Cutting a signed certification bundle (v3, major 1)
+
+A certification bundle is v3 regardless of major (RFC 0168 §E.2), so this v1-only host publishes the key it signs with in its **v1** discovery root: `signingKeys: [{ keyId: "postgres-reference-1", alg: "ed25519", publicKey, use: "certification-bundle" }]`, derived at startup from [`keys/host.pub.pem`](./keys/README.md). The private half lives only at `~/.openwop-keys/postgres-reference-1.host.pem`.
+
+```bash
+SUITE_VERSION=2.42.10 ./scripts/cut-bundle.sh [out=bundle-v3.json.new]   # REQUIRE_0218=1 on the RFC 0218 acceptance cut
+SUITE_VERSION=2.42.10 PREFLIGHT_ONLY=1 ./scripts/cut-bundle.sh           # boot + preflight only
+node scripts/verify-bundle.mjs <bundle.json> http://127.0.0.1:3839        # attribution check against a running host
+```
+
+The script installs the requested published suite (and its exactly-pinned `@openwop/spec-artifacts`) outside this package, boots a fresh pglite host on the suite's own fixture catalog, preflights the signing key (mode 600, pairs with the committed public key), the published `signingKeys[]` entry and a served audit checkpoint, then runs `openwop-conformance --target-major 1 --certify --bundle-version 3 --signing-key-id postgres-reference-1`. It refuses a bundle whose `discovery.url` is not the host it started or whose signature does not verify under the key the host's **live** discovery publishes, and finally runs the suite's own `--verify --host-key keys/host.pub.pem`. It is a loopback cut: the webhook SSRF guard is opened for the suite's loopback receivers and that relaxation is declared in `host.relaxations[]`.
+
 ## Architecture
 
 ```

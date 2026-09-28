@@ -84,8 +84,45 @@ async function sleepUnlessCancelled(host: Host, runId: string, ms: number): Prom
   return 'done';
 }
 
-function interruptFor(node: WorkflowNode, run: RunRow): InterruptPayload {
-  const key = `${run.run_id}:${node.id}:0`;
+/**
+ * The run whose id roots the deterministic re-entry key K. replay.md §Suppression
+ * keys a replay fork on `(sourceRunId, nodeId, attempt)`, never on the fork's own
+ * runId — so a replay fork's K is its source's K (followed up a chain of replays),
+ * and the source's recorded `interrupt.resolved` is the one it short-circuits to.
+ * A branch is an independent run and keys on itself.
+ */
+function keyRunId(host: Host, run: RunRow): string {
+  let r = run;
+  while (r.fork_mode === 'replay' && r.source_run_id !== null) {
+    const source = host.store.getRun(r.source_run_id);
+    if (!source) break;
+    r = source;
+  }
+  return r.run_id;
+}
+
+/**
+ * replay.md §"Determinism caveats" 2 — `ctx.interrupt(K)` short-circuits to the
+ * persisted `interrupt.resolved`. The log is consulted (interrupt.md §"Re-entry
+ * and resume values"): the run's own, then each replay source's, since a replay
+ * consumes its source's events as fixed history. Returns the recorded
+ * `node.suspended` (which names the interrupt K was invoked as) and its
+ * `interrupt.resolved`, or null when K was never resolved.
+ */
+function recordedResolution(host: Host, run: RunRow, key: string): { suspended: Record<string, unknown>; resolved: Record<string, unknown> } | null {
+  for (let r: RunRow | undefined = run; r !== undefined; r = r.fork_mode === 'replay' && r.source_run_id !== null ? host.store.getRun(r.source_run_id) : undefined) {
+    const events = readEvents(host, r);
+    const suspended = events.find((e) => e.type === 'node.suspended' && (e.payload as { key?: unknown } | null)?.key === key);
+    if (suspended === undefined) continue;
+    const interruptId = (suspended.payload as { interruptId?: unknown }).interruptId;
+    const resolved = events.find((e) => e.type === 'interrupt.resolved' && (e.payload as { interruptId?: unknown } | null)?.interruptId === interruptId);
+    if (resolved !== undefined) return { suspended: suspended.payload as Record<string, unknown>, resolved: resolved.payload as Record<string, unknown> };
+  }
+  return null;
+}
+
+function interruptFor(host: Host, node: WorkflowNode, run: RunRow): InterruptPayload {
+  const key = `${keyRunId(host, run)}:${node.id}:0`;
   const c = node.config;
   if (node.typeId === 'core.approvalGate') {
     const data: Record<string, unknown> = { artifactId: node.id, artifactType: 'conformance-artifact', title: String(c['title'] ?? `Approve ${node.id}`), actions: Array.isArray(c['actions']) ? c['actions'] : ['accept', 'reject'] };
@@ -152,7 +189,7 @@ async function useCredential(host: Host, run: RunRow, node: WorkflowNode): Promi
   }
   const data: Record<string, unknown> = { provider: providerId, scopes, reason: got.reason, connectUrl: connectUrlFor(host, run, node.id, providerId, scopes) };
   if (got.credentialRef !== undefined) data['credentialRef'] = { ref: got.credentialRef, scope: 'user' };
-  return { suspend: { kind: 'credential', key: `${run.run_id}:${node.id}:0`, data, resumeSchema: { ...CREDENTIAL_RESUME_SCHEMA } as unknown as Record<string, unknown> } };
+  return { suspend: { kind: 'credential', key: `${keyRunId(host, run)}:${node.id}:0`, data, resumeSchema: { ...CREDENTIAL_RESUME_SCHEMA } as unknown as Record<string, unknown> } };
 }
 
 async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number): Promise<NodeResult | 'cancelled' | 'paused'> {
@@ -169,7 +206,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
     case 'core.approvalGate':
     case 'core.clarificationGate':
     case 'core.interrupt':
-      return { suspend: interruptFor(node, run) };
+      return { suspend: interruptFor(host, node, run) };
     case 'core.httpFetch': {
       try {
         const r = await performHttpFetch(host, run, node, attempt);
@@ -227,21 +264,43 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
   }
 }
 
-function fold(host: Host, run: RunRow): { started: boolean; completed: string[]; attempts: Map<string, number>; suspended: string | null; startedAt: string | null } {
+interface Folded {
+  started: boolean;
+  completed: string[];
+  attempts: Map<string, number>;
+  suspended: string | null;
+  /** K of an `interrupt.requested` the node's current attempt recorded and nothing has resolved yet. */
+  requested: Map<string, string>;
+  /** `interrupt.resolved` recorded and the node not yet resumed — a fork cut between the two. */
+  resolved: Map<string, Record<string, unknown>>;
+  /** `node.resumed` recorded and the node not yet completed, with its resumeValue. */
+  resumed: Map<string, unknown>;
+  startedAt: string | null;
+}
+
+function fold(host: Host, run: RunRow): Folded {
   const events = readEvents(host, run);
   const completed: string[] = [];
   const attempts = new Map<string, number>();
+  const resolved = new Map<string, Record<string, unknown>>();
+  const resumed = new Map<string, unknown>();
+  const requested = new Map<string, string>();
   let started = false;
   let suspended: string | null = null;
   let startedAt: string | null = null;
   for (const e of events) {
+    const payload = (e.payload ?? {}) as Record<string, unknown>;
     if (e.type === 'run.started') { started = true; startedAt = e.timestamp; }
-    if (e.type === 'node.started' && e.nodeId) attempts.set(e.nodeId, (attempts.get(e.nodeId) ?? 0) + 1);
+    if (e.type === 'node.started' && e.nodeId) { attempts.set(e.nodeId, (attempts.get(e.nodeId) ?? 0) + 1); requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); }
     if (e.type === 'node.completed' && e.nodeId && !completed.includes(e.nodeId)) completed.push(e.nodeId);
     if (e.type === 'node.suspended' && e.nodeId) suspended = e.nodeId;
+    if (e.type === 'interrupt.requested' && e.nodeId && typeof payload['key'] === 'string') requested.set(e.nodeId, payload['key']);
+    if (e.type === 'interrupt.resolved' && e.nodeId) { requested.delete(e.nodeId); resolved.set(e.nodeId, payload); }
+    if (e.type === 'node.resumed' && e.nodeId) { resolved.delete(e.nodeId); resumed.set(e.nodeId, payload['resumeValue']); }
+    if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) { requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); }
     if (e.type === 'node.resumed' || e.type === 'node.completed' || e.type === 'node.failed') suspended = null;
   }
-  return { started, completed, attempts, suspended, startedAt };
+  return { started, completed, attempts, suspended, requested, resolved, resumed, startedAt };
 }
 
 function setStatus(host: Host, run: RunRow, status: string, patch: Partial<RunRow> = {}): void {
@@ -341,6 +400,31 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       setStatus(host, run, 'paused', { pause_requested: 0 });
       return;
     }
+    // Re-entry past a recorded resolution (interrupt.md §"Re-entry and resume
+    // values"): a fork whose fixed history already resolved this node's interrupt
+    // continues from the log — no fresh attempt, no second `interrupt.requested`.
+    if (state.resumed.has(node.id)) {
+      appendEvent(host, run, 'node.completed', { nodeId: node.id, outputs: { resumeValue: state.resumed.get(node.id) } }, { nodeId: node.id });
+      completed.push(node.id);
+      continue;
+    }
+    let recorded = state.resolved.get(node.id);
+    const requestedKey = state.requested.get(node.id);
+    if (recorded === undefined && requestedKey !== undefined && run.fork_mode === 'replay') {
+      // The history stops after K was invoked; the source's resolution of the same K
+      // is the one this replay takes, and the source's events carry it from there.
+      const replayed = recordedResolution(host, run, requestedKey);
+      if (replayed !== null) {
+        if (state.suspended !== node.id) appendEvent(host, run, 'node.suspended', replayed.suspended, { nodeId: node.id });
+        appendEvent(host, run, 'interrupt.resolved', replayed.resolved, { nodeId: node.id });
+        recorded = replayed.resolved;
+      }
+    }
+    if (recorded !== undefined) {
+      if (applyResolution(host, run, node.id, recorded) === 'failed') return;
+      completed.push(node.id);
+      continue;
+    }
     const attempt = state.attempts.get(node.id) ?? 0;
     state.attempts.set(node.id, attempt + 1);
     const nodeStart = Date.now();
@@ -374,6 +458,19 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       return;
     }
     if ('suspend' in result) {
+      // replay.md §"Determinism caveats" 2: in a replay, ctx.interrupt(K) short-circuits
+      // to the source's persisted resolution. The recorded suspend and resolution are
+      // re-emitted as the source logged them, and nothing is minted to resolve again.
+      const replayed = run.fork_mode === 'replay' ? recordedResolution(host, run, result.suspend.key) : null;
+      if (replayed !== null) {
+        host.validate('suspend-request', result.suspend, `replayed interrupt ${String(replayed.suspended['interruptId'])}`);
+        appendEvent(host, run, 'interrupt.requested', result.suspend, { nodeId: node.id });
+        appendEvent(host, run, 'node.suspended', replayed.suspended, { nodeId: node.id });
+        appendEvent(host, run, 'interrupt.resolved', replayed.resolved, { nodeId: node.id });
+        if (applyResolution(host, run, node.id, replayed.resolved) === 'failed') return;
+        completed.push(node.id);
+        continue;
+      }
       const { row } = mintInterrupt(host, run, node.id, result.suspend);
       host.validate('suspend-request', result.suspend, `interrupt ${row.interrupt_id}`);
       appendEvent(host, run, 'interrupt.requested', result.suspend, { nodeId: node.id });
@@ -479,28 +576,34 @@ export function resolveAndResume(host: Host, run: RunRow, row: InterruptRow, res
   if (subject !== null) resolved['resolvedBy'] = subject;
   if (outcome.decision !== undefined) resolved['decision'] = outcome.decision;
   appendEvent(host, run, 'interrupt.resolved', resolved, { nodeId: row.node_id });
-  // RFC 0199 §C.4 — `declined` fails the node with connector_auth_declined.
-  if (payload.kind === 'credential' && (resumeValue as { outcome?: unknown } | null)?.outcome === 'declined') {
-    const error = { code: 'connector_auth_declined', message: 'the user declined the credential interrupt' };
-    appendEvent(host, run, 'node.failed', { nodeId: row.node_id, error, attempts: 1 }, { nodeId: row.node_id });
-    appendEvent(host, run, 'run.failed', { error, failedNodeId: row.node_id });
-    host.store.invalidateInterruptsForRun(run.run_id);
-    setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
-    return { runId: run.run_id, nodeId: row.node_id, status: 'failed' };
-  }
-  if (outcome.decision === 'rejected') {
-    const error = { code: 'approval_rejected', message: 'the approval was rejected' };
-    appendEvent(host, run, 'node.failed', { nodeId: row.node_id, error, attempts: 1 }, { nodeId: row.node_id });
-    appendEvent(host, run, 'run.failed', { error, failedNodeId: row.node_id });
-    host.store.invalidateInterruptsForRun(run.run_id);
-    setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
-    return { runId: run.run_id, nodeId: row.node_id, status: 'failed' };
-  }
-  appendEvent(host, run, 'node.resumed', { nodeId: row.node_id, interruptId: row.interrupt_id, resumeValue }, { nodeId: row.node_id });
-  appendEvent(host, run, 'node.completed', { nodeId: row.node_id, outputs: { resumeValue } }, { nodeId: row.node_id });
+  if (applyResolution(host, run, row.node_id, resolved) === 'failed') return { runId: run.run_id, nodeId: row.node_id, status: 'failed' };
   setStatus(host, run, 'running', { current_node_id: null });
   scheduleRun(host, run.run_id);
   return { runId: run.run_id, nodeId: row.node_id, status: 'running' };
+}
+
+/**
+ * What an `interrupt.resolved` does to its node, whether it was just recorded by
+ * a resolve or is being re-entered from the log by a fork (the same events either
+ * way, so a replay reproduces its source): the node resumes and completes with
+ * the resumeValue, or a rejection / declined credential fails it and the run.
+ */
+function applyResolution(host: Host, run: RunRow, nodeId: string, resolved: Record<string, unknown>): 'resumed' | 'failed' {
+  const resumeValue = resolved['resumeValue'];
+  let error: { code: string; message: string } | null = null;
+  // RFC 0199 §C.4 — `declined` fails the node with connector_auth_declined.
+  if (resolved['kind'] === 'credential' && (resumeValue as { outcome?: unknown } | null)?.outcome === 'declined') error = { code: 'connector_auth_declined', message: 'the user declined the credential interrupt' };
+  else if (resolved['decision'] === 'rejected') error = { code: 'approval_rejected', message: 'the approval was rejected' };
+  if (error !== null) {
+    appendEvent(host, run, 'node.failed', { nodeId, error, attempts: 1 }, { nodeId });
+    appendEvent(host, run, 'run.failed', { error, failedNodeId: nodeId });
+    host.store.invalidateInterruptsForRun(run.run_id);
+    setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
+    return 'failed';
+  }
+  appendEvent(host, run, 'node.resumed', { nodeId, interruptId: resolved['interruptId'], resumeValue }, { nodeId });
+  appendEvent(host, run, 'node.completed', { nodeId, outputs: { resumeValue } }, { nodeId });
+  return 'resumed';
 }
 
 /** persistence.md §Runs pinned to v1 — applied at first v2 read of a non-terminal era-2 run. */

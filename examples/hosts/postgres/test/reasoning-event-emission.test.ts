@@ -40,7 +40,9 @@ process.env.OPENWOP_EXTRA_FIXTURES_DIR = resolve(__dirname, 'fixtures-private');
 
 import { setQuerier, start } from '../src/server.js';
 import type { Querier, QueryResult } from '../src/db.js';
-import { McpFakeServer } from '../../../../conformance/src/lib/mcp-fake-server.js';
+import { importFromSpecRepo } from './sibling-repos.js';
+// Borrowed from the spec repo's conformance suite (test/sibling-repos.ts).
+const { McpFakeServer } = (await importFromSpecRepo('conformance', 'src', 'lib', 'mcp-fake-server.js')) as { McpFakeServer: any };
 
 function pgliteQuerier(db: PGlite): Querier {
   return {
