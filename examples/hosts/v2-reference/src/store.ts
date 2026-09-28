@@ -142,6 +142,14 @@ export interface EffectRow {
   at: string;
   business_key: string;
   outcome_json: string | null;
+  /**
+   * replay.md §Suppression rule 2: the node's EXECUTION ORDINAL n when this row
+   * was recorded (its n-th `node.started` in the run's log, 1-based, inherited
+   * prefix included). A replay resolves execution n from rows with the same n.
+   * NULL on rows written before the ordinal was recorded: the host never
+   * re-executed a node then, so they are execution 1.
+   */
+  execution?: number | null;
 }
 
 export interface PackRow {
@@ -293,6 +301,7 @@ CREATE TABLE IF NOT EXISTS effects (
   at TEXT NOT NULL,
   business_key TEXT NOT NULL,
   outcome_json TEXT NULL,
+  execution INTEGER NULL,
   PRIMARY KEY (run_id, effect_id, attempt)
 );
 CREATE INDEX IF NOT EXISTS effects_business ON effects(business_key);
@@ -373,6 +382,8 @@ export class Store {
     this.db.exec(DDL);
     // A database created before subscriptions recorded their contract: add the column, defaulting to the major-1 rendering those rows always received.
     const webhookColumns = (this.db.prepare('PRAGMA table_info(webhooks)').all() as Array<{ name: string }>).map((c) => c.name);
+    const effectColumns = (this.db.prepare('PRAGMA table_info(effects)').all() as Array<{ name: string }>).map((c) => c.name);
+    if (!effectColumns.includes('execution')) this.db.exec('ALTER TABLE effects ADD COLUMN execution INTEGER NULL');
     const interruptColumns = (this.db.prepare('PRAGMA table_info(interrupts)').all() as Array<{ name: string }>).map((c) => c.name);
     if (!interruptColumns.includes('votes_json')) this.db.exec('ALTER TABLE interrupts ADD COLUMN votes_json TEXT NULL');
     if (!webhookColumns.includes('contract_major')) this.db.exec('ALTER TABLE webhooks ADD COLUMN contract_major INTEGER NOT NULL DEFAULT 1');
@@ -563,8 +574,8 @@ export class Store {
    */
   claimEffect(row: EffectRow): { row: EffectRow; won: boolean } {
     try {
-      this.db.prepare(`INSERT INTO effects (effect_id, run_id, node_id, attempt, keying, state, provider_key, invocation_id, at, business_key, outcome_json)
-        VALUES (@effect_id, @run_id, @node_id, @attempt, @keying, @state, @provider_key, @invocation_id, @at, @business_key, @outcome_json)`).run(row);
+      this.db.prepare(`INSERT INTO effects (effect_id, run_id, node_id, attempt, keying, state, provider_key, invocation_id, at, business_key, outcome_json, execution)
+        VALUES (@effect_id, @run_id, @node_id, @attempt, @keying, @state, @provider_key, @invocation_id, @at, @business_key, @outcome_json, @execution)`).run({ ...row, execution: row.execution ?? null });
       return { row, won: true };
     } catch {
       return { row: this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND effect_id = ? AND attempt = ?').get(row.run_id, row.effect_id, row.attempt) as EffectRow, won: false };
@@ -582,9 +593,18 @@ export class Store {
   effectsForRun(runId: string): EffectRow[] {
     return this.db.prepare('SELECT * FROM effects WHERE run_id = ? ORDER BY at ASC, attempt ASC').all(runId) as EffectRow[];
   }
-  /** The terminal outcome a replay resolves from, keyed (sourceRunId, nodeId, nodeAttempt). */
-  effectOutcome(runId: string, nodeId: string, attempt: number): EffectRow | undefined {
-    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND node_id = ? AND outcome_json IS NOT NULL ORDER BY attempt DESC LIMIT 1').get(runId, nodeId) as EffectRow | undefined;
+  /**
+   * The terminal outcome a replay resolves from, keyed (sourceRunId, nodeId, n):
+   * the last transport attempt of the node's n-th execution (replay.md
+   * §Suppression rule 2). It used to ignore n and take the node's LAST outcome,
+   * so every execution of a re-executed node replayed as the final one.
+   */
+  effectOutcome(runId: string, nodeId: string, execution: number): EffectRow | undefined {
+    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND node_id = ? AND COALESCE(execution, 1) = ? AND outcome_json IS NOT NULL ORDER BY attempt DESC LIMIT 1').get(runId, nodeId, execution) as EffectRow | undefined;
+  }
+  /** The terminal outcome recorded under one effect identity in a run (the fallback for an execution that resolved to an earlier one's record). */
+  effectOutcomeById(runId: string, effectId: string): EffectRow | undefined {
+    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND effect_id = ? AND outcome_json IS NOT NULL ORDER BY COALESCE(execution, 1) DESC, attempt DESC LIMIT 1').get(runId, effectId) as EffectRow | undefined;
   }
 
   // ── packs ─────────────────────────────────────────────────────────────────
