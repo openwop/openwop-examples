@@ -218,14 +218,24 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
     } catch (e) {
       outcome = { status: 0, error: (e as Error).message };
     }
-    host.store.updateEffect(run.run_id, effectId, ledgerAttempt, { state: outcome.error === undefined ? 'completed' : 'released', outcome_json: JSON.stringify(outcome) });
+    // A gateway 5xx (502/503/504) is a transport failure seen through a proxy:
+    // a front that loses its upstream connection answers 502 where a direct
+    // connection would have reset. Retrying it under the same Idempotency-Key
+    // is safe (RFC 0150 §B), and it is what `transportRetries` exists for.
+    // Measured: the suite's effect receiver resets the first attempt, and a
+    // tunnelled cut turned the reset into a 502 this loop recorded as done —
+    // one ledger row where RFC 0173's retry leg needs two.
+    const gatewayRetry = outcome.error === undefined && GATEWAY_STATUSES.has(outcome.status) && i < request.transportRetries;
+    host.store.updateEffect(run.run_id, effectId, ledgerAttempt, { state: outcome.error === undefined && !gatewayRetry ? 'completed' : 'released', outcome_json: JSON.stringify(outcome) });
     settle(outcome);
     inFlight.delete(flightKey);
-    if (outcome.error === undefined) break;
+    if (outcome.error === undefined && !gatewayRetry) break;
   }
   if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed after ${ledgerAttempt} transport attempt(s): ${outcome.error}`);
   return { outputs: { status: outcome.status, attempts: ledgerAttempt }, effectId };
 }
+
+const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
 export function recordAttempt(host: Host, run: RunRow, state: CompensationState): void {
   host.store.updateRun(run.run_id, { compensation_json: JSON.stringify(state) });
