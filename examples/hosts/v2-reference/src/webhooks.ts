@@ -183,6 +183,29 @@ export function rotateWebhookSecret(host: Host, tenant: string, webhookId: strin
   return { rotatedAt: new Date(now).toISOString(), previousSecretExpiresAt: new Date(expires).toISOString() };
 }
 
+/**
+ * `shortenRotationOverlap` (host-sample-test-seams.md §29) — the seams-profile
+ * seam behind the RFC 0201 §E.20 post-overlap witness. It moves the ONE stored
+ * expiry `rotateWebhookSecret` wrote, to `now + overlapSeconds`; the delivery
+ * signer below reads that column exactly as it does for a real overlap, so which
+ * secret signs afterwards is production's decision. Tenant checks mirror
+ * `rotateWebhookSecret`; it only ever shortens.
+ */
+export function shortenRotationOverlap(host: Host, tenant: string, webhookId: string, overlapSeconds: number): { webhookId: string; previousSecretExpiresAt: string } {
+  if (secretRotation(host) === undefined) throw err('not_found', 'webhooks.secretRotation is not advertised');
+  checkTenantBound(webhookId, tenant, 'webhookId');
+  const row = host.store.getWebhook(webhookId);
+  if (!row) throw err('not_found', 'no such webhook');
+  if (row.tenant !== tenant) throw err('forbidden', 'the subscription belongs to another tenant');
+  if (!optedIn(row)) throw err('validation_error', 'the subscription did not opt into standard-webhooks-1; it has no overlap');
+  const now = Date.now();
+  if (row.prev_secret === null || row.prev_secret_expires_at === null || row.prev_secret_expires_at <= now) throw err('validation_error', 'no rotation overlap is in progress on this subscription');
+  const expires = now + overlapSeconds * 1000;
+  if (expires >= row.prev_secret_expires_at) throw err('validation_error', 'the seam only shortens an overlap; this expiry is not earlier than the current one', { previousSecretExpiresAt: new Date(row.prev_secret_expires_at).toISOString() });
+  host.store.setWebhookPrevSecretExpiry(webhookId, expires);
+  return { webhookId, previousSecretExpiresAt: new Date(expires).toISOString() };
+}
+
 export function unregisterWebhook(host: Host, tenant: string, webhookId: string): void {
   // identity.md §5: the tenant segment is checked BEFORE the lookup. Checking it
   // after means a foreign-tenant id that happens not to exist answers `404`, which

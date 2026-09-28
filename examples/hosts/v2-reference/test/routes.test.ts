@@ -100,6 +100,29 @@ describe('discovery + negotiation', () => {
     expect((await call('GET', '/v1/openapi.json', undefined, { 'OpenWOP-Version': '1' })).s).toBe(200);
     expect((await call('GET', '/.well-known/wop')).s).toBe(404);
   });
+  it('/openapi.json is the canonical contract filtered to the mounted routes, with real operations and resolvable components', async () => {
+    const v2 = await call('GET', '/openapi.json');
+    expect(v2.h.get('openwop-version')).toBe('2.0');
+    expect(v2.b.info.version).toBe('2.0');
+    expect(Object.keys(v2.b.components.schemas).length).toBeGreaterThan(0);
+    expect(v2.b.paths['/runs'].post.operationId).toBeTypeOf('string');
+    expect(v2.b.paths['/runs/{runId}'].get).toBeDefined();
+    expect(v2.b.paths['/audit/verify'].get).toBeDefined();
+    expect(v2.b.paths['/webhooks/{webhookId}/dead-letters'].get).toBeDefined();
+    // Not mounted by this host: absent, as is a v1 path key.
+    expect(v2.b.paths['/prompts']).toBeUndefined();
+    expect(v2.b.paths['/v1/runs']).toBeUndefined();
+    // Self-contained: every schema file the canonical document points at is bundled.
+    const refs = JSON.stringify(v2.b).match(/"\$ref":"[^"]*"/g) ?? [];
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs.filter((r) => !r.startsWith('"$ref":"#/'))).toEqual([]);
+    expect(v2.b.components.schemas['error-envelope']).toBeDefined();
+    const v1 = await call('GET', '/v1/openapi.json', undefined, { 'OpenWOP-Version': '1' });
+    expect(v1.b.info.version).toBe('1.11');
+    expect(v1.b.paths['/v1/runs'].post).toBeDefined();
+    expect(v1.b.paths['/runs']).toBeUndefined();
+    expect((JSON.stringify(v1.b).match(/"\$ref":"[^"]*"/g) ?? []).filter((r) => !r.startsWith('"$ref":"#/'))).toEqual([]);
+  });
 });
 
 describe('runs', () => {
@@ -348,12 +371,15 @@ describe('interrupt.md §Rejection — a rejected gate fails closed, and the fai
     expect(okEvs.filter((e) => e.type === 'node.skipped').map((e) => e.nodeId)).toEqual(['notify']);
     expect(okEvs.filter((e) => e.type === 'node.completed').map((e) => e.nodeId).sort()).toEqual(['audit', 'clean', 'gate', 'next']);
   });
-  it('a gate whose timeoutMs elapses with onTimeout absent or reject resolves rejected by the host (action timeout, reason timeout)', async () => {
+  it('a gate whose timeoutMs elapses resolves rejected by the host whatever onTimeout holds (action timeout, reason timeout)', async () => {
+    // openwop#1696: a timeout MUST NOT grant a gate — `approve` is treated as reject, and
+    // `escalate` MUST NOT extend or grant, so every onTimeout value fails the gate the same way.
     register('rfc0223-timeout', [gateNode({ timeoutMs: 300 })]);
     register('rfc0223-timeout-reject', [gateNode({ timeoutMs: 300, onTimeout: 'reject' })]);
     register('rfc0223-timeout-approve', [gateNode({ timeoutMs: 300, onTimeout: 'approve' })]);
-    const ids = await Promise.all(['rfc0223-timeout', 'rfc0223-timeout-reject', 'rfc0223-timeout-approve'].map((w) => suspend(w)));
-    for (const runId of ids.slice(0, 2)) {
+    register('rfc0223-timeout-escalate', [gateNode({ timeoutMs: 300, onTimeout: 'escalate' })]);
+    const ids = await Promise.all(['rfc0223-timeout', 'rfc0223-timeout-reject', 'rfc0223-timeout-approve', 'rfc0223-timeout-escalate'].map((w) => suspend(w)));
+    for (const runId of ids) {
       const snap = await waitStatus(runId, ['failed'], 4000);
       expect(snap.status).toBe('failed');
       expect(snap.error.code).toBe('approval_rejected');
@@ -364,10 +390,6 @@ describe('interrupt.md §Rejection — a rejected gate fails closed, and the fai
       expect(types(evs).slice(4)).toEqual(['interrupt.resolved', 'approval.rejected', 'node.failed', 'run.failed']);
       expect(evs.find((e) => e.type === 'run.failed').payload.failedNodeId).toBe('gate');
     }
-    // `approve` is not the absent / reject disposition: the host does not resolve it.
-    expect((await call('GET', `/runs/${enc(ids[2] as string)}`)).b.status).toBe('waiting-approval');
-    expect(types(await eventsOf(ids[2] as string))).not.toContain('interrupt.resolved');
-    await call('POST', `/runs/${enc(ids[2] as string)}/cancel`, {});
   });
   it('majority quorum: rejects decide only past half of requiredApprovals; a non-deciding vote emits nothing', async () => {
     expect((await call('GET', '/.well-known/openwop')).b.fixtures).toContain('conformance-interrupt-quorum');
