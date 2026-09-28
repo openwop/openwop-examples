@@ -412,6 +412,32 @@ describe('webhooks + identity + packs + workspace', () => {
     expect((await call('POST', '/conformance/seams/sample/webhooks/receive', { secret: 'k', headers, body })).b.accepted).toBe(true);
     expect((await call('POST', '/conformance/seams/sample/webhooks/receive', { secret: 'k', headers: { ...headers, 'X-openwop-Signature': 'sha256=00' }, body })).b.accepted).toBe(false);
   });
+  it('returns a generated secret once in the 201, signs with it, and never echoes a supplied one (webhooks.md §Surfaces, RFC 0221, #103)', async () => {
+    const { createServer } = await import('node:http');
+    const hits: Array<{ headers: Record<string, string>; body: string }> = [];
+    const srv = createServer((req, res) => { let body = ''; req.on('data', (c: Buffer) => { body += c.toString(); }); req.on('end', () => { hits.push({ headers: req.headers as never, body }); res.writeHead(204); res.end(); }); });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/`;
+    try {
+      const gen = await call('POST', '/webhooks', { url, events: ['run.completed'] });
+      expect(gen.s).toBe(201);
+      expect(Object.keys(gen.b).sort()).toEqual(['secret', 'webhookId']);
+      expect(typeof gen.b.secret).toBe('string');
+      expect(gen.b.secret.length).toBeGreaterThan(0);
+      const c = await call('POST', '/runs', { workflowId: 'conformance-noop' });
+      await waitStatus(c.b.runId, ['completed']);
+      for (let i = 0; i < 60 && hits.length < 1; i++) await new Promise((r) => setTimeout(r, 50));
+      const d = hits[0] as { headers: Record<string, string>; body: string };
+      expect(d.headers['openwop-signature']).toBe(`sha256=${createHmac('sha256', gen.b.secret).update(`${d.headers['openwop-timestamp']}.${d.body}`).digest('hex')}`);
+      const supplied = await call('POST', '/webhooks', { url, events: ['run.completed'], secret: 'caller-supplied-secret' });
+      expect(supplied.s).toBe(201);
+      expect(Object.keys(supplied.b)).toEqual(['webhookId']);
+      expect(JSON.stringify(supplied.b)).not.toContain('caller-supplied-secret');
+      for (const id of [gen.b.webhookId, supplied.b.webhookId]) expect((await call('DELETE', `/webhooks/${enc(id)}`)).s).toBe(204);
+    } finally {
+      srv.close();
+    }
+  });
   it('rejects a private receiver with the registered webhook_url_rejected when the egress guard is on', async () => {
     const guarded = await startHost({ port: 0, dbPath: ':memory:', apiKey: K, devValidate: 'strict', webhookAllowPrivate: false });
     const post = async (url: string): Promise<{ s: number; b: any }> => {
