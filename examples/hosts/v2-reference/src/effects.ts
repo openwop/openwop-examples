@@ -93,7 +93,16 @@ export function businessKey(run: RunRow, node: WorkflowNode, request: { method: 
   return createHash('sha256').update(material).digest('hex');
 }
 
-export interface FetchOutcome { status: number; error?: string; suppressed?: boolean }
+export interface FetchOutcome { status: number; error?: string; suppressed?: boolean; /** the host's own egress guard refused the request (it never left) */ denied?: true }
+
+/**
+ * The registered code a failed fetch fails its node with (RFC 0228): the host's
+ * egress guard refusing the destination is `egress_denied`; any other failure to
+ * get an answer from the fetch target is `upstream_unavailable`.
+ */
+export function fetchFailureCode(outcome: FetchOutcome): 'egress_denied' | 'upstream_unavailable' {
+  return outcome.denied === true ? 'egress_denied' : 'upstream_unavailable';
+}
 
 /** Effect attempts THIS process holds the claim on and has not yet recorded an outcome for — see performHttpFetch. */
 const inFlight = new Map<string, Promise<FetchOutcome>>();
@@ -225,9 +234,10 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
       // The effect identity IS the provider's idempotency key (RFC 0150 §B).
       const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Idempotency-Key': providerKey };
       const r = await guardedRequest(target, { method: request.method, headers, timeoutMs: request.timeoutMs, allowPrivate: host.config.webhookAllowPrivate, ...(request.body === undefined ? {} : { body: request.body }) });
-      outcome = r.error === undefined ? { status: r.status } : { status: r.status, error: r.error };
+      outcome = r.error === undefined ? { status: r.status } : { status: r.status, error: r.error, ...(r.error.startsWith('egress denied') ? { denied: true as const } : {}) };
     } catch (e) {
-      outcome = { status: 0, error: (e as Error).message };
+      const refused = (e as { code?: unknown }).code === 'webhook_url_rejected';
+      outcome = { status: 0, error: (e as Error).message, ...(refused ? { denied: true as const } : {}) };
     }
     // A gateway 5xx (502/503/504) is a transport failure seen through a proxy:
     // a front that loses its upstream connection answers 502 where a direct
@@ -242,7 +252,7 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
     inFlight.delete(flightKey);
     if (outcome.error === undefined && !gatewayRetry) break;
   }
-  if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed after ${ledgerAttempt - base} transport attempt(s): ${outcome.error}`);
+  if (outcome.error !== undefined) throw Object.assign(new Error(`http.fetch failed after ${ledgerAttempt - base} transport attempt(s): ${outcome.error}`), { code: fetchFailureCode(outcome) });
   return { outputs: { status: outcome.status, attempts: ledgerAttempt - base }, effectId };
 }
 
@@ -291,7 +301,7 @@ export function replayRecordedEffect(host: Host, run: RunRow, node: WorkflowNode
     host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
   }
   // A recorded failure replays as the same failure: the outcome is derived, never re-decided.
-  if (outcome.error !== undefined) throw err('validation_error', `${label} failed in the source run (recorded, not performed): ${outcome.error}`);
+  if (outcome.error !== undefined) throw Object.assign(new Error(`${label} failed in the source run (recorded, not performed): ${outcome.error}`), { code: fetchFailureCode(outcome) });
   return { outputs: { status: outcome.status, suppressed: true, sourceEffectId: recorded.effect_id }, effectId: recorded.effect_id };
 }
 
