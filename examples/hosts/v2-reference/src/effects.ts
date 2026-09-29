@@ -194,10 +194,31 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
     const mirror = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: 1, keying: 'business-identity', state: 'completed', provider_key: providerKey, invocation_id: `deduplicated-of:${done.run_id}`, at: nowIso(), business_key: key, outcome_json: done.outcome_json, execution });
     return { outputs: { ...(JSON.parse(done.outcome_json as string) as FetchOutcome), deduplicated: true }, effectId: mirror.row.effect_id };
   }
+  // A LATER execution of this node in the same run (a loop visit, a retry after a
+  // terminal failure) is a new logical invocation of the SAME business operation
+  // (openwop-examples#132). idempotency.md §"Layer 2": the identity is the business
+  // key — no runId, nodeId or ordinal — so it keeps its effectId and provider key,
+  // and "a retried node MUST NOT issue a second external effect": an operation that
+  // already COMPLETED resolves to that record. One that only FAILED was never
+  // performed, so the new execution re-attempts it under the same identity (the
+  // provider deduplicates on the key, RFC 0150 §B), on fresh ledger attempts
+  // tagged with its own ordinal. Rows of THIS execution mean a re-delivery of it
+  // (RFC 0158): its own attempt numbers are reused, so the claims below dedupe it
+  // exactly as before — including a failure that execution already recorded.
+  const prior = host.store.effectsForRun(run.run_id).filter((e) => e.effect_id === effectId);
+  const mine = prior.filter((e) => (e.execution ?? 1) === execution);
+  let base = 0;
+  if (mine.length > 0) {
+    base = Math.min(...mine.map((e) => e.attempt)) - 1;
+  } else if (prior.length > 0) {
+    const performed = prior.find((e) => e.state === 'completed' && e.outcome_json !== null && (JSON.parse(e.outcome_json) as FetchOutcome).error === undefined);
+    if (performed !== undefined) return { outputs: { ...(JSON.parse(performed.outcome_json as string) as FetchOutcome), deduplicated: true }, effectId };
+    base = Math.max(...prior.map((e) => e.attempt));
+  }
   let outcome: FetchOutcome = { status: 0, error: 'not attempted' };
   let ledgerAttempt = 0;
   for (let i = 0; i <= request.transportRetries; i++) {
-    ledgerAttempt = i + 1;
+    ledgerAttempt = base + i + 1;
     const claim = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: ledgerAttempt, keying: 'business-identity', state: 'claimed', provider_key: providerKey, invocation_id: null, at: nowIso(), business_key: key, outcome_json: null, execution });
     if (!claim.won && claim.row?.outcome_json !== null && claim.row !== undefined) {
       // Another executor already completed this attempt: resolve to its outcome.
@@ -247,8 +268,8 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
     inFlight.delete(flightKey);
     if (outcome.error === undefined && !gatewayRetry) break;
   }
-  if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed after ${ledgerAttempt} transport attempt(s): ${outcome.error}`);
-  return { outputs: { status: outcome.status, attempts: ledgerAttempt }, effectId };
+  if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed after ${ledgerAttempt - base} transport attempt(s): ${outcome.error}`);
+  return { outputs: { status: outcome.status, attempts: ledgerAttempt - base }, effectId };
 }
 
 /** The effectId the source run's n-th execution of `nodeId` completed with: its n-th terminal event, if that is a node.completed naming one. */
