@@ -41,8 +41,9 @@ import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
 export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
-  // core.conformance.hold (suite 2.44.4) executes, but no fixture using it is honoured yet, so nothing new is advertised.
-  const executable = new Set(['core.noop', 'core.delay', 'core.conformance.hold', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
+  // core.conformance.hold (pure) and core.conformance.side-effect (side-effecting by classification) are the
+  // conformance-reserved typeIds the loop fixtures use (fixtures.md).
+  const executable = new Set(['core.noop', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
@@ -56,7 +57,11 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
     // An honoured id whose file the installed suite does not ship is simply never loaded.
     'conformance-interrupt-quorum', 'conformance-approval-reject-routed', 'conformance-approval-timeout',
     // openwop#1696: a gate whose onTimeout is `approve` — a timeout still rejects it.
-    'conformance-approval-timeout-approve']);
+    'conformance-approval-timeout-approve',
+    // Cycles (the scheduler re-opens a node reached again over an edge, bounded by recursionLimit):
+    // RFC 0223 G11 — a rejected gate looped back is asked again under a new key; and openwop#1718 —
+    // a replay resolves each execution of a looped side-effecting node by its own ordinal.
+    'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];

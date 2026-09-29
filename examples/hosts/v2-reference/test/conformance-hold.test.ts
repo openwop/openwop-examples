@@ -47,11 +47,9 @@ describe('core.conformance.hold', () => {
     expect(evs.find((e) => e.type === 'node.completed')?.payload.outputs).toEqual({ delayMs: 250, greeting: 'hi', n: 3 });
     expect((await get(`/runs/${enc(f.runId)}/effects`)).effects).toEqual([]);
   });
-  it('is not advertised: no honoured fixture uses it yet', async () => {
+  it('is advertised only through the fixture that loops through it (conformance-replay-ordinal-loop)', async () => {
     const d = await get('/.well-known/openwop');
-    for (const id of (d.fixtures as string[]).filter((f) => f !== 'hold-test')) { // hold-test is registered by this file
-      const def = running.host.workflows.get(id) as { nodes: Array<{ typeId: string }> } | undefined;
-      expect(def?.nodes.some((n) => n.typeId === 'core.conformance.hold') ?? false, id).toBe(false);
-    }
+    const using = (d.fixtures as string[]).filter((f) => f !== 'hold-test').filter((id) => (running.host.workflows.get(id) as { nodes: Array<{ typeId: string }> } | undefined)?.nodes.some((n) => n.typeId === 'core.conformance.hold'));
+    expect(using).toEqual(['conformance-replay-ordinal-loop']);
   });
 });
