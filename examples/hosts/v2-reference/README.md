@@ -43,6 +43,7 @@ npm start                          # http://127.0.0.1:3838
 | `OPENWOP_HOST_BUILD` | `commit:dev` | `host.build` on the effect-seam manifest (`commit:<sha>` when cutting a bundle) |
 | `OPENWOP_WORKLOAD_TRUST_ROOTS` | `spiffe://example` | the `workload` lane's trust roots |
 | `OPENWOP_RATELIMIT_REQS_PER_MIN` | `1200` | per-credential token bucket → `429 rate_limited` + `Retry-After` |
+| `OPENWOP_CORS_ORIGINS` | _(unset: reflect any origin)_ | CORS (openwop#1763): unset or `*` echoes any `Origin` in `Access-Control-Allow-Origin` (never `*`, never credentials — bearer tokens are headers); `off` grants none; a comma list grants only those origins. A preflight (`OPTIONS` + `Access-Control-Request-Method`) for a served operation answers `204` admitting the method and reflecting `Access-Control-Request-Headers` |
 | `OPENWOP_FIXTURES_DIR` | _(the suite's `fixtures/`)_ | override the fixture catalog directory |
 | `OPENWOP_ENVELOPE_STRICTNESS` | `warn` | `envelopeStrictness.mode` for envelope admission below a kind's floor (events.md §"The envelope-kind catalog"); `strict` refuses with `unknown_schema_version` |
 
