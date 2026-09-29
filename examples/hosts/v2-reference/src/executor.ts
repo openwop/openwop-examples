@@ -11,7 +11,7 @@
  * the node (and the run) closed.
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
-import { buildCompensationPlan, compensationState, performHttpFetch, recordAttempt } from './effects.js';
+import { buildCompensationPlan, compensationState, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
 import { err } from './errors.js';
 import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
@@ -99,6 +99,65 @@ function orderNodes(def: WorkflowDefinition): WorkflowNode[] {
   return order;
 }
 
+/**
+ * Whether a source's outcome travels over a BACK edge (one that closes a cycle,
+ * pointing at a node earlier in the order): only an outcome that satisfies the
+ * edge's own triggerRule re-opens its target. A skip never does, so a skipped
+ * loop body cannot re-open its gate and spin.
+ */
+function delivers(rule: string, type: string): boolean {
+  if (rule === 'any_failed') return type === 'node.failed';
+  if (rule === 'all_complete') return type === 'node.completed' || type === 'node.failed';
+  return type === 'node.completed'; // all_success, any_success, none_failed
+}
+
+/**
+ * The scheduler, derived from the log so a re-entered loop (resume, restart,
+ * fork) picks up exactly where the run is. A node is OWED an evaluation when it
+ * has no terminal yet, when it started and recorded no terminal, or when a
+ * source finished after the node's last terminal: over a forward edge always,
+ * over a back edge only when that edge delivers. The next node is the first owed
+ * one, in order, whose forward-edge sources owe nothing — in a DAG that is the
+ * old single pass, and a cycle re-opens its target each time the loop comes round.
+ */
+function nextNode(def: WorkflowDefinition, order: WorkflowNode[], st: Folded): WorkflowNode | null {
+  const idx = new Map(order.map((n, i) => [n.id, i] as const));
+  const ls = links(def);
+  const owed = (id: string): boolean => {
+    const t = st.outcome.get(id);
+    if (t === undefined) return true;
+    if ((st.lastStart.get(id) ?? -1) > t.seq) return true;
+    return ls.some((l) => {
+      if (l.to !== id) return false;
+      const s = st.outcome.get(l.from);
+      if (s === undefined || s.seq <= t.seq) return false;
+      const back = (idx.get(l.from) ?? 0) >= (idx.get(id) ?? 0);
+      return !back || delivers(l.triggerRule, s.type);
+    });
+  };
+  for (const n of order) {
+    if (!owed(n.id)) continue;
+    const forward = ls.filter((l) => l.to === n.id && (idx.get(l.from) ?? 0) < (idx.get(n.id) ?? 0));
+    if (forward.every((l) => !owed(l.from))) return n;
+  }
+  return null;
+}
+
+/** Each node's latest outcome, as the three lists `fires` reads. */
+function latestOutcomes(st: Folded): { completed: string[]; failed: string[]; skipped: string[] } {
+  const out = { completed: [] as string[], failed: [] as string[], skipped: [] as string[] };
+  for (const [id, t] of st.outcome) (t.type === 'node.completed' ? out.completed : t.type === 'node.failed' ? out.failed : out.skipped).push(id);
+  return out;
+}
+
+/** runs.md §`run` section: recursionLimit, clamped to limits.maxNodeExecutions (the default when absent). */
+export const MAX_NODE_EXECUTIONS = 1000;
+function recursionLimit(run: RunRow): number {
+  const options = JSON.parse(run.options_json) as { configurable?: { run?: { recursionLimit?: unknown } } };
+  const asked = options.configurable?.run?.recursionLimit;
+  return typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? Math.min(asked, MAX_NODE_EXECUTIONS) : MAX_NODE_EXECUTIONS;
+}
+
 function resolveInput(node: WorkflowNode, name: string, run: RunRow, def: WorkflowDefinition): unknown {
   const binding = node.inputs[name] as { type?: string; variableName?: string; value?: unknown } | undefined;
   const inputs = JSON.parse(run.inputs_json) as Record<string, unknown>;
@@ -162,8 +221,14 @@ function recordedResolution(host: Host, run: RunRow, key: string): { suspended: 
   return null;
 }
 
-function interruptFor(host: Host, node: WorkflowNode, run: RunRow): InterruptPayload {
-  const key = `${keyRunId(host, run)}:${node.id}:0`;
+/**
+ * interrupt.md §Re-entry and resume values: K derives from the run, the node and
+ * the node's VISIT INDEX (its interrupts whose resolution was consumed before this
+ * execution). A replay or recovery of the same execution re-derives the same K; a
+ * later visit over an edge derives a different one and asks again.
+ */
+function interruptFor(host: Host, node: WorkflowNode, run: RunRow, visit: number): InterruptPayload {
+  const key = `${keyRunId(host, run)}:${node.id}:${visit}`;
   const c = node.config;
   if (node.typeId === 'core.approvalGate') {
     const data: Record<string, unknown> = { artifactId: node.id, artifactType: 'conformance-artifact', title: String(c['title'] ?? `Approve ${node.id}`), actions: Array.isArray(c['actions']) ? c['actions'] : ['accept', 'reject'] };
@@ -220,7 +285,7 @@ type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPay
  * `connector_auth_expired` after a terminal refresh failure, `credential_required`
  * when there never was one.
  */
-async function useCredential(host: Host, run: RunRow, node: WorkflowNode): Promise<NodeResult> {
+async function useCredential(host: Host, run: RunRow, node: WorkflowNode, visit: number): Promise<NodeResult> {
   const auth = (node.config['auth'] ?? {}) as { type?: unknown; provider?: unknown; scopes?: unknown };
   const providerId = typeof auth.provider === 'string' ? auth.provider : '';
   const scopes = Array.isArray(auth.scopes) ? auth.scopes.map(String) : [];
@@ -235,10 +300,10 @@ async function useCredential(host: Host, run: RunRow, node: WorkflowNode): Promi
   }
   const data: Record<string, unknown> = { provider: providerId, scopes, reason: got.reason, connectUrl: connectUrlFor(host, run, node.id, providerId, scopes) };
   if (got.credentialRef !== undefined) data['credentialRef'] = { ref: got.credentialRef, scope: 'user' };
-  return { suspend: { kind: 'credential', key: `${keyRunId(host, run)}:${node.id}:0`, data, resumeSchema: { ...CREDENTIAL_RESUME_SCHEMA } as unknown as Record<string, unknown> } };
+  return { suspend: { kind: 'credential', key: `${keyRunId(host, run)}:${node.id}:${visit}`, data, resumeSchema: { ...CREDENTIAL_RESUME_SCHEMA } as unknown as Record<string, unknown> } };
 }
 
-async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number, execution: number): Promise<NodeResult | 'cancelled' | 'paused'> {
+async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number, execution: number, visit: number): Promise<NodeResult | 'cancelled' | 'paused'> {
   switch (node.typeId) {
     case 'core.noop':
       return { outputs: {} };
@@ -247,6 +312,15 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       const r = await sleepUnlessCancelled(host, run.run_id, ms);
       return r === 'done' ? { outputs: { sleptMs: ms } } : r;
     }
+    case 'core.conformance.side-effect':
+      // Side-effecting by classification: suppressed in a replay (effects.ts).
+      try {
+        const r = performConformanceSideEffect(host, run, node, execution);
+        return { outputs: { ...r.outputs, effectId: r.effectId } };
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'internal_error', (e as Error).message);
+      }
     case 'core.conformance.hold': {
       // A reserved, PURE conformance node: it holds for inputs.delayMs, then completes
       // with its resolved inputs as its outputs. It performs nothing observable outside
@@ -263,7 +337,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
     case 'core.approvalGate':
     case 'core.clarificationGate':
     case 'core.interrupt':
-      return { suspend: interruptFor(host, node, run) };
+      return { suspend: interruptFor(host, node, run, visit) };
     case 'core.httpFetch': {
       try {
         const r = await performHttpFetch(host, run, node, execution);
@@ -316,7 +390,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
     case 'core.conversationGate':
       return { outputs: runConversation(host, run, node) };
     case OAUTH_USE_TYPE:
-      return useCredential(host, run, node);
+      return useCredential(host, run, node, visit);
     default:
       throw new NodeFailure('capability_not_provided', `${node.typeId} is not executed by this host (capability not provided)`, { typeId: node.typeId });
   }
@@ -346,6 +420,17 @@ interface Folded {
   failed: string[];
   /** Nodes whose incoming edges' triggerRule was not satisfied. */
   skipped: string[];
+  /** Each node's LATEST terminal event (node.completed / node.failed / node.skipped) and its sequence — the scheduler's view of a visit. */
+  outcome: Map<string, { seq: number; type: string }>;
+  /** Each node's latest node.started sequence: a start with no terminal after it is an execution still owed. */
+  lastStart: Map<string, number>;
+  /** node.started events in the run (inherited prefix included) — what configurable.run.recursionLimit counts. */
+  starts: number;
+  /**
+   * interrupt.md §Re-entry: the node's visit index — its interrupts whose
+   * resolution was consumed before this execution — which the key K derives from.
+   */
+  resolvedCount: Map<string, number>;
   startedAt: string | null;
 }
 
@@ -360,13 +445,19 @@ function fold(host: Host, run: RunRow): Folded {
   const rejectedEmitted = new Set<string>();
   const failed: string[] = [];
   const skipped: string[] = [];
+  const outcome = new Map<string, { seq: number; type: string }>();
+  const lastStart = new Map<string, number>();
+  const resolvedCount = new Map<string, number>();
+  let starts = 0;
   let started = false;
   let suspended: string | null = null;
   let startedAt: string | null = null;
   for (const e of events) {
     const payload = (e.payload ?? {}) as Record<string, unknown>;
     if (e.type === 'run.started') { started = true; startedAt = e.timestamp; }
-    if (e.type === 'node.started' && e.nodeId) { attempts.set(e.nodeId, (attempts.get(e.nodeId) ?? 0) + 1); requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); }
+    if (e.type === 'node.started' && e.nodeId) { attempts.set(e.nodeId, (attempts.get(e.nodeId) ?? 0) + 1); requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); lastStart.set(e.nodeId, e.sequence); starts++; }
+    if ((e.type === 'node.completed' || e.type === 'node.failed' || e.type === 'node.skipped') && e.nodeId) outcome.set(e.nodeId, { seq: e.sequence, type: e.type });
+    if (e.type === 'interrupt.resolved' && e.nodeId) resolvedCount.set(e.nodeId, (resolvedCount.get(e.nodeId) ?? 0) + 1);
     if (e.type === 'node.completed' && e.nodeId && !completed.includes(e.nodeId)) completed.push(e.nodeId);
     if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) terminals.set(e.nodeId, (terminals.get(e.nodeId) ?? 0) + 1);
     if (e.type === 'node.suspended' && e.nodeId) suspended = e.nodeId;
@@ -379,7 +470,7 @@ function fold(host: Host, run: RunRow): Folded {
     if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) { requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); rejectedEmitted.delete(e.nodeId); }
     if (e.type === 'node.resumed' || e.type === 'node.completed' || e.type === 'node.failed') suspended = null;
   }
-  return { started, completed, attempts, terminals, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, startedAt };
+  return { started, completed, attempts, terminals, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, outcome, lastStart, starts, resolvedCount, startedAt };
 }
 
 function setStatus(host: Host, run: RunRow, status: string, patch: Partial<RunRow> = {}): void {
@@ -465,12 +556,15 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   } else if (run.status === 'pending') {
     setStatus(host, run, 'running');
   }
-  const completed = [...state.completed];
-  const failed = [...state.failed];
-  const skipped = [...state.skipped];
-  for (const node of orderNodes(def)) {
-    if (completed.includes(node.id) || failed.includes(node.id) || skipped.includes(node.id)) continue;
+  const order = orderNodes(def);
+  const limit = recursionLimit(run);
+  for (;;) {
+    // Re-folded every step: the log is the scheduler's only state, so a cycle, a
+    // resumed suspend, a restart and a fork all continue from what is recorded.
     run = host.store.getRun(runId) as RunRow;
+    const state = fold(host, run);
+    const node = nextNode(def, order, state);
+    if (node === null) break;
     if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
     if (run.pause_requested === 1) {
       // Between nodes: the requested policy is echoed verbatim (runs.md §Pause
@@ -482,12 +576,11 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       return;
     }
     // The scheduler: a node fires only when its incoming edges' triggerRule is
-    // satisfied by its sources' outcomes — so a failed source satisfies an
+    // satisfied by its sources' latest outcomes — so a failed source satisfies an
     // `all_complete` / `any_failed` edge and never an `all_success` one.
-    const gate = fires(def, node.id, { completed, failed, skipped });
+    const gate = fires(def, node.id, latestOutcomes(state));
     if (!gate.fires) {
       appendEvent(host, run, 'node.skipped', { nodeId: node.id, reason: `triggerRule ${gate.rule} not satisfied` }, { nodeId: node.id });
-      skipped.push(node.id);
       continue;
     }
     // Re-entry past a recorded resolution (interrupt.md §"Re-entry and resume
@@ -495,7 +588,6 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     // continues from the log — no fresh attempt, no second `interrupt.requested`.
     if (state.resumed.has(node.id)) {
       appendEvent(host, run, 'node.completed', { nodeId: node.id, outputs: { resumeValue: state.resumed.get(node.id) } }, { nodeId: node.id });
-      completed.push(node.id);
       continue;
     }
     let recorded = state.resolved.get(node.id);
@@ -511,25 +603,33 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       }
     }
     if (recorded !== undefined) {
-      const applied = applyResolution(host, run, node.id, recorded, state.rejectedEmitted.has(node.id));
-      if (applied === 'failed') return;
-      (applied === 'routed' ? failed : completed).push(node.id);
+      if (applyResolution(host, run, node.id, recorded, state.rejectedEmitted.has(node.id)) === 'failed') return;
       continue;
     }
+    // runs.md §`run` section: a breach of recursionLimit, counted in node starts,
+    // emits cap.breached { kind: node-executions } and fails the run — the runaway
+    // guard a cycle needs (settings.maxLoopbackIterations is advisory, openwop#1748).
+    if (state.starts >= limit) {
+      appendEvent(host, run, 'cap.breached', { kind: 'node-executions', limit, observed: state.starts + 1 });
+      const error = { code: 'recursion_limit_exceeded', message: `starting ${node.id} would exceed recursionLimit ${limit} node executions`, details: { limit, nodeId: node.id } };
+      appendEvent(host, run, 'run.failed', { error, durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
+      host.store.invalidateInterruptsForRun(run.run_id);
+      setStatus(host, run, 'failed', { completed_at: nowIso(), current_node_id: null, error_json: JSON.stringify(error) });
+      return;
+    }
     const attempt = state.attempts.get(node.id) ?? 0;
-    state.attempts.set(node.id, attempt + 1);
     const execution = 1 + (state.terminals.get(node.id) ?? 0);
+    const visit = state.resolvedCount.get(node.id) ?? 0;
     const nodeStart = Date.now();
     appendEvent(host, run, 'node.started', { nodeId: node.id, typeId: node.typeId, attempt }, { nodeId: node.id });
     let result: NodeResult | 'cancelled' | 'paused';
     try {
-      result = await executeNode(host, run, def, node, attempt, execution);
+      result = await executeNode(host, run, def, node, attempt, execution, visit);
     } catch (e) {
       const failure = e instanceof NodeFailure ? e : new NodeFailure('internal_error', (e as Error).message);
       const error: Record<string, unknown> = { code: failure.code, message: failure.message };
       if (failure.details) error['details'] = failure.details;
       if (failNode(host, host.store.getRun(runId) as RunRow, def, node.id, error, attempt + 1) === 'failed') return;
-      failed.push(node.id);
       continue;
     }
     if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
@@ -556,9 +656,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       if (replayed !== null) {
         host.validate('suspend-request', result.suspend, `replayed interrupt ${String(replayed.suspended['interruptId'])}`);
         appendEvent(host, run, 'interrupt.resolved', replayed.resolved, { nodeId: node.id });
-        const applied = applyResolution(host, run, node.id, replayed.resolved);
-        if (applied === 'failed') return;
-        (applied === 'routed' ? failed : completed).push(node.id);
+        if (applyResolution(host, run, node.id, replayed.resolved) === 'failed') return;
         continue;
       }
       const { row } = mintInterrupt(host, run, node.id, result.suspend);
@@ -579,9 +677,8 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     // interleave between the check and the write it guards.
     run = host.store.getRun(runId) as RunRow;
     if (TERMINAL.has(run.status)) return;
-    if (fold(host, run).completed.includes(node.id)) { completed.push(node.id); continue; }
+    if ((fold(host, run).terminals.get(node.id) ?? 0) >= execution) continue; // the other delivery already ended THIS execution
     appendEvent(host, run, 'node.completed', { nodeId: node.id, outputs: result.outputs, durationMs: Date.now() - nodeStart }, { nodeId: node.id });
-    completed.push(node.id);
   }
   run = host.store.getRun(runId) as RunRow;
   if (TERMINAL.has(run.status)) return; // the other delivery of this work already ended it

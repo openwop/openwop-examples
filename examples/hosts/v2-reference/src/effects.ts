@@ -153,33 +153,7 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
   const request = requestOf(run, node);
   const key = businessKey(run, node, request);
 
-  if (run.fork_mode === 'replay' && run.source_run_id !== null) {
-    let recorded = host.store.effectOutcome(run.source_run_id, node.id, execution);
-    if (recorded === undefined) {
-      // Execution n recorded no row of its own when it resolved to an earlier
-      // execution's record of the same business identity; its node.completed names that effect.
-      const effectId = executionEffectId(host, run.source_run_id, node.id, execution);
-      if (effectId !== undefined) recorded = host.store.effectOutcomeById(run.source_run_id, effectId);
-    }
-    if (recorded === undefined || recorded.outcome_json === null) {
-      throw Object.assign(new Error(`no recorded outcome for (${run.source_run_id}, ${node.id}, ${execution}) — the effect is not performed`), { code: 'replay_source_missing' });
-    }
-    const outcome = JSON.parse(recorded.outcome_json) as FetchOutcome;
-    // The fork's own ledger carries the SOURCE run's attempts for this node as
-    // inherited history, so the read projection stays whole-run — and records
-    // no attempt the source did not make. Each row keeps the source's attempt
-    // number, state and `at`: a replay proves recorded history and MUST NOT
-    // regenerate it (replay.md §Suppression rule 1). Until 2026-09-27 this wrote
-    // one row stamped `attempt: 1`, `state: completed`, `at: now()`, which read
-    // on GET /runs/{fork}/effects as a new attempt the host never made — a
-    // re-fire on the host's own ledger (RFC 0173 §C.2, suite 2.42.2).
-    for (const src of host.store.effectsForRun(run.source_run_id).filter((e) => e.node_id === node.id && (e.execution ?? 1) === execution)) {
-      host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
-    }
-    // A recorded failure replays as the same failure: the outcome is derived, never re-decided.
-    if (outcome.error !== undefined) throw err('validation_error', `http.fetch failed in the source run (recorded, not performed): ${outcome.error}`);
-    return { outputs: { status: outcome.status, suppressed: true, sourceEffectId: recorded.effect_id }, effectId: recorded.effect_id };
-  }
+  if (run.fork_mode === 'replay' && run.source_run_id !== null) return replayRecordedEffect(host, run, node, execution, 'http.fetch');
 
   // The identity is assigned once per business key and reused by every attempt.
   const identity = host.store.effectIdentity(key);
@@ -286,6 +260,58 @@ function executionEffectId(host: Host, sourceRunId: string, nodeId: string, exec
     return typeof id === 'string' ? id : undefined;
   }
   return undefined;
+}
+
+/**
+ * replay.md §Suppression: a replay fork never performs a side effect. Execution n
+ * of a side-effecting node resolves from the SOURCE run's recorded terminal
+ * outcome for (sourceRunId, nodeId, n) — or fails closed with
+ * replay_source_missing when the source recorded none (rule 3). Shared by every
+ * side-effecting node this host runs (core.httpFetch, core.conformance.side-effect).
+ */
+export function replayRecordedEffect(host: Host, run: RunRow, node: WorkflowNode, execution: number, label: string): { outputs: Record<string, unknown>; effectId: string } {
+  const sourceRunId = run.source_run_id as string;
+  let recorded = host.store.effectOutcome(sourceRunId, node.id, execution);
+  if (recorded === undefined) {
+    // Execution n recorded no row of its own when it resolved to an earlier
+    // execution's record of the same business identity; its node.completed names that effect.
+    const effectId = executionEffectId(host, sourceRunId, node.id, execution);
+    if (effectId !== undefined) recorded = host.store.effectOutcomeById(sourceRunId, effectId);
+  }
+  if (recorded === undefined || recorded.outcome_json === null) {
+    throw Object.assign(new Error(`no recorded outcome for (${sourceRunId}, ${node.id}, ${execution}) — the effect is not performed`), { code: 'replay_source_missing' });
+  }
+  const outcome = JSON.parse(recorded.outcome_json) as FetchOutcome;
+  // The fork's own ledger carries the SOURCE run's attempts for this execution as
+  // inherited history, so the read projection stays whole-run — and records no
+  // attempt the source did not make. Each row keeps the source's attempt number,
+  // state and `at`: a replay proves recorded history and MUST NOT regenerate it
+  // (replay.md §Suppression rule 1; RFC 0173 §C.2, suite 2.42.2).
+  for (const src of host.store.effectsForRun(sourceRunId).filter((e) => e.node_id === node.id && (e.execution ?? 1) === execution)) {
+    host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
+  }
+  // A recorded failure replays as the same failure: the outcome is derived, never re-decided.
+  if (outcome.error !== undefined) throw err('validation_error', `${label} failed in the source run (recorded, not performed): ${outcome.error}`);
+  return { outputs: { status: outcome.status, suppressed: true, sourceEffectId: recorded.effect_id }, effectId: recorded.effect_id };
+}
+
+/**
+ * core.conformance.side-effect — the conformance-RESERVED side-effecting typeId
+ * (fixtures.md §conformance-replay-side-effect): what matters is that the replay
+ * classifier treats it as side-effecting, not what the effect is. Live, it
+ * performs nothing outside the host but records one ledger row per execution,
+ * keyed by the activity recipe (tenant, run, node, ordinal — idempotency.md: the
+ * fallback when there is no business key), so each execution has its own
+ * recorded outcome. In a replay it resolves execution n from the source or fails
+ * closed. A re-delivery of the same execution resolves to its row.
+ */
+export function performConformanceSideEffect(host: Host, run: RunRow, node: WorkflowNode, execution: number): { outputs: Record<string, unknown>; effectId: string } {
+  if (run.fork_mode === 'replay' && run.source_run_id !== null) return replayRecordedEffect(host, run, node, execution, 'core.conformance.side-effect');
+  const recipe = `${run.tenant}|${run.run_id}|${node.id}|${execution}`;
+  const effectId = `${run.tenant}/se-${createHash('sha256').update(recipe).digest('base64url').slice(0, 22)}`;
+  const outcome: FetchOutcome = { status: 200 };
+  const claim = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: 1, keying: 'activity-recipe', state: 'completed', provider_key: null, invocation_id: null, at: nowIso(), business_key: recipe, outcome_json: JSON.stringify(outcome), execution });
+  return { outputs: { status: outcome.status, effectId, ...(claim.won ? {} : { deduplicated: true }) }, effectId };
 }
 
 const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
