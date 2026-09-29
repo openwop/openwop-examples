@@ -268,6 +268,10 @@ describe('interrupts', () => {
     const types = source.map((e) => e.type);
     expect(types).toEqual(['run.started', 'node.started', 'interrupt.requested', 'node.suspended', 'interrupt.resolved', 'node.resumed', 'node.completed', 'run.completed']);
     const key = source.find((e) => e.type === 'interrupt.requested').payload.key as string;
+    // What a replay records from `fromSeq` on: the source's events, minus any
+    // interrupt.requested / node.suspended — a replay short-circuits to the recorded
+    // interrupt.resolved and never asks again (0223.replay-derives-rejection).
+    const replayed = (fromSeq: number): string[] => source.filter((e) => e.sequence < fromSeq || (e.type !== 'interrupt.requested' && e.type !== 'node.suspended')).map((e) => e.type);
     // Before the gate ran, at its suspend, at its resolution and after it resumed:
     // 5 and 6 are the issue's repro. (2 cuts inside the gate's attempt, which the
     // loop re-enters as a fresh `node.started` for every node type — not this.)
@@ -276,9 +280,9 @@ describe('interrupts', () => {
       expect(f.s).toBe(201);
       expect((await waitStatus(f.b.runId, ['completed', 'failed'], 2000)).status, `fromSeq ${fromSeq}`).toBe('completed');
       const fork = (await call('GET', `/runs/${enc(f.b.runId)}/events/poll?timeout=1`)).b.events as any[];
-      expect(fork.map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(types);
-      // K is the source's key, never one minted from the fork's own runId.
-      expect(fork.filter((e) => e.type === 'interrupt.requested').map((e) => e.payload.key), `fromSeq ${fromSeq}`).toEqual([key]);
+      expect(fork.map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(replayed(fromSeq));
+      // Only an inherited interrupt.requested, carrying the source's K: none is minted on the fork.
+      expect(fork.filter((e) => e.type === 'interrupt.requested').map((e) => e.payload.key), `fromSeq ${fromSeq}`).toEqual(fromSeq > 2 ? [key] : []);
       expect(fork.find((e) => e.type === 'interrupt.resolved').payload.resumeValue).toEqual(resumeValue);
       expect(fork.find((e) => e.type === 'node.completed').payload.outputs).toEqual({ resumeValue });
       // Nothing is left for anyone to resolve on the fork.
@@ -290,13 +294,14 @@ describe('interrupts', () => {
     await waitStatus(c.b.runId, ['waiting-approval']);
     expect((await call('POST', `/runs/${enc(c.b.runId)}/interrupts/gate`, { resumeValue: { action: 'reject' } })).s).toBe(200);
     expect((await waitStatus(c.b.runId, ['failed'])).status).toBe('failed');
-    const types = ((await call('GET', `/runs/${enc(c.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type);
+    const source = (await call('GET', `/runs/${enc(c.b.runId)}/events/poll?timeout=1`)).b.events as any[];
+    const replayed = (fromSeq: number): string[] => source.filter((e) => e.sequence < fromSeq || (e.type !== 'interrupt.requested' && e.type !== 'node.suspended')).map((e) => e.type);
     for (const fromSeq of [0, 4, 5, 6]) {
       const f = await call('POST', `/runs/${enc(c.b.runId)}:fork`, { mode: 'replay', fromSeq });
       const snap = await waitStatus(f.b.runId, ['completed', 'failed'], 2000);
       expect(snap.status, `fromSeq ${fromSeq}`).toBe('failed');
       expect(snap.error?.code, `fromSeq ${fromSeq}`).toBe('approval_rejected');
-      expect(((await call('GET', `/runs/${enc(f.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(types);
+      expect(((await call('GET', `/runs/${enc(f.b.runId)}/events/poll?timeout=1`)).b.events as any[]).map((e) => e.type), `fromSeq ${fromSeq}`).toEqual(replayed(fromSeq));
     }
   }, 30_000);
 });
@@ -411,6 +416,44 @@ describe('interrupt.md §Rejection — a rejected gate fails closed, and the fai
     expect((await call('POST', `/runs/${enc(ok)}/interrupts/gate`, { resumeValue: { action: 'accept', voter: 'c' } })).s).toBe(200);
     expect((await waitStatus(ok, ['completed'])).status).toBe('completed');
   });
+  // 0223.replay-derives-rejection: a mode:replay fork cut at the gate's node.started
+  // derives the rejection from the recorded interrupt.resolved — it never asks again.
+  async function replayAtGateStart(sourceRunId: string): Promise<{ fork: any[]; source: any[]; snap: any; resume: Res }> {
+    const source = await eventsOf(sourceRunId);
+    const gateStart = source.find((e) => e.type === 'node.started' && e.nodeId === 'gate').sequence as number;
+    const f = await call('POST', `/runs/${enc(sourceRunId)}:fork`, { mode: 'replay', fromSeq: gateStart });
+    expect(f.s).toBe(201);
+    const snap = await waitStatus(f.b.runId, ['completed', 'failed'], 3000);
+    const fork = await eventsOf(f.b.runId);
+    const resume = await call('POST', `/runs/${enc(f.b.runId)}/interrupts/gate`, { resumeValue: { action: 'accept' } });
+    return { fork, source, snap, resume };
+  }
+  function expectDerivedRejection(r: { fork: any[]; source: any[]; snap: any; resume: Res }): void {
+    expect(r.fork.filter((e) => e.type === 'interrupt.requested')).toEqual([]);
+    const recorded = r.source.find((e) => e.type === 'interrupt.resolved').payload;
+    const replayed = r.fork.find((e) => e.type === 'interrupt.resolved')?.payload;
+    expect({ decision: replayed?.decision, action: replayed?.action, reason: replayed?.reason }).toEqual({ decision: recorded.decision, action: recorded.action, reason: recorded.reason });
+    expect(replayed).toEqual(recorded);
+    expect(r.snap.status).toBe('failed');
+    expect(r.snap.error.code).toBe('approval_rejected');
+    expect(r.fork.find((e) => e.type === 'node.failed').payload).toMatchObject({ nodeId: 'gate', error: { code: 'approval_rejected', retryable: false } });
+    expect(r.fork.find((e) => e.type === 'run.failed').payload.failedNodeId).toBe('gate');
+    expect(r.resume.s).toBe(409);
+    expect(r.resume.b.error).toBe('interrupt_already_resolved');
+  }
+  it('0223.replay-derives-rejection: a replay of a rejected gate records the resolution, fails the same way, and refuses a resume 409', async () => {
+    const runId = await suspend('conformance-approval');
+    expect((await call('POST', `/runs/${enc(runId)}/interrupts/gate`, { resumeValue: { action: 'reject' } })).s).toBe(200);
+    expect((await waitStatus(runId, ['failed'])).status).toBe('failed');
+    expectDerivedRejection(await replayAtGateStart(runId));
+  });
+  it('0223.replay-derives-rejection: the same for a gate the host timed out (conformance-approval-timeout)', async () => {
+    const runId = await suspend('conformance-approval-timeout');
+    expect((await waitStatus(runId, ['failed'], 6000)).status).toBe('failed');
+    const r = await replayAtGateStart(runId);
+    expect(r.fork.find((e) => e.type === 'interrupt.resolved')?.payload).toMatchObject({ action: 'timeout', decision: 'rejected', reason: 'timeout' });
+    expectDerivedRejection(r);
+  }, 20_000);
   it('the quorum fixture is a v2 claim only: the v1 document does not advertise it', async () => {
     expect((await call('GET', '/.well-known/openwop', undefined, { 'OpenWOP-Version': '1' })).b.fixtures).not.toContain('conformance-interrupt-quorum');
   });

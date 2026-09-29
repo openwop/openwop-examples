@@ -41,7 +41,8 @@ import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
 export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
-  const executable = new Set(['core.noop', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
+  // core.conformance.hold (suite 2.44.4) executes, but no fixture using it is honoured yet, so nothing new is advertised.
+  const executable = new Set(['core.noop', 'core.delay', 'core.conformance.hold', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose

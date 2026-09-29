@@ -1,11 +1,11 @@
 /**
  * replay.md §Suppression rule 2 (openwop#1745, #1718; suite 2.43.2): a replay
  * resolves a side-effecting node from the source's recorded terminal outcome for
- * `(sourceRunId, nodeId, n)`, where n is that node's execution ordinal — its n-th
- * `node.started`, inherited prefix, retries and later visits included. The store
- * used to ignore n and return the node's LAST outcome. The host runs no cycles
- * yet, so the executions are recorded directly here; the executor supplies
- * n - 1 as `attempt` (its count of the node's earlier node.started events).
+ * `(sourceRunId, nodeId, n)`, where n is that node's execution ordinal: 1 + its
+ * node.completed + node.failed events before this execution, inherited prefix
+ * included (re-corrected on #1718 from node.started). The store used to ignore n
+ * and return the node's LAST outcome. The host runs no cycles yet, so the
+ * executions are recorded directly here and n is passed as the executor would.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHost, type RunningHost } from '../src/server.js';
@@ -46,11 +46,11 @@ describe('a replay resolves the source execution n, not the last one', () => {
     record(src, 'e-2', 2, { status: 500, error: 'first try refused' }, 1);
     record(src, 'e-2', 2, { status: 202 }, 2); // execution 2's terminal outcome is its LAST transport attempt
     const f = fork(src);
-    const first = await performHttpFetch(running.host, f, node, 0);
+    const first = await performHttpFetch(running.host, f, node, 1);
     expect(first).toMatchObject({ effectId: 'e-1', outputs: { status: 201, suppressed: true } });
-    const second = await performHttpFetch(running.host, f, node, 1);
+    const second = await performHttpFetch(running.host, f, node, 2);
     expect(second).toMatchObject({ effectId: 'e-2', outputs: { status: 202, suppressed: true } });
-    await expect(performHttpFetch(running.host, f, node, 2)).rejects.toMatchObject({ code: 'replay_source_missing' });
+    await expect(performHttpFetch(running.host, f, node, 3)).rejects.toMatchObject({ code: 'replay_source_missing' });
     // The fork's ledger inherits each execution's own rows, never the other's.
     expect(running.host.store.effectsForRun(f.run_id).map((e) => [e.effect_id, e.attempt])).toEqual([['e-1', 1], ['e-2', 1], ['e-2', 2]]);
   });
@@ -58,8 +58,8 @@ describe('a replay resolves the source execution n, not the last one', () => {
     const src = run();
     record(src, 'legacy', null, { status: 200 });
     const f = fork(src);
-    expect(await performHttpFetch(running.host, f, node, 0)).toMatchObject({ effectId: 'legacy', outputs: { status: 200 } });
-    await expect(performHttpFetch(running.host, f, node, 1)).rejects.toMatchObject({ code: 'replay_source_missing' });
+    expect(await performHttpFetch(running.host, f, node, 1)).toMatchObject({ effectId: 'legacy', outputs: { status: 200 } });
+    await expect(performHttpFetch(running.host, f, node, 2)).rejects.toMatchObject({ code: 'replay_source_missing' });
   });
   it('an execution that resolved to an earlier record replays through the effect its node.completed names', async () => {
     const src = run();
@@ -69,11 +69,43 @@ describe('a replay resolves the source execution n, not the last one', () => {
       appendEvent(running.host, src, 'node.completed', { nodeId: node.id, outputs: { status: 204, effectId: 'e-shared' } }, { nodeId: node.id });
     }
     const f = fork(src);
-    expect(await performHttpFetch(running.host, f, node, 1)).toMatchObject({ effectId: 'e-shared', outputs: { status: 204, suppressed: true } });
+    expect(await performHttpFetch(running.host, f, node, 2)).toMatchObject({ effectId: 'e-shared', outputs: { status: 204, suppressed: true } });
   });
   it('a recorded failure replays as the same failure, not a success', async () => {
     const src = run();
     record(src, 'e-failed', 1, { status: 0, error: 'connect refused' });
-    await expect(performHttpFetch(running.host, fork(src), node, 0)).rejects.toThrow(/recorded, not performed/);
+    await expect(performHttpFetch(running.host, fork(src), node, 1)).rejects.toThrow(/recorded, not performed/);
+  });
+});
+
+describe('the executor derives n from terminals, not starts (Class 3 on openwop#1718)', () => {
+  const K = 'k-ordinal';
+  const H = { Authorization: `Bearer ${K}`, 'OpenWOP-Version': '2.0', 'Content-Type': 'application/json' };
+  const B = (): string => `http://127.0.0.1:${running.port}`;
+  const enc = encodeURIComponent;
+  async function waitTerminal(runId: string): Promise<any> {
+    for (let i = 0; i < 100; i++) {
+      const s = await (await fetch(`${B()}/runs/${enc(runId)}`, { headers: H })).json() as { status?: string };
+      if (['completed', 'failed', 'cancelled'].includes(String(s.status))) return s;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return null;
+  }
+  it('a fork cut inside the source execution re-emits node.started but replays execution 1, not a missing execution 2', async () => {
+    // The source performs its http.fetch once: node.started (seq 1), node.completed.
+    const fired = await (await fetch(`${B()}/conformance/seams/sample/effect-seams/fire`, { method: 'POST', headers: H, body: JSON.stringify({ seam: 'http.fetch' }) })).json() as { runId: string };
+    const src = await (await fetch(`${B()}/runs/${enc(fired.runId)}/events/poll?timeout=1`, { headers: H })).json() as { events: Array<{ type: string; sequence: number; nodeId?: string }> };
+    const started = src.events.find((e) => e.type === 'node.started') as { sequence: number };
+    // Cut right after node.started: the fork inherits that start with no terminal and starts the node again.
+    const f = await (await fetch(`${B()}/runs/${enc(fired.runId)}:fork`, { method: 'POST', headers: H, body: JSON.stringify({ mode: 'replay', fromSeq: started.sequence + 1 }) })).json() as { runId: string };
+    // The fixture's provider does not resolve, so the source's one execution recorded a FAILED
+    // outcome; the fork must derive exactly that — not fail closed looking for an execution 2.
+    const source = await waitTerminal(fired.runId);
+    const snap = await waitTerminal(f.runId);
+    expect(snap?.error?.code, JSON.stringify(snap?.error ?? null)).not.toBe('replay_source_missing');
+    expect(snap?.status).toBe(source?.status);
+    expect(snap?.error?.message ?? '').toMatch(/recorded, not performed/);
+    const evs = (await (await fetch(`${B()}/runs/${enc(f.runId)}/events/poll?timeout=1`, { headers: H })).json() as { events: Array<{ type: string; payload: any }> }).events;
+    expect(evs.filter((e) => e.type === 'node.started').length).toBe(2); // two starts, one execution
   });
 });

@@ -144,8 +144,9 @@ export interface EffectRow {
   outcome_json: string | null;
   /**
    * replay.md §Suppression rule 2: the node's EXECUTION ORDINAL n when this row
-   * was recorded (its n-th `node.started` in the run's log, 1-based, inherited
-   * prefix included). A replay resolves execution n from rows with the same n.
+   * was recorded (1 + its node.completed + node.failed events before this
+   * execution, inherited prefix included). A replay resolves execution n from
+   * rows with the same n.
    * NULL on rows written before the ordinal was recorded: the host never
    * re-executed a node then, so they are execution 1.
    */

@@ -142,16 +142,16 @@ function requestOf(run: RunRow, node: WorkflowNode): { method: string; url: stri
  * the SOURCE run's recorded outcome for `(sourceRunId, nodeId, n)` is the
  * result, or the node fails closed with `replay_source_missing`.
  *
- * `attempt` is the executor's count of this node's earlier `node.started` events
- * in the run's log — inherited fork prefix, retries and later visits included —
- * so `n = attempt + 1` is this execution's ordinal (replay.md §Suppression rule
- * 2, openwop#1745). Every ledger row records it, and a replay of execution n
- * resolves execution n's outcome, never simply the last one.
+ * `execution` is this execution's ordinal n: 1 + the node's `node.completed` +
+ * `node.failed` events before it in the run's log, inherited fork prefix
+ * included (replay.md §Suppression rule 2, as re-corrected on openwop#1718 —
+ * terminals, not `node.started`, which a restart or a fork cut inside an
+ * attempt re-emits for the same execution). Every ledger row records it, and a
+ * replay of execution n resolves execution n's outcome, never simply the last.
  */
-export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNode, attempt: number): Promise<{ outputs: Record<string, unknown>; effectId: string }> {
+export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNode, execution: number): Promise<{ outputs: Record<string, unknown>; effectId: string }> {
   const request = requestOf(run, node);
   const key = businessKey(run, node, request);
-  const execution = attempt + 1;
 
   if (run.fork_mode === 'replay' && run.source_run_id !== null) {
     let recorded = host.store.effectOutcome(run.source_run_id, node.id, execution);
@@ -251,19 +251,18 @@ export async function performHttpFetch(host: Host, run: RunRow, node: WorkflowNo
   return { outputs: { status: outcome.status, attempts: ledgerAttempt }, effectId };
 }
 
-/** The effectId the source run's n-th execution of `nodeId` completed with (its node.completed outputs), if any. */
+/** The effectId the source run's n-th execution of `nodeId` completed with: its n-th terminal event, if that is a node.completed naming one. */
 function executionEffectId(host: Host, sourceRunId: string, nodeId: string, execution: number): string | undefined {
   const source = host.store.getRun(sourceRunId);
   if (!source) return undefined;
-  let seen = 0;
+  let terminals = 0;
   for (const e of readEvents(host, source)) {
-    if (e.nodeId !== nodeId) continue;
-    if (e.type === 'node.started') seen++;
-    if (seen === execution && e.type === 'node.completed') {
-      const id = ((e.payload as { outputs?: { effectId?: unknown } } | null)?.outputs)?.effectId;
-      return typeof id === 'string' ? id : undefined;
-    }
-    if (seen > execution) return undefined;
+    if (e.nodeId !== nodeId || (e.type !== 'node.completed' && e.type !== 'node.failed')) continue;
+    terminals++;
+    if (terminals < execution) continue;
+    if (e.type !== 'node.completed') return undefined;
+    const id = ((e.payload as { outputs?: { effectId?: unknown } } | null)?.outputs)?.effectId;
+    return typeof id === 'string' ? id : undefined;
   }
   return undefined;
 }
