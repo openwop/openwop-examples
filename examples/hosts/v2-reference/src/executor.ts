@@ -4,7 +4,7 @@
  * loop), executes them, and records every transition as a registered v2
  * event with a payload from the registry (events.md §Payloads).
  *
- * Node types: core.noop, core.delay, core.fail, core.approvalGate,
+ * Node types: core.noop, core.delay, core.conformance.hold (pure), core.fail, core.approvalGate,
  * core.clarificationGate, core.interrupt, core.httpFetch, core.conversationGate
  * (the conformance mock), conformance.artifact.emit (RFC 0205), and (RFC 0204,
  * when `mcp.client` is advertised) core.conformance.mcp-client. Anything else fails
@@ -238,7 +238,7 @@ async function useCredential(host: Host, run: RunRow, node: WorkflowNode): Promi
   return { suspend: { kind: 'credential', key: `${keyRunId(host, run)}:${node.id}:0`, data, resumeSchema: { ...CREDENTIAL_RESUME_SCHEMA } as unknown as Record<string, unknown> } };
 }
 
-async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number): Promise<NodeResult | 'cancelled' | 'paused'> {
+async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, node: WorkflowNode, attempt: number, execution: number): Promise<NodeResult | 'cancelled' | 'paused'> {
   switch (node.typeId) {
     case 'core.noop':
       return { outputs: {} };
@@ -246,6 +246,16 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       const ms = Math.max(0, Math.min(60_000, Number(resolveInput(node, 'delayMs', run, def) ?? 1000)));
       const r = await sleepUnlessCancelled(host, run.run_id, ms);
       return r === 'done' ? { outputs: { sleptMs: ms } } : r;
+    }
+    case 'core.conformance.hold': {
+      // A reserved, PURE conformance node: it holds for inputs.delayMs, then completes
+      // with its resolved inputs as its outputs. It performs nothing observable outside
+      // the run's log, is never side-effecting, and so re-executes live on replay (no
+      // suppression, no recorded outcome to resolve).
+      const inputs = Object.fromEntries(Object.keys(node.inputs).map((name) => [name, resolveInput(node, name, run, def)]));
+      const ms = Math.max(0, Math.min(60_000, Number(resolveInput(node, 'delayMs', run, def) ?? 0) || 0));
+      const r = await sleepUnlessCancelled(host, run.run_id, ms);
+      return r === 'done' ? { outputs: inputs } : r;
     }
     case 'core.fail':
       // fixtures.md §core.fail: a vendor code under the registered `example` org (errors.md §The registry, openwop#1698).
@@ -256,7 +266,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       return { suspend: interruptFor(host, node, run) };
     case 'core.httpFetch': {
       try {
-        const r = await performHttpFetch(host, run, node, attempt);
+        const r = await performHttpFetch(host, run, node, execution);
         return { outputs: { ...r.outputs, effectId: r.effectId } };
       } catch (e) {
         const code = (e as { code?: string }).code;
@@ -316,6 +326,13 @@ interface Folded {
   started: boolean;
   completed: string[];
   attempts: Map<string, number>;
+  /**
+   * replay.md §Suppression rule 2 (Class 3 on openwop#1718): a node's execution
+   * ordinal is 1 + its `node.completed` + `node.failed` events before this
+   * execution — terminals, not `node.started`, which an immediate pause, a
+   * restart or a fork cut inside an attempt re-emits for the SAME execution.
+   */
+  terminals: Map<string, number>;
   suspended: string | null;
   /** K of an `interrupt.requested` the node's current attempt recorded and nothing has resolved yet. */
   requested: Map<string, string>;
@@ -336,6 +353,7 @@ function fold(host: Host, run: RunRow): Folded {
   const events = readEvents(host, run);
   const completed: string[] = [];
   const attempts = new Map<string, number>();
+  const terminals = new Map<string, number>();
   const resolved = new Map<string, Record<string, unknown>>();
   const resumed = new Map<string, unknown>();
   const requested = new Map<string, string>();
@@ -350,6 +368,7 @@ function fold(host: Host, run: RunRow): Folded {
     if (e.type === 'run.started') { started = true; startedAt = e.timestamp; }
     if (e.type === 'node.started' && e.nodeId) { attempts.set(e.nodeId, (attempts.get(e.nodeId) ?? 0) + 1); requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); }
     if (e.type === 'node.completed' && e.nodeId && !completed.includes(e.nodeId)) completed.push(e.nodeId);
+    if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) terminals.set(e.nodeId, (terminals.get(e.nodeId) ?? 0) + 1);
     if (e.type === 'node.suspended' && e.nodeId) suspended = e.nodeId;
     if (e.type === 'interrupt.requested' && e.nodeId && typeof payload['key'] === 'string') requested.set(e.nodeId, payload['key']);
     if (e.type === 'interrupt.resolved' && e.nodeId) { requested.delete(e.nodeId); resolved.set(e.nodeId, payload); }
@@ -360,7 +379,7 @@ function fold(host: Host, run: RunRow): Folded {
     if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) { requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); rejectedEmitted.delete(e.nodeId); }
     if (e.type === 'node.resumed' || e.type === 'node.completed' || e.type === 'node.failed') suspended = null;
   }
-  return { started, completed, attempts, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, startedAt };
+  return { started, completed, attempts, terminals, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, startedAt };
 }
 
 function setStatus(host: Host, run: RunRow, status: string, patch: Partial<RunRow> = {}): void {
@@ -483,10 +502,10 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     const requestedKey = state.requested.get(node.id);
     if (recorded === undefined && requestedKey !== undefined && run.fork_mode === 'replay') {
       // The history stops after K was invoked; the source's resolution of the same K
-      // is the one this replay takes, and the source's events carry it from there.
+      // is the one this replay takes: the recorded interrupt.resolved, and nothing
+      // re-emitted before it (openwop 0223.replay-derives-rejection).
       const replayed = recordedResolution(host, run, requestedKey);
       if (replayed !== null) {
-        if (state.suspended !== node.id) appendEvent(host, run, 'node.suspended', replayed.suspended, { nodeId: node.id });
         appendEvent(host, run, 'interrupt.resolved', replayed.resolved, { nodeId: node.id });
         recorded = replayed.resolved;
       }
@@ -499,11 +518,12 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     }
     const attempt = state.attempts.get(node.id) ?? 0;
     state.attempts.set(node.id, attempt + 1);
+    const execution = 1 + (state.terminals.get(node.id) ?? 0);
     const nodeStart = Date.now();
     appendEvent(host, run, 'node.started', { nodeId: node.id, typeId: node.typeId, attempt }, { nodeId: node.id });
     let result: NodeResult | 'cancelled' | 'paused';
     try {
-      result = await executeNode(host, run, def, node, attempt);
+      result = await executeNode(host, run, def, node, attempt, execution);
     } catch (e) {
       const failure = e instanceof NodeFailure ? e : new NodeFailure('internal_error', (e as Error).message);
       const error: Record<string, unknown> = { code: failure.code, message: failure.message };
@@ -527,13 +547,14 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     }
     if ('suspend' in result) {
       // replay.md §"Determinism caveats" 2: in a replay, ctx.interrupt(K) short-circuits
-      // to the source's persisted resolution. The recorded suspend and resolution are
-      // re-emitted as the source logged them, and nothing is minted to resolve again.
+      // to the source's persisted resolution. No interrupt.requested is emitted and
+      // nothing is minted to resolve (interrupt.md §"Re-entry and resume values";
+      // openwop 0223.replay-derives-rejection): the fork records the source's
+      // interrupt.resolved verbatim and applies it, so a rejection is derived, never
+      // re-decided, and a resume on the fork answers 409 interrupt_already_resolved.
       const replayed = run.fork_mode === 'replay' ? recordedResolution(host, run, result.suspend.key) : null;
       if (replayed !== null) {
         host.validate('suspend-request', result.suspend, `replayed interrupt ${String(replayed.suspended['interruptId'])}`);
-        appendEvent(host, run, 'interrupt.requested', result.suspend, { nodeId: node.id });
-        appendEvent(host, run, 'node.suspended', replayed.suspended, { nodeId: node.id });
         appendEvent(host, run, 'interrupt.resolved', replayed.resolved, { nodeId: node.id });
         const applied = applyResolution(host, run, node.id, replayed.resolved);
         if (applied === 'failed') return;
