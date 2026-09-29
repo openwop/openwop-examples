@@ -136,6 +136,13 @@ export interface HostConfig {
   readonly interruptKid: string;
   readonly legacyInterruptSecret: string;
   readonly rateLimitPerMinute: number;
+  /**
+   * CORS origin policy (openwop#1763). `reflect` (the default) grants any Origin
+   * by echoing it, without credentials; `off` grants none; a list grants only
+   * those origins. Bearer tokens ride in Authorization, not cookies, so no
+   * Access-Control-Allow-Credentials is ever sent.
+   */
+  readonly corsOrigins: 'reflect' | 'off' | string[];
   readonly fixturesDir: string | null;
   readonly hostBuild: { kind: 'commit' | 'image-digest' | 'artifact-sha256'; id: string };
   readonly workloadTrustRoots: readonly string[];
@@ -205,6 +212,14 @@ function parseMcpServers(raw: string): ReadonlyMap<string, string> {
   return out;
 }
 
+/** `OPENWOP_CORS_ORIGINS`: unset or `*` → reflect any origin; `off` → none; otherwise a comma list of exact origins. */
+function corsPolicy(raw: string | undefined): 'reflect' | 'off' | string[] {
+  const v = raw?.trim();
+  if (v === undefined || v === '' || v === '*') return 'reflect';
+  if (v.toLowerCase() === 'off') return 'off';
+  return v.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
+}
+
 export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
   // Derived, not independently settable: §1.1 binds preferredVersion to a 1.x
   // member while one is advertised, and to the single major once it is not.
@@ -246,6 +261,7 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     interruptKid: env('OPENWOP_INTERRUPT_KID', 'v2-reference-1'),
     legacyInterruptSecret: env('OPENWOP_LEGACY_INTERRUPT_SECRET', 'openwop-v1-legacy-interrupt-secret'),
     rateLimitPerMinute: envInt('OPENWOP_RATELIMIT_REQS_PER_MIN', 1200),
+    corsOrigins: corsPolicy(process.env['OPENWOP_CORS_ORIGINS']),
     fixturesDir: process.env['OPENWOP_FIXTURES_DIR']?.trim() || null,
     hostBuild: build ? { kind: build[1] as HostConfig['hostBuild']['kind'], id: build[2] as string } : { kind: 'commit', id: 'dev' },
     workloadTrustRoots: env('OPENWOP_WORKLOAD_TRUST_ROOTS', 'spiffe://example').split(',').map((s) => s.trim()).filter((s) => s.length > 0),

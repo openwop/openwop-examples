@@ -135,9 +135,49 @@ export class Router {
     return b;
   }
 
+  /** The Origin this host grants under its CORS policy (config.corsOrigins), or null. */
+  private grantedOrigin(req: IncomingMessage): string | null {
+    const origin = req.headers['origin'];
+    if (typeof origin !== 'string' || origin === '' || origin === 'null') return null;
+    const policy = this.host.config.corsOrigins;
+    if (policy === 'off') return null;
+    return policy === 'reflect' || policy.includes(origin) ? origin : null;
+  }
+
+  /**
+   * A CORS preflight (openwop#1763, headers.cors-preflight-admits): an OPTIONS
+   * naming Access-Control-Request-Method. When the origin is granted and an
+   * operation serves that method at the path, the answer admits the method and
+   * reflects Access-Control-Request-Headers — so every header api/v2/openapi.yaml
+   * declares for the operation, Authorization and Content-Type included, is
+   * admitted exactly when the browser asks for it (a `*` would not admit
+   * Authorization). No credentials are granted: bearer tokens are headers.
+   */
+  private preflight(req: IncomingMessage, res: ServerResponse, path: string): boolean {
+    const requested = req.headers['access-control-request-method'];
+    if ((req.method ?? '').toUpperCase() !== 'OPTIONS' || typeof requested !== 'string' || requested === '') return false;
+    const method = requested.toUpperCase();
+    const served = this.routes.some((r) => r.method === method && r.pattern.test(path));
+    const origin = this.grantedOrigin(req);
+    const headers: Record<string, string> = { Vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers' };
+    if (origin !== null && served) {
+      headers['Access-Control-Allow-Origin'] = origin;
+      headers['Access-Control-Allow-Methods'] = method;
+      const asked = req.headers['access-control-request-headers'];
+      if (typeof asked === 'string' && asked.trim() !== '') headers['Access-Control-Allow-Headers'] = asked;
+      headers['Access-Control-Max-Age'] = '600';
+    }
+    res.writeHead(served ? 204 : 404, headers);
+    res.end();
+    return true;
+  }
+
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
+    if (this.preflight(req, res, path)) return;
+    // A granted Origin is echoed on every actual response; nothing else about it changes.
+    const corsOrigin = this.grantedOrigin(req);
     const isV1Path = path === '/v1' || path.startsWith('/v1/');
     const { major: requested, malformed } = versionMajor(req.headers['openwop-version'] as string | undefined ?? null);
     const preferredMajor = Number(this.host.config.preferredVersion.split('.')[0]);
@@ -158,6 +198,7 @@ export class Router {
     else major = 2;
     const version = major === 1 ? V1_VERSION : V2_VERSION;
     const responseHeaders: Record<string, string> = { 'OpenWOP-Version': version };
+    if (corsOrigin !== null) { responseHeaders['Access-Control-Allow-Origin'] = corsOrigin; responseHeaders['Vary'] = 'Origin'; }
 
     const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'http';
     const hostHeader = (req.headers['host'] as string | undefined) ?? `${this.host.config.host}:${this.host.config.port}`;
@@ -167,6 +208,7 @@ export class Router {
     let scopeRequired: string | null = null;
     const send = (reply: Reply): void => {
       const headers: Record<string, string> = { ...responseHeaders, ...(reply.headers ?? {}) };
+      if (responseHeaders['Vary'] !== undefined && reply.headers?.['Vary'] !== undefined) headers['Vary'] = `${reply.headers['Vary']}, ${responseHeaders['Vary']}`;
       if ((reply.status === 401 || reply.status === 403) && headers['WWW-Authenticate'] === undefined) {
         const code = typeof (reply.body as { error?: unknown } | undefined)?.error === 'string' ? String((reply.body as { error: string }).error) : '';
         const challenge = challengeFor(this.host, baseUrl, reply.status, code, scopeRequired, bearerOf(req) !== null);
