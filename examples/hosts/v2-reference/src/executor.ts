@@ -345,7 +345,8 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       } catch (e) {
         const code = (e as { code?: string }).code;
         // No registered row for a failed fetch: a vendor code under the registered `example` org (openwop#1698).
-        throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'example.http_fetch_failed', (e as Error).message);
+        // RFC 0228: egress_denied (the host's guard refused it) or upstream_unavailable (no answer from the target).
+        throw new NodeFailure(code === 'replay_source_missing' || code === 'egress_denied' || code === 'upstream_unavailable' ? code : 'upstream_unavailable', (e as Error).message);
       }
     }
     case 'core.conformance.mcp-client': {

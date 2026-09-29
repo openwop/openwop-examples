@@ -48,7 +48,7 @@ function emittedCodes(): Map<string, string> {
 describe('every failure code the host emits is registered or an example.* vendor code', () => {
   it('the scan finds the known emit sites', () => {
     const codes = emittedCodes();
-    for (const c of ['approval_rejected', 'capability_not_provided', 'example.conformance_failure', 'example.http_fetch_failed', 'mcp_error', 'example.mcp_unreachable', 'internal_error', 'node_config_invalid', 'sandbox_invocation_error', 'sandbox_timeout', 'sandbox_memory_exceeded']) expect(codes.has(c), c).toBe(true);
+    for (const c of ['approval_rejected', 'capability_not_provided', 'example.conformance_failure', 'egress_denied', 'upstream_unavailable', 'mcp_error', 'internal_error', 'node_config_invalid', 'sandbox_invocation_error', 'sandbox_timeout', 'sandbox_memory_exceeded']) expect(codes.has(c), c).toBe(true);
   });
   it('none is unregistered and non-vendor', () => {
     const bad = [...emittedCodes()].filter(([c]) => !REGISTERED.has(c) && !(VENDOR.test(c) && c.startsWith('example.')));
