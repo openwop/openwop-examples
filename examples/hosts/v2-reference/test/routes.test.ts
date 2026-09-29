@@ -857,10 +857,24 @@ describe('security-defaults.md §Sandbox isolation — the §8 seam runs real es
       expect(r.b.error?.details?.escapeKind, typeId).toBe(kind);
     }
   });
-  it('kills a wall-clock overrun and reports a heap overrun', async () => {
+  it('kills a wall-clock overrun', async () => {
     expect((await invoke('misbehave.timeout')).b.error?.code).toBe('sandbox_timeout');
-    expect((await invoke('misbehave.memory-bomb')).b.error?.code).toBe('sandbox_memory_exceeded');
   }, 30_000);
+  it('reports a heap overrun, whatever the machine\'s speed (#131)', async () => {
+    // The heap cap and the wall-clock kill are independent limits, and this leg
+    // measures only the first. On the shared host the bomb raced the 2 s kill,
+    // and a loaded CI runner let the clock win (sandbox_timeout). A host whose
+    // wall-clock limit is far beyond any time-to-OOM leaves the heap cap as the
+    // only limit that can fire, so the answer no longer depends on timing.
+    const roomy = await startHost({ port: 0, dbPath: ':memory:', apiKey: K, devValidate: 'strict', sandboxWallClockLimitMs: 120_000 });
+    try {
+      const r = await fetch(`http://127.0.0.1:${roomy.port}/conformance/seams/sample/test/sandbox-invoke`, { method: 'POST', headers: H, body: JSON.stringify({ typeId: 'misbehave.memory-bomb' }) });
+      const body = await r.json() as { error?: { code?: string } };
+      expect(body.error?.code).toBe('sandbox_memory_exceeded');
+    } finally {
+      await roomy.close();
+    }
+  }, 150_000);
   it('a fresh context per invocation, the capability gate, and the two well-behaved baselines', async () => {
     for (let i = 0; i < 3; i++) expect((await invoke('misbehave.cross-pack-mutate')).b.result?.shared).toBe(1);
     const denied = await invoke('misbehave.capability-gate-violation');
