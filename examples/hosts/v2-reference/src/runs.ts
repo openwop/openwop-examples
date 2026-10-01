@@ -167,7 +167,7 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     for (const k of Object.keys(body)) if (!CREATE_KEYS.has(k)) throw err('validation_error', `unknown key ${k} — the createRun body is closed`, { key: k });
     const subject = ctx.subject;
     if (subject === null) throw err('unauthenticated', 'runs:create needs a credential');
-    if (body['mode'] === 'eval') throw err('capability_required', 'mode: eval needs agents.evalSuite, which this host does not advertise', { capability: 'agents.evalSuite' });
+    if (body['mode'] === 'eval') throw err('capability_not_provided', 'mode: eval needs agents.evalSuite, which this host does not advertise', { capability: 'agents.evalSuite' });
     if (body['mode'] !== undefined) throw err('validation_error', 'mode MUST be eval when present');
     const workflowId = body['workflowId'];
     if (typeof workflowId !== 'string' || !WORKFLOW_ID.test(workflowId)) throw err('validation_error', 'workflowId is REQUIRED (ids.schema.json workflowId grammar)');
