@@ -12,6 +12,7 @@
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
 import { buildCompensationPlan, compensationState, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
+import { SafeFetchRejection, safeFetch } from './safe-fetch.js';
 import { BudgetExhausted, afterToolCall, beforeToolCall, reserveBudget } from './budget.js';
 import { err } from './errors.js';
 import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPayload } from './interrupts.js';
@@ -356,6 +357,19 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         appendEvent(host, run, 'agent.decided', { agentId, decision: decision.decision ?? null, ...(typeof decision.confidence === 'number' ? { confidence: decision.confidence } : {}) }, { nodeId: node.id });
       }
       return { outputs: { toolCalls: calls.length } };
+    }
+    case 'core.conformance.safefetch-probe': {
+      // A reserved conformance node (fixtures.md §"The safeFetch probe fixture"): it calls this
+      // host's own safeFetch with the run's `url`, unchanged, and outputs the status only. A
+      // rejection fails the node with its code and details as given.
+      const target = String(resolveInput(node, 'url', run, def) ?? '');
+      try {
+        const r = await safeFetch(target);
+        return { outputs: { result: { status: r.status } } };
+      } catch (e) {
+        if (e instanceof SafeFetchRejection) throw new NodeFailure(e.code, e.message, e.details);
+        throw e;
+      }
     }
     case 'core.fail':
       // fixtures.md §core.fail: a vendor code under the registered `example` org (errors.md §The registry, openwop#1698).

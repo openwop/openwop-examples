@@ -90,9 +90,9 @@ When the installed `@openwop/spec-artifacts` carries `ui.a2ui-surface` schema ve
 
 `core.conversationGate` runs only as the conformance mock (`lifecycle: open-exchange-close`, `mockAutoResume`, fixture `conformance-conversation-lifecycle`): `conversation.opened` → one `conversation.exchanged` agent turn → `conversation.closed`. The turn carries `parts` (`[{ text }]`, with `content` the same text for readers that predate RFC 0205) only when the installed contract declares `parts` on the closed v2 turn def. `conversationPrimitive` is advertised on the v2 root only; the v1 document does not advertise it, lists no fixture that needs it, and a v1 `POST /v1/runs` naming one is refused `422 capability_required` (`details.requiredCapability: conversationPrimitive`, runs.md §Conversation).
 
-## Budget and backpressure
+## Budget, backpressure and the guarded HTTP client
 
-Two optional families, added so the suite's v2 witnesses for them run against a real host.
+Three optional families, added so the suite's v2 witnesses for them run against a real host.
 
 **`budget`** (`runs.md` §`budget` section, `src/budget.ts`). Advertised as `{ dimensions: ["toolCalls"], enforce: "hard", scopes: ["run"] }`.
 
@@ -104,7 +104,16 @@ Two optional families, added so the suite's v2 witnesses for them run against a 
 Not claimed, and refused or ignored as stated:
 
 - `tokens`, `cost`, `retries` and `model` are not in `dimensions`. The host calls no model and retries no node, so limits on them are accepted and never enforced.
-- `onExhaustion: "interrupt"` is refused at create with `422 capability_not_provided`. The spec defines no facet for declining it, so this is a deviation: the host does not raise a budget-extending approval and says so instead of ignoring the field.
+- `onExhaustion: "interrupt"` is refused at create with `422 capability_not_provided`: the host does not raise a budget-extending approval. RFC 0231 gives this a facet, `budget.onExhaustion`; the host advertises `["fail"]` as soon as the installed `@openwop/spec-artifacts` defines it (2.45.6+). On an earlier pin the facet cannot be advertised, and the refusal is a deviation from a contract that has no way to decline the value.
+
+**`httpClient`** (`host-services.md` §`httpClient`, `src/safe-fetch.ts`). Advertised as `{ ssrfGuard: true, maxResponseBodyBytes: 1048576, requestTimeoutMs: 5000, methods: ["GET"], safeFetch: {} }`.
+
+- `safeFetch` resolves the target, checks every resolved address, and pins the connection to the checked address (`guardedRequest` in `src/egress.ts`). A refused target is `egress_denied` with `details.reason: "ssrf-blocked"`; one that gives no answer is `upstream_unavailable`.
+- The guard is never relaxed on this path. `OPENWOP_WEBHOOK_ALLOW_PRIVATE` and `OPENWOP_OAUTH_ALLOW_PRIVATE` open it for webhooks and OAuth only, so a loopback lane still measures a closed guard here.
+- The response is cut at `maxResponseBodyBytes` and the request at `requestTimeoutMs`. A redirect is not followed; a connection upgrade is not accepted.
+- The only caller is the reserved `core.conformance.safefetch-probe` node of the `conformance-safefetch-probe` fixture. It outputs the response status and never the body, so the fixture is not a read proxy.
+
+Not claimed: `egressPolicy` (no credential is ever attached to an egress), any method but `GET`, and `toolHooks.prePostEvents` (so no `agent.tool-called` pair is emitted for a fetch).
 
 **`production`** (`conformance.md` §Production profile, `src/router.ts`). Advertised only when `OPENWOP_INFLIGHT_CAP` is set, and then only the `backpressure` facet.
 

@@ -137,7 +137,7 @@ export function validateEgressUrl(raw: string, allowPrivate: boolean): URL {
 export interface EgressResult { status: number; body: string; error?: string }
 
 /** Delivery-time guarded request: resolve, validate every address, pin the connection, no redirects. */
-export async function guardedRequest(url: URL, init: { method: string; headers: Record<string, string>; body?: string; timeoutMs: number; allowPrivate: boolean }): Promise<EgressResult> {
+export async function guardedRequest(url: URL, init: { method: string; headers: Record<string, string>; body?: string; timeoutMs: number; allowPrivate: boolean; maxResponseBodyBytes?: number }): Promise<EgressResult> {
   let address: string;
   if (isIP(url.hostname.replace(/^\[|\]$/g, ''))) {
     address = url.hostname.replace(/^\[|\]$/g, '');
@@ -174,7 +174,13 @@ export async function guardedRequest(url: URL, init: { method: string; headers: 
       servername: url.protocol === 'https:' ? url.hostname : undefined,
     } as never, (res) => {
       const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
+      let received = 0;
+      res.on('data', (c: Buffer) => {
+        received += c.length;
+        // host-services.md §httpClient: maxResponseBodyBytes is enforced, not advisory — stop reading at the cap.
+        if (init.maxResponseBodyBytes !== undefined && received > init.maxResponseBodyBytes) { req.destroy(new Error('response too large')); return; }
+        chunks.push(c);
+      });
       res.on('end', () => {
         const status = res.statusCode ?? 0;
         const body = Buffer.concat(chunks).toString('utf8');
