@@ -12,6 +12,7 @@
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
 import { buildCompensationPlan, compensationState, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
+import { BudgetExhausted, afterToolCall, beforeToolCall, reserveBudget } from './budget.js';
 import { err } from './errors.js';
 import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
@@ -331,6 +332,31 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       const r = await sleepUnlessCancelled(host, run.run_id, ms);
       return r === 'done' ? { outputs: inputs } : r;
     }
+    case 'core.conformance.mock-agent': {
+      // A reserved conformance node (fixtures.md §conformance-budget-tool-calls): it
+      // makes the scripted tool calls and nothing else. Each call is charged to the
+      // run's budget before it is recorded (budget.ts), so the call that does not fit
+      // is never made.
+      const agentId = String(node.agent?.agentId ?? `core.conformance.${node.id}`);
+      const calls = Array.isArray(node.config['mockToolCalls']) ? (node.config['mockToolCalls'] as Array<Record<string, unknown>>) : [];
+      for (const [i, call] of calls.entries()) {
+        try { beforeToolCall(host, run, node.id); }
+        catch (e) {
+          if (e instanceof BudgetExhausted) throw new NodeFailure('budget_exhausted', e.message, { dimension: 'toolCalls', limit: e.limit });
+          throw e;
+        }
+        const toolName = String(call['toolId'] ?? 'unnamed');
+        const callId = `${node.id}.${execution}.${i + 1}`;
+        appendEvent(host, run, 'agent.tool-called', { agentId, toolName, callId, inputs: call['arguments'] ?? {} }, { nodeId: node.id });
+        afterToolCall(host, run, node.id);
+        appendEvent(host, run, 'agent.tool-returned', { agentId, toolName, callId, outcome: call['result'] ?? null, durationMs: Number.isInteger(call['durationMs']) ? (call['durationMs'] as number) : 0 }, { nodeId: node.id });
+      }
+      const decision = node.config['mockDecision'] as { decision?: unknown; confidence?: unknown } | undefined;
+      if (decision !== undefined && decision !== null && typeof decision === 'object') {
+        appendEvent(host, run, 'agent.decided', { agentId, decision: decision.decision ?? null, ...(typeof decision.confidence === 'number' ? { confidence: decision.confidence } : {}) }, { nodeId: node.id });
+      }
+      return { outputs: { toolCalls: calls.length } };
+    }
     case 'core.fail':
       // fixtures.md §core.fail: a vendor code under the registered `example` org (errors.md §The registry, openwop#1698).
       throw new NodeFailure('example.conformance_failure', String(node.config['message'] ?? 'Intentional conformance failure'));
@@ -478,6 +504,13 @@ function setStatus(host: Host, run: RunRow, status: string, patch: Partial<RunRo
   host.store.updateRun(run.run_id, { status, ...patch });
   run.status = status;
   Object.assign(run, patch);
+  // conformance.md §Production profile: a host claiming `production` logs, per terminal run, its
+  // id, tenant, terminal status, error code and a correlation id. The run id is the correlation
+  // id: every event, snapshot and audit entry of the run carries it.
+  if (host.config.inflightCap !== null && TERMINAL.has(status)) {
+    const error = typeof run.error_json === 'string' ? (JSON.parse(run.error_json) as { code?: unknown }) : null;
+    process.stdout.write(`${JSON.stringify({ level: 'info', msg: 'run.terminal', runId: run.run_id, tenant: run.tenant, status, errorCode: typeof error?.code === 'string' ? error.code : null, correlationId: run.run_id })}\n`);
+  }
 }
 
 function terminalCancel(host: Host, run: RunRow, reason: string, cancelledBy: string, startedAt: string | null): void {
@@ -554,6 +587,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
     const doc = appendEvent(host, run, 'run.started', payload);
     startedAt = doc.timestamp;
     setStatus(host, run, 'running', { started_at: doc.timestamp });
+    reserveBudget(host, run);
   } else if (run.status === 'pending') {
     setStatus(host, run, 'running');
   }
@@ -630,7 +664,8 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
       const failure = e instanceof NodeFailure ? e : new NodeFailure('internal_error', (e as Error).message);
       const error: Record<string, unknown> = { code: failure.code, message: failure.message };
       if (failure.details) error['details'] = failure.details;
-      if (failNode(host, host.store.getRun(runId) as RunRow, def, node.id, error, attempt + 1) === 'failed') return;
+      // A hard budget stops the RUN (runs.md §budget section): a failure edge cannot route around it.
+      if (failNode(host, host.store.getRun(runId) as RunRow, def, node.id, error, attempt + 1, failure.code !== 'budget_exhausted') === 'failed') return;
       continue;
     }
     if (result === 'cancelled') { run = host.store.getRun(runId) as RunRow; appendEvent(host, run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, { nodeId: node.id }); terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
@@ -823,9 +858,9 @@ function applyResolution(host: Host, run: RunRow, nodeId: string, resolved: Reco
  * `any_failed`) the failure is routed and the run goes on (`routed`). Otherwise
  * the run ends: compensation unwinds, then `run.failed { failedNodeId }` (`failed`).
  */
-function failNode(host: Host, run: RunRow, def: WorkflowDefinition | undefined, nodeId: string, error: Record<string, unknown>, attempts: number): 'routed' | 'failed' {
+function failNode(host: Host, run: RunRow, def: WorkflowDefinition | undefined, nodeId: string, error: Record<string, unknown>, attempts: number, routable = true): 'routed' | 'failed' {
   appendEvent(host, run, 'node.failed', { nodeId, error, attempts }, { nodeId });
-  if (def !== undefined && failureRouted(def, nodeId)) return 'routed';
+  if (routable && def !== undefined && failureRouted(def, nodeId)) return 'routed';
   const state = fold(host, run);
   if (def !== undefined) unwind(host, run, def, state.completed);
   appendEvent(host, run, 'run.failed', { error, failedNodeId: nodeId, durationMs: state.startedAt ? Math.max(0, Date.now() - Date.parse(state.startedAt)) : 0 });

@@ -58,6 +58,12 @@ jobs:
           # says the host still behaves, never that it certifies. The certifying
           # cut is scripts/cut-public.sh, guard closed, run by an operator.
           OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'
+          # NO in-flight cap here, unlike scripts/cut-bundle.sh (OPENWOP_INFLIGHT_CAP=32). This is a
+          # deliberate difference: the Conformance step runs --max-workers 4, and
+          # v2-production-backpressure holds every slot while it probes, so parallel files would
+          # meet its 503s. Without a cap `production` is not advertised and that scenario is
+          # `inapplicable` in CI; the cut (--max-workers 1) witnesses it, and test/backpressure.test.ts
+          # covers the behaviour on every push.
           # RFC 0199 (suite >= 2.36.0): the suite's OAuth authorization-server doubles
           # listen on loopback, and the host's token request goes through its own egress
           # guard (src/oauth.ts tokenRequest), which refuses them unless this is set. The
@@ -129,6 +135,7 @@ jobs:
         env:
           OPENWOP_V1_RETIRED: '1'
           OPENWOP_WEBHOOK_ALLOW_PRIVATE: 'true'
+          # No OPENWOP_INFLIGHT_CAP: see the note on the first lane.
           # RFC 0199 (suite >= 2.36.0): the suite's OAuth authorization-server doubles
           # listen on loopback, and the host's token request goes through its own egress
           # guard (src/oauth.ts tokenRequest), which refuses them unless this is set. The

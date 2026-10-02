@@ -117,6 +117,8 @@ class TokenBucket {
 export class Router {
   private readonly routes: Route[] = [];
   private readonly buckets = new Map<string, TokenBucket>();
+  /** Authenticated requests being served now (the `production.backpressure` cap counts these). */
+  private inflight = 0;
 
   constructor(private readonly host: Host) {}
 
@@ -299,6 +301,17 @@ export class Router {
         bodyBuf = Buffer.concat(chunks);
         return bodyBuf;
       };
+      // conformance.md §Production profile, `backpressure`: at capacity the host answers
+      // `503 service_unavailable` with `Retry-After`, and nothing else (errors.md §Retry timing).
+      // Only authenticated operations take a slot, so discovery and the OpenAPI document
+      // answer under load. A slot is held until the response closes, which for an event
+      // stream is when the client goes away.
+      const cap = this.host.config.inflightCap;
+      if (cap !== null && matched.auth) {
+        if (this.inflight >= cap) throw err('service_unavailable', 'the host is at capacity', undefined, { 'Retry-After': String(this.host.config.backpressureRetryAfterSeconds) });
+        this.inflight++;
+        res.once('close', () => { this.inflight--; });
+      }
       const authed = matched.auth ? await authenticate(this.host, req) : null;
       // RFC 0200 §B.1 / auth.md §Scopes — the endpoint-level scope check, before the
       // handler runs and therefore before any resource is looked up: a caller that lacks

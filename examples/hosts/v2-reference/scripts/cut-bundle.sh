@@ -104,12 +104,17 @@ trap cleanup EXIT
 # kill rows leave nothing behind that a later cut should inherit.
 # (The port is OPENWOP_PORT. This script used to pass it positionally, which the
 # host has never read — it only worked because 3838 is also the default.)
+# conformance.md §Production profile, `backpressure`: the cut advertises an in-flight cap so
+# `v2-production-backpressure` can saturate it. 32 is above anything else the suite holds open at
+# once under --max-workers 1 (the saturation leg itself opens 32 event streams), so no other
+# scenario meets a 503. A cap low enough to be hit elsewhere would fail those rows, not this one.
+INFLIGHT_CAP="${OPENWOP_INFLIGHT_CAP:-32}"
 SUP_LOG="$(mktemp -t v2ref-supervisor.XXXXXX)"
 CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 # RFC 0199 §C.2: the host advertises oauth.credentialInterrupt only with an https
 # public base; under PUBLIC=1 that is the host tunnel (suite: OPENWOP_HOST_PUBLIC_URL).
 OPENWOP_PUBLIC_BASE_URL="${OPENWOP_HOST_PUBLIC_URL:-}" \
-OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 \
+OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 OPENWOP_INFLIGHT_CAP="$INFLIGHT_CAP" \
 OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_OAUTH_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
 OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" \
   node scripts/supervisor.mjs --restart-ms 1000 --log "$SUP_LOG" >/tmp/cut-host.log 2>&1 &
