@@ -100,7 +100,9 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // host-services.md §`httpClient`: the guarded client behind the reserved safeFetch probe node (safe-fetch.ts).
     httpClient: record('witnessable-gated', { ...HTTP_CLIENT, methods: [...HTTP_CLIENT.methods], safeFetch: {} }),
     // runs.md §`budget` section: the one dimension this host counts (budget.ts). `run` is the only scope with a wire surface.
-    budget: record('witnessable-gated', { dimensions: [...BUDGET_DIMENSIONS], enforce: 'hard', scopes: ['run'] }),
+    // RFC 0231: `onExhaustion` names the behaviours served — `fail` only (budget.ts refuses `interrupt`). Advertised
+    // once the installed contract defines the facet; before that the refusal is a stated deviation (README).
+    budget: record('witnessable-gated', { dimensions: [...BUDGET_DIMENSIONS], enforce: 'hard', scopes: ['run'], ...(host.artifacts.budgetOnExhaustionFacet ? { onExhaustion: ['fail'] } : {}) }),
     limits: stable('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
     eventLog: record('claims-check', { crossEngineOrdering: { orderingModel: 'global-sequencer' } }),
     interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),

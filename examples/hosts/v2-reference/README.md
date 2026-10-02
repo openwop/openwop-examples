@@ -104,7 +104,7 @@ Three optional families, added so the suite's v2 witnesses for them run against 
 Not claimed, and refused or ignored as stated:
 
 - `tokens`, `cost`, `retries` and `model` are not in `dimensions`. The host calls no model and retries no node, so limits on them are accepted and never enforced.
-- `onExhaustion: "interrupt"` is refused at create with `422 capability_not_provided`. The spec defines no facet for declining it, so this is a deviation: the host does not raise a budget-extending approval and says so instead of ignoring the field.
+- `onExhaustion: "interrupt"` is refused at create with `422 capability_not_provided`: the host does not raise a budget-extending approval. RFC 0231 gives this a facet, `budget.onExhaustion`; the host advertises `["fail"]` as soon as the installed `@openwop/spec-artifacts` defines it (2.45.6+). On an earlier pin the facet cannot be advertised, and the refusal is a deviation from a contract that has no way to decline the value.
 
 **`httpClient`** (`host-services.md` §`httpClient`, `src/safe-fetch.ts`). Advertised as `{ ssrfGuard: true, maxResponseBodyBytes: 1048576, requestTimeoutMs: 5000, methods: ["GET"], safeFetch: {} }`.
 

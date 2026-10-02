@@ -41,6 +41,8 @@ export interface SpecArtifacts {
   readonly peerAliases: ReadonlyMap<string, AliasRow>;
   /** RFC 0204: the installed `mcp` facet defines `client` (`ctx.mcp` is part of the contract this host ships). */
   readonly mcpClientFacet: boolean;
+  /** RFC 0231: the installed contract defines `budget.onExhaustion` (the exhaustion behaviours a host serves). */
+  readonly budgetOnExhaustionFacet: boolean;
   /** RFC 0204: the installed `ToolDescriptor` defines `annotations` (the MCP ToolAnnotations projection). */
   readonly toolAnnotations: boolean;
   /** RFC 0202: the installed `a2a` facet defines `agentCards` (per-agent A2A cards over the agent inventory). */
@@ -118,6 +120,7 @@ export function loadArtifacts(): SpecArtifacts {
     registeredOrgs: new Set<string>(Object.keys(declaration.extensions ?? {})),
     peerAliases,
     mcpClientFacet: caps.properties['mcp']?.properties?.['client'] !== undefined,
+    budgetOnExhaustionFacet: caps.properties['budget']?.properties?.['onExhaustion'] !== undefined,
     toolAnnotations: descriptor.properties['annotations'] !== undefined,
     agentCardsFacet: caps.properties['a2a']?.properties?.['agentCards'] !== undefined,
     auditLogIntegrityFamily: caps.properties['auditLogIntegrity'] !== undefined,
