@@ -32,6 +32,7 @@ export interface WorkflowNode {
   name?: string;
   config: Record<string, unknown>;
   inputs: Record<string, unknown>;
+  agent?: { agentId?: string };
 }
 
 export interface WorkflowDefinition {

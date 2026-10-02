@@ -3,6 +3,7 @@
  * keeps through the overlap (versioning.md §1.2). Handlers only; the loop is
  * executor.ts, the fork is replay.ts, the projections are effects.ts.
  */
+import { budgetRefusal } from './budget.js';
 import { inboundTraceContext } from './trace-context.js';
 import { EVENT_LOG_SCHEMA_VERSION, ENGINE_VERSION, HOST_ID, V1_RETIRED } from './config.js';
 import { compensationProjection, compensationStatusOf, effectsProjection, effectSeamManifest } from './effects.js';
@@ -34,7 +35,11 @@ export function validateConfigurable(c: unknown): void {
   if (obj['version'] !== 1) throw err('validation_error', 'configurable.version is REQUIRED and MUST be 1', { path: 'configurable.version' });
   for (const [k, v] of Object.entries(obj)) {
     if (k === 'version') continue;
-    if (k === 'budget') { if (v === null || typeof v !== 'object') throw err('validation_error', 'configurable.budget MUST be an object'); continue; }
+    if (k === 'budget') {
+      const refusal = budgetRefusal(v);
+      if (refusal !== null) throw err(refusal[0], refusal[1], { path: refusal[2] });
+      continue;
+    }
     if (k === 'extensions') {
       if (v === null || typeof v !== 'object') throw err('validation_error', 'configurable.extensions MUST be an object');
       for (const org of Object.keys(v as object)) if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(org)) throw err('validation_error', `configurable.extensions.${org} is not an org key`, { path: `configurable.extensions.${org}` });

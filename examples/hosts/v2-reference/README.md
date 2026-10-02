@@ -43,6 +43,7 @@ npm start                          # http://127.0.0.1:3838
 | `OPENWOP_HOST_BUILD` | `commit:dev` | `host.build` on the effect-seam manifest (`commit:<sha>` when cutting a bundle) |
 | `OPENWOP_WORKLOAD_TRUST_ROOTS` | `spiffe://example` | the `workload` lane's trust roots |
 | `OPENWOP_RATELIMIT_REQS_PER_MIN` | `1200` | per-credential token bucket → `429 rate_limited` + `Retry-After` |
+| `OPENWOP_INFLIGHT_CAP` / `OPENWOP_BACKPRESSURE_RETRY_AFTER_SECONDS` | _(unset)_ / `1` | **`production.backpressure`.** The most authenticated requests served at once. Set, the host advertises `production` with `backpressure { inflightCap, retryAfterSeconds }` and answers the next request `503 service_unavailable` with `Retry-After` and no `details.retryAfter*`. Unset, no cap is enforced and `production` is not advertised. `scripts/cut-bundle.sh` sets 32; CI does not (see "Budget and backpressure") |
 | `OPENWOP_CORS_ORIGINS` | _(unset: reflect any origin)_ | CORS (openwop#1763): unset or `*` echoes any `Origin` in `Access-Control-Allow-Origin` (never `*`, never credentials — bearer tokens are headers); `off` grants none; a comma list grants only those origins. A preflight (`OPTIONS` + `Access-Control-Request-Method`) for a served operation answers `204` admitting the method and reflecting `Access-Control-Request-Headers` |
 | `OPENWOP_FIXTURES_DIR` | _(the suite's `fixtures/`)_ | override the fixture catalog directory |
 | `OPENWOP_ENVELOPE_STRICTNESS` | `warn` | `envelopeStrictness.mode` for envelope admission below a kind's floor (events.md §"The envelope-kind catalog"); `strict` refuses with `unknown_schema_version` |
@@ -88,6 +89,29 @@ When the installed `@openwop/spec-artifacts` carries `ui.a2ui-surface` schema ve
 `getArtifact` (`GET /runs/{runId}/artifacts/{artifactId}`, `src/run-artifacts.ts`) resolves an artifact from the run's own log — the `artifact.created` event that named it and the node that produced it — so a fork reads the artifact its own log announced. It answers `application/json` with this host's object, or, when `Accept` ranks `application/a2a+json` above `application/json` (a tie keeps `application/json`) and the installed `@openwop/spec-artifacts` carries `schemas/v2/artifact.schema.json` (corpus 2.36.0+), an A2A `Artifact` whose `artifactId` is the path segment, the payload as one `data` Part (`mediaType: application/json`) and `metadata.openwop.artifactTypeId`, with `Vary: Accept`. It emits no `url` Part, so there is no pre-signed URL to outlive the caller's authorization (§A.3; the suite's `artifact-url-part-scoped` leg is honestly `inapplicable` here). The artifact comes from the corpus fixture `conformance-artifact-emit` (node type `conformance.artifact.emit`).
 
 `core.conversationGate` runs only as the conformance mock (`lifecycle: open-exchange-close`, `mockAutoResume`, fixture `conformance-conversation-lifecycle`): `conversation.opened` → one `conversation.exchanged` agent turn → `conversation.closed`. The turn carries `parts` (`[{ text }]`, with `content` the same text for readers that predate RFC 0205) only when the installed contract declares `parts` on the closed v2 turn def. `conversationPrimitive` is advertised on the v2 root only; the v1 document does not advertise it, lists no fixture that needs it, and a v1 `POST /v1/runs` naming one is refused `422 capability_required` (`details.requiredCapability: conversationPrimitive`, runs.md §Conversation).
+
+## Budget and backpressure
+
+Two optional families, added so the suite's v2 witnesses for them run against a real host.
+
+**`budget`** (`runs.md` §`budget` section, `src/budget.ts`). Advertised as `{ dimensions: ["toolCalls"], enforce: "hard", scopes: ["run"] }`.
+
+- The policy rides on `createRun` as `configurable.budget`. Consumption is the count of `agent.tool-called` events in the run's log, so a restart, a fork and a replay read the same number.
+- The host emits `budget.reserved` after `run.started`, `budget.consumed` per call, and `budget.threshold-crossed` once (default 80%).
+- A call that does not fit is never made: the host records `budget.exhausted` and `cap.breached` (`kind: "budget-tool-calls"`) and fails the run `budget_exhausted`; a failure edge on the node does not route around it. A budget that exactly covers the run is not exhausted.
+- The only node that spends is the reserved `core.conformance.mock-agent`, executed for the `conformance-budget-tool-calls` fixture and no other mock-agent fixture.
+
+Not claimed, and refused or ignored as stated:
+
+- `tokens`, `cost`, `retries` and `model` are not in `dimensions`. The host calls no model and retries no node, so limits on them are accepted and never enforced.
+- `onExhaustion: "interrupt"` is refused at create with `422 capability_not_provided`. The spec defines no facet for declining it, so this is a deviation: the host does not raise a budget-extending approval and says so instead of ignoring the field.
+
+**`production`** (`conformance.md` §Production profile, `src/router.ts`). Advertised only when `OPENWOP_INFLIGHT_CAP` is set, and then only the `backpressure` facet.
+
+- Each authenticated request takes a slot until its response closes; an event stream holds one for as long as the client stays. Discovery and the OpenAPI document take no slot.
+- What backs the family's own rules: this host passes `openwop-core-standard` (`conformance.md`); it serves the events channel and the poll; run state and the event log are in SQLite, with boot recovery of in-flight runs (RFC 0158); and with a cap set it writes one JSON line per terminal run to stdout (`run.terminal`: run id, tenant, status, error code, correlation id).
+- `retention` and `debugBundle` are not claimed. No OTel spans or metrics are exported (a SHOULD).
+- CI runs the suite with four workers and no cap, so `v2-production-backpressure` is `inapplicable` there: it holds every slot while it probes and would hand its 503s to the other files. The certifying cut runs one worker with the cap set. `test/backpressure.test.ts` covers the behaviour on every push.
 
 ## Negotiation through the overlap
 

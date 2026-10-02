@@ -43,9 +43,11 @@ import type { Host, WorkflowDefinition } from './host.js';
 export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
   // core.conformance.hold (pure) and core.conformance.side-effect (side-effecting by classification) are the
   // conformance-reserved typeIds the loop fixtures use (fixtures.md).
-  const executable = new Set(['core.noop', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
+  // `core.conformance.mock-agent` is executed for the budget fixture only: it is in `executable`, and only
+  // `conformance-budget-tool-calls` of the mock-agent fixtures is in `honoured` (runs.md §budget, budget.ts).
+  const executable = new Set(['core.conformance.mock-agent', 'core.noop', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
-  const honoured = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
+  const honoured = new Set(['conformance-budget-tool-calls', 'conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
     // semantics (open → one auto-resumed exchange → close) this host honours end to end.
     'conformance-artifact-emit', 'conformance-conversation-lifecycle',

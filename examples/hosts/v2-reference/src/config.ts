@@ -137,6 +137,13 @@ export interface HostConfig {
   readonly legacyInterruptSecret: string;
   readonly rateLimitPerMinute: number;
   /**
+   * conformance.md §Production profile, `backpressure`: the most authenticated requests served at
+   * once. `null` (the default) means no cap is enforced and `production` is not advertised.
+   */
+  readonly inflightCap: number | null;
+  /** The `Retry-After` a refusal at capacity carries, in seconds; advertised as `retryAfterSeconds`. */
+  readonly backpressureRetryAfterSeconds: number;
+  /**
    * CORS origin policy (openwop#1763). `reflect` (the default) grants any Origin
    * by echoing it, without credentials; `off` grants none; a list grants only
    * those origins. Bearer tokens ride in Authorization, not cookies, so no
@@ -261,6 +268,8 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     interruptKid: env('OPENWOP_INTERRUPT_KID', 'v2-reference-1'),
     legacyInterruptSecret: env('OPENWOP_LEGACY_INTERRUPT_SECRET', 'openwop-v1-legacy-interrupt-secret'),
     rateLimitPerMinute: envInt('OPENWOP_RATELIMIT_REQS_PER_MIN', 1200),
+    inflightCap: ((n) => (n >= 1 ? n : null))(envInt('OPENWOP_INFLIGHT_CAP', 0)),
+    backpressureRetryAfterSeconds: Math.min(86_400, Math.max(0, envInt('OPENWOP_BACKPRESSURE_RETRY_AFTER_SECONDS', 1))),
     corsOrigins: corsPolicy(process.env['OPENWOP_CORS_ORIGINS']),
     fixturesDir: process.env['OPENWOP_FIXTURES_DIR']?.trim() || null,
     hostBuild: build ? { kind: build[1] as HostConfig['hostBuild']['kind'], id: build[2] as string } : { kind: 'commit', id: 'dev' },
