@@ -8,6 +8,7 @@
  *                mirror, no profiles[], no supportedTransports, no grpc.
  * Both carry a standard ETag and honour If-None-Match with 304.
  */
+import { HTTP_CLIENT } from './safe-fetch.js';
 import { BUDGET_DIMENSIONS } from './budget.js';
 import { createHash, createPublicKey } from 'node:crypto';
 import { SERVED_VERSIONS, V1_RETIRED, ENGINE_VERSION, EVENT_LOG_SCHEMA_VERSION, EXTENSION_ORG, HOST_ID, HOST_NAME, HOST_VENDOR, HOST_VERSION, MIN_CLIENT_VERSION, PROTOCOL_VERSIONS, SEAMS_PROFILE_ID, BUNDLE_SIGNING_KEY_ID, KEYS_DIR, SESSION_ISSUER, API_KEY_ISSUER, V1_VERSION } from './config.js';
@@ -96,6 +97,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
       [`${EXTENSION_ORG}.host`]: { hostId: HOST_ID, build: c.hostBuild, webhookBackoffBaseMs: c.webhookBackoffBaseMs, deadLetterRetentionDays: c.webhookRetentionDays },
     },
     // ── core families ───────────────────────────────────────────────────
+    // host-services.md §`httpClient`: the guarded client behind the reserved safeFetch probe node (safe-fetch.ts).
+    httpClient: record('witnessable-gated', { ...HTTP_CLIENT, methods: [...HTTP_CLIENT.methods], safeFetch: {} }),
     // runs.md §`budget` section: the one dimension this host counts (budget.ts). `run` is the only scope with a wire surface.
     budget: record('witnessable-gated', { dimensions: [...BUDGET_DIMENSIONS], enforce: 'hard', scopes: ['run'] }),
     limits: stable('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
