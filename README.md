@@ -53,4 +53,4 @@ against the live registry at [`packs.openwop.dev`](https://packs.openwop.dev).
 
 ## License
 
-Apache-2.0 (see `LICENSE` in the spec corpus).
+Apache-2.0 (see [`LICENSE`](./LICENSE)).
