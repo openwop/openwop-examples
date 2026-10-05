@@ -232,6 +232,18 @@ export function v1Document(host: Host): Record<string, unknown> {
   };
 }
 
+/**
+ * `If-None-Match` as RFC 9110 §13.1.2 defines it (runs.md §Caching and
+ * encoding, RFC 0235): `*`, or a list of entity tags any of which matches
+ * `etag` under weak comparison — the `W/` prefix is ignored on either side.
+ * The caller evaluates it only where it would otherwise answer 2xx.
+ */
+export function ifNoneMatchMatches(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  const opaque = (t: string): string => t.trim().replace(/^W\//, '');
+  return header.split(',').some((t) => t.trim() === '*' || opaque(t) === opaque(etag));
+}
+
 export function etagOf(body: string): string {
   return `"${createHash('sha256').update(body).digest('hex').slice(0, 32)}"`;
 }

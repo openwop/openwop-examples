@@ -15,7 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadArtifacts } from './artifacts.js';
 import { loadConfig, type HostConfig, PKG_ROOT, SERVED_VERSIONS, V1_RETIRED } from './config.js';
-import { etagOf, v1Document, v2Document } from './discovery.js';
+import { etagOf, ifNoneMatchMatches, v1Document, v2Document } from './discovery.js';
 import { PRM_PATH, prmDocument } from './protected-resource.js';
 import { err } from './errors.js';
 import { ensureDefaultCredential } from './identity.js';
@@ -246,8 +246,7 @@ async function discovery(ctx: Ctx): Promise<Reply> {
   const text = JSON.stringify(doc);
   const etag = etagOf(text);
   const headers = { ETag: etag, 'Cache-Control': 'public, max-age=60' };
-  const inm = ctx.header('if-none-match');
-  if (inm !== null && inm.split(',').map((s) => s.trim()).includes(etag)) return { status: 304, headers };
+  if (ifNoneMatchMatches(ctx.header('if-none-match'), etag)) return { status: 304, headers };
   return { status: 200, raw: text, contentType: 'application/json; charset=utf-8', headers };
 }
 

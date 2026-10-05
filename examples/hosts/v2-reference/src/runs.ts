@@ -12,6 +12,7 @@ import { err } from './errors.js';
 import { applyPinDisposition, requestCancel, requestPause, requestResume, resolveAndResume, scheduleRun } from './executor.js';
 import { ownerOf, parseStreamModes, pollResponse, readEvents, streamRun } from './events.js';
 import { docForMajor, ownerForMajor } from './codemap.js';
+import { ifNoneMatchMatches } from './discovery.js';
 import { checkTenantBound, nowIso, NODE_ID, projectBoundId, tenantBound, VERSION, WORKFLOW_ID } from './ids.js';
 import { mintToken, payloadOf, verifyToken } from './interrupts.js';
 import { forkRun } from './replay.js';
@@ -278,7 +279,8 @@ async function getRun(ctx: Ctx): Promise<Reply> {
   const run = loadRun(ctx, ctx.params['runId'] as string);
   const body = { ...snapshotForMajor(ctx, run), runId: wireRunId(ctx, run.run_id) };
   const etag = `"seq-${ctx.host.store.lastSequence(run.run_id)}-${run.status}"`;
-  if (ctx.header('if-none-match') === etag) return { status: 304, headers: { ETag: etag } };
+  // loadRun above already refused a run the caller cannot read, so a 304 never stands in for that 404.
+  if (ifNoneMatchMatches(ctx.header('if-none-match'), etag)) return { status: 304, headers: { ETag: etag } };
   return { status: 200, body, headers: { ETag: etag } };
 }
 
