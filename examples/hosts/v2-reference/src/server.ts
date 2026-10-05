@@ -6,6 +6,7 @@
  *   npm start            → http://127.0.0.1:3838
  *   OPENWOP_API_KEY      → the default api-key credential (openwop-v2-dev-key)
  */
+import { attachHostEventSubscriber } from './host-events.js';
 import { createA2uiAdmission } from './a2ui.js';
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -250,18 +251,23 @@ async function discovery(ctx: Ctx): Promise<Reply> {
   return { status: 200, raw: text, contentType: 'application/json; charset=utf-8', headers };
 }
 
-/** events.md §Host events — the heartbeat channel at /host/events (content-free of run data). */
+/**
+ * events.md §Host events — `/host/events` carries the heartbeat messages and
+ * host events (RFC 0236). The liveness heartbeat is host-wide and carries no
+ * tenant's data, so it reaches every subscriber and has no `id:` (resumption
+ * belongs to durable host events). Host events reach only the caller's tenant.
+ */
 async function hostEvents(ctx: Ctx): Promise<Reply | typeof STREAMED> {
   ctx.res.writeHead(200, { ...ctx.responseHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-  let tick = 0;
   const send = (): void => {
     const payload = { heartbeatId: 'host-liveness', status: 'ok', changed: false };
     ctx.host.validate('heartbeat-evaluated', payload, 'heartbeat');
-    ctx.res.write(`id: ${tick++}\nevent: heartbeat.evaluated\ndata: ${JSON.stringify(payload)}\n\n`);
+    ctx.res.write(`event: heartbeat.evaluated\ndata: ${JSON.stringify(payload)}\n\n`);
   };
   send();
   const timer = setInterval(send, 5000);
-  ctx.res.on('close', () => clearInterval(timer));
+  const detach = ctx.subject !== null ? attachHostEventSubscriber(ctx.subject.tenant, ctx.res, ctx.header('last-event-id')) : () => undefined;
+  ctx.res.on('close', () => { clearInterval(timer); detach(); });
   return STREAMED;
 }
 

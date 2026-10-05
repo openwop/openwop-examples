@@ -17,6 +17,7 @@
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
  *   POST sample/oauth/{authorize-start,expire-refresh}   RFC 0199 — point a provider at the suite's AS double, then the PRODUCTION builder (oauth.ts)
  */
+import { hostEventTypes, publishHostEvent } from './host-events.js';
 import { inboundTraceContext } from './trace-context.js';
 import { createHash } from 'node:crypto';
 import { EVENT_SCHEMA_VERSION, SEAMS_PREFIX } from './config.js';
@@ -390,6 +391,22 @@ async function emitSurfaceRoute(ctx: Ctx): Promise<Reply> {
   return { status: 201, body: admitSurface(ctx.host, adm, run, body.envelope) };
 }
 
+/**
+ * RFC 0236 §G — produce one host event of an advertised type under the caller's
+ * tenant, through `publishHostEvent` (the same path any emitter would take).
+ */
+async function emitHostEventRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ type?: unknown; workspaceId?: unknown }>();
+  if (typeof body.type !== 'string' || !hostEventTypes(ctx.host).some((t) => t.type === body.type)) {
+    throw err('validation_error', `type MUST be an advertised host-event type (${hostEventTypes(ctx.host).map((t) => t.type).join(', ') || 'none advertised'})`, { field: 'type' });
+  }
+  if (body.workspaceId !== undefined && typeof body.workspaceId !== 'string') throw err('validation_error', 'workspaceId MUST be a string', { field: 'workspaceId' });
+  const tenant = ctx.subject?.tenant;
+  if (tenant === undefined) throw err('forbidden', 'the seam needs an authenticated caller; host events belong to a tenant');
+  const event = publishHostEvent(ctx.host, tenant, body.type, typeof body.workspaceId === 'string' ? body.workspaceId : undefined);
+  return { status: 202, body: { eventId: event.eventId } };
+}
+
 export function seamRoutes(host: Host): Route[] {
   if (!host.config.seamsProfile) return [];
   const p = SEAMS_PREFIX;
@@ -397,6 +414,7 @@ export function seamRoutes(host: Host): Route[] {
     route('POST', `${p}/sample/event-log/seed`, true, seedEra2),
     route('POST', `${p}/sample/event-log/append`, true, appendEra2),
     route('POST', `${p}/sample/webhooks/receive`, true, receive),
+    route('POST', `${p}/sample/host-events/emit`, true, emitHostEventRoute),
     route('POST', `${p}/sample/webhooks/rotation-overlap`, true, rotationOverlapRoute),
     route('POST', `${p}/sample/effect-seams/fire`, true, fireEffectSeamRoute),
     route('POST', `${p}/sample/test/idempotency/effect-retry`, true, effectRetryRoute),

@@ -8,6 +8,7 @@
  *                mirror, no profiles[], no supportedTransports, no grpc.
  * Both carry a standard ETag and honour If-None-Match with 304.
  */
+import { hostEventTypes } from './host-events.js';
 import { HTTP_CLIENT } from './safe-fetch.js';
 import { BUDGET_DIMENSIONS } from './budget.js';
 import { createHash, createPublicKey } from 'node:crypto';
@@ -119,6 +120,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     compensation: record('seam-gated', { profileVersion: '1', orderingModels: ['reverse-completion'], manualIntervention: false }),
     feedback: record('witnessable-gated', { targets: ['run', 'event', 'node'], signals: ['rating', 'correction', 'label', 'flag'] }),
     heartbeat: record('witnessable-gated', { minIntervalSec: 5, maxRuntimeMs: 1000, deliveryChannel: '/host/events' }),
+    // RFC 0236: only the conformance seam's example types, so advertised only when the seams profile is mounted and the contract defines the family.
+    ...(hostEventTypes(host).length > 0 ? { hostEvents: record('witnessable-gated', { types: hostEventTypes(host) }) } : {}),
     // interop.md: the facets carry every required field; the seams profile drives the exchange (§22/§23) and the audit event is on the host's own log.
     // RFC 0208: the host is also an A2A 1.0 SERVER (profile a2a-1.0, the card at
     // agentCardUrl, one JSON-RPC interface — a2a-server.ts) and an MCP 2026-07-28
