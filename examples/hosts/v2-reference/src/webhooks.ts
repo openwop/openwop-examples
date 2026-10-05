@@ -19,6 +19,7 @@ import { checkTenantBound, nowIso, tenantBound } from './ids.js';
 import type { AppendedEvent, Host } from './host.js';
 import type { DeliveryRow, WebhookRow } from './store.js';
 import { docForMajor, v1TypeOf } from './codemap.js';
+import { hostEventTypes, type HostEvent } from './host-events.js';
 
 export function sign(secret: string, timestamp: string, rawBody: string): string {
   return createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
@@ -115,6 +116,12 @@ export async function registerWebhook(host: Host, tenant: string, body: Record<s
       const mapped = host.artifacts.codemap.get(e);
       if (mapped === undefined && !isVendor(e)) throw err('validation_error', `${e} is not a registered v1 event type`, { type: e });
       return mapped ?? e;
+    }
+    // RFC 0236 §E: an advertised durable host-event type may be subscribed; an ephemeral one never is.
+    const hostType = hostEventTypes(host).find((t) => t.type === e);
+    if (hostType !== undefined) {
+      if (hostType.delivery === 'ephemeral') throw err('validation_error', `${e} is an ephemeral host-event type and is never delivered through webhooks (RFC 0236 §C)`, { type: e });
+      return e;
     }
     if (!host.artifacts.v2EventTypes.has(e) && !isVendor(e)) throw err('validation_error', `${e} is not a registered v2 event type`, { type: e });
     return e;
@@ -262,8 +269,8 @@ function readDeadLetterCursor(raw: string, webhookId: string): { updatedAt: stri
 /** `eventId` lives in the stored delivery body; §B.1 forbids returning the body, not reading one field out of it. */
 function eventIdOf(row: DeliveryRow): string {
   try {
-    const parsed = JSON.parse(row.body) as { event?: { eventId?: unknown } };
-    const id = parsed.event?.eventId;
+    const parsed = JSON.parse(row.body) as { event?: { eventId?: unknown }; hostEvent?: { eventId?: unknown } };
+    const id = parsed.event?.eventId ?? parsed.hostEvent?.eventId;
     if (typeof id === 'string' && id.length > 0) return id;
   } catch { /* a body that will not parse cannot yield an id */ }
   // Deterministic and unique per delivery, so the field is never absent on a
@@ -304,7 +311,8 @@ export function deadLetterProjection(
     deliveries: page.map((d) => ({
       deliveryId: d.delivery_id,
       webhookId: d.webhook_id,
-      runId: d.run_id,
+      // RFC 0236 §E: a host-event delivery names no run, so its record carries no runId.
+      ...(d.run_id !== '' ? { runId: d.run_id } : {}),
       eventId: eventIdOf(d),
       eventType: d.event_type,
       attempts: d.attempts,
@@ -359,6 +367,19 @@ export function subscribeFanout(host: Host): void {
       host.store.insertDelivery({ delivery_id: tenantBound(e.run.tenant), webhook_id: sub.webhook_id, tenant: e.run.tenant, run_id: e.run.runId, sequence: e.doc.sequence, event_type: e.doc.type, body, attempts: 0, next_at: Date.now(), state: 'pending', last_status: null, last_error: null, created_at: nowIso(), updated_at: nowIso(), message_id: optedIn(sub) ? mintMessageId() : null });
     }
   });
+}
+
+/**
+ * RFC 0236 §E — a durable host event to every major-2 subscription of its tenant
+ * that names its type. The body is `{ hostEvent }`; the row carries no run, so
+ * `run_id` is empty and `sequence` is -1 (the dead-letter read renders it as a
+ * host record). Signing, retries and dead letters are the run path's.
+ */
+export function fanOutHostEvent(host: Host, tenant: string, event: HostEvent): void {
+  for (const sub of host.store.webhooksForTenant(tenant)) {
+    if (sub.contract_major !== 2 || !(JSON.parse(sub.events_json) as string[]).includes(event.type)) continue;
+    host.store.insertDelivery({ delivery_id: tenantBound(tenant), webhook_id: sub.webhook_id, tenant, run_id: '', sequence: -1, event_type: event.type, body: JSON.stringify({ hostEvent: event }), attempts: 0, next_at: Date.now(), state: 'pending', last_status: null, last_error: null, created_at: nowIso(), updated_at: nowIso(), message_id: optedIn(sub) ? mintMessageId() : null });
+  }
 }
 
 async function attempt(host: Host, d: DeliveryRow): Promise<void> {
