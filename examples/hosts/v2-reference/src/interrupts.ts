@@ -18,6 +18,7 @@ import type { InterruptRow, RunRow } from './store.js';
 import { principalRef } from './identity.js';
 import { taintedSurfaces } from './a2ui.js';
 import { credentialResolves, subjectKey } from './oauth.js';
+import { rosterOf } from './council.js';
 import { ownerOf } from './events.js';
 
 export interface InterruptPayload {
@@ -168,6 +169,15 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
     const required = Array.isArray(schema['required']) ? (schema['required'] as string[]) : [];
     for (const k of required) if ((resumeValue as Record<string, unknown>)[k] === undefined) throw err('validation_error', `resumeValue fails resumeSchema (missing ${k})`, { missing: k });
     if (type === 'string' && typeof resumeValue !== 'string') throw err('validation_error', 'resumeValue fails resumeSchema (string expected)');
+  }
+  if (payload.kind === 'conversation.exchange') {
+    // conversation.md §multiPartyConversation (RFC 0239 §B): a turn whose speaker is off the
+    // gate's roster is refused before anything is claimed, so the interrupt stays open.
+    const rv = resumeValue as Record<string, unknown>;
+    if (typeof rv['speakerId'] !== 'string' || typeof rv['content'] !== 'string') throw err('validation_error', 'a conversation turn resolves with { role, speakerId, content } strings', { field: 'resumeValue' });
+    const node = host.workflows.get(run.workflow_id)?.nodes.find((n) => n.id === row.node_id);
+    const roster = node === undefined ? [] : rosterOf(node);
+    if (roster.length > 0 && !roster.includes(rv['speakerId'])) throw err('conversation_speaker_not_participant', `${rv['speakerId']} is not on this conversation's roster`, { speakerId: rv['speakerId'] });
   }
   if (payload.kind === 'clarification') {
     const questions = Array.isArray(data['questions']) ? (data['questions'] as Array<{ id?: string }>) : [];

@@ -15,6 +15,7 @@ import { docForMajor, ownerForMajor } from './codemap.js';
 import { ifNoneMatchMatches } from './discovery.js';
 import { checkTenantBound, nowIso, NODE_ID, projectBoundId, tenantBound, VERSION, WORKFLOW_ID } from './ids.js';
 import { mintToken, payloadOf, verifyToken } from './interrupts.js';
+import { MAX_PARTICIPANTS, councilSupported, oversizedRoster } from './council.js';
 import { forkRun } from './replay.js';
 import { route, STREAMED, withIdempotency, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host } from './host.js';
@@ -201,6 +202,9 @@ async function createRun(ctx: Ctx): Promise<Reply> {
     // runs.md §Conversation: core.conversationGate needs conversationPrimitive, which only the v2
     // root advertises (the v1 document does not), so the v1 contract refuses it here.
     if (ctx.major === 1 && def.nodes.some((n) => n.typeId === 'core.conversationGate')) throw err('capability_required', 'core.conversationGate needs conversationPrimitive, which this host does not advertise on the 1.x contract', { requiredCapability: 'conversationPrimitive' });
+    // conversation.md §multiPartyConversation (RFC 0239 §C): a roster over the advertised ceiling is refused here, never truncated.
+    const oversized = ctx.major === 2 && councilSupported(ctx.host) ? oversizedRoster(def) : null;
+    if (oversized !== null) throw err('conversation_roster_exceeded', `core.conversationGate ${oversized.nodeId} names ${oversized.size} participants; this host's multiPartyConversation.maxParticipants is ${MAX_PARTICIPANTS}`, { maxParticipants: MAX_PARTICIPANTS, nodeId: oversized.nodeId, participants: oversized.size });
     const scopeId = typeof body['scopeId'] === 'string' ? body['scopeId'] : null;
     if (ctx.header('openwop-dedup') === 'enforce' && scopeId !== null) {
       const activeRun = ctx.host.store.activeRunForScope(subject.tenant, scopeId);
