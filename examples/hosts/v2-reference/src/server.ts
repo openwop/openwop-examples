@@ -64,7 +64,10 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
     // Cycles (the scheduler re-opens a node reached again over an edge, bounded by recursionLimit):
     // RFC 0223 G11 — a rejected gate looped back is asked again under a new key; and openwop#1718 —
     // a replay resolves each execution of a looped side-effecting node by its own ordinal.
-    'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop']);
+    'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop',
+    // RFC 0239 (council.ts): a roster the caller's turns are checked against, and the
+    // 64-member roster refused at creation. Executed only as councils when the contract registers the codes.
+    'conformance-multi-party-council', 'conformance-multi-party-council-oversize']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];

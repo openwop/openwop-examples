@@ -26,6 +26,7 @@ import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
 import { CATALOG, credentialInterruptAdvertised, oauthSupported } from './oauth.js';
 import { mcpClientAdvertised } from './mcp-client.js';
 import { agentCardsAdvertised } from './agents.js';
+import { MAX_PARTICIPANTS, councilSupported } from './council.js';
 
 const SINCE = '2.0';
 /**
@@ -169,6 +170,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
   // (open → one auto-resumed exchange → close, executor.ts runConversation). RFC 0205 §B: its
   // turn carries A2A `parts` when the installed contract declares them.
   if (conversationAdvertised(host)) doc['conversationPrimitive'] = record('claims-check');
+  // conversation.md §multiPartyConversation (RFC 0239, council.ts): the roster seat, its refusals, and a ceiling below the suite's 64-member fixture.
+  if (councilSupported(host)) doc['multiPartyConversation'] = record('witnessable-gated', { maxParticipants: MAX_PARTICIPANTS });
   // RFC 0199 (oauth.md): the host is an OAuth authorization-code client for the suite's synthetic
   // providers (oauth.ts). Advertised only when the installed contract carries RFC 0199. Every
   // provider sends PKCE S256 (so no `pkce` member is needed); none has a static issuer — the seam

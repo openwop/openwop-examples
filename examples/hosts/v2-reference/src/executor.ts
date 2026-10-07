@@ -19,6 +19,7 @@ import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPay
 import { nowIso } from './ids.js';
 import { McpClientError, createCtxMcp } from './mcp-client.js';
 import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
+import { conversationIdFor, councilSupported, isCouncilGate, rosterOf } from './council.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 import { CREDENTIAL_RESUME_SCHEMA, OAUTH_USE_TYPE, acquireForNode, connectUrlFor, credentialInterruptAdvertised, oauthSupported, provider as oauthProvider, setGrantCompletedHandler } from './oauth.js';
@@ -279,6 +280,25 @@ function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<st
 type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload };
 
 /**
+ * conversation.md §multiPartyConversation (RFC 0239, council.ts): a council gate
+ * opens its conversation with the configured roster and waits on one
+ * `conversation.exchange` turn the caller supplies. The turn is checked against
+ * the roster at resolve (interrupts.ts) and recorded by applyResolution.
+ */
+function openCouncil(host: Host, run: RunRow, node: WorkflowNode, visit: number): NodeResult {
+  const conversationId = conversationIdFor(run, node.id);
+  appendEvent(host, run, 'conversation.opened', { conversationId, participants: rosterOf(node).map((agentId) => ({ agentId })) }, { nodeId: node.id });
+  return {
+    suspend: {
+      kind: 'conversation.exchange',
+      key: `${keyRunId(host, run)}:${node.id}:${visit}`,
+      data: { conversationId, prompt: String(node.config['prompt'] ?? 'The council takes its turn.'), turnIndex: 0 },
+      resumeSchema: { type: 'object', required: ['speakerId', 'content'], properties: { role: { type: 'string' }, speakerId: { type: 'string' }, content: { type: 'string' } } },
+    },
+  };
+}
+
+/**
  * RFC 0199 / oauth.md — a node declaring `auth { type: oauth2, provider, scopes }`
  * (fixture conformance-credential). The host resolves the credential host-side
  * (refreshing it through the provider's token endpoint); the node sees a
@@ -429,6 +449,7 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       return { outputs: { artifactId } };
     }
     case 'core.conversationGate':
+      if (isCouncilGate(node) && councilSupported(host)) return openCouncil(host, run, node, visit);
       return { outputs: runConversation(host, run, node) };
     case OAUTH_USE_TYPE:
       return useCredential(host, run, node, visit);
@@ -862,6 +883,16 @@ function applyResolution(host: Host, run: RunRow, nodeId: string, resolved: Reco
   }
   if (error !== null) return failNode(host, run, host.workflows.get(run.workflow_id), nodeId, error, 1);
   appendEvent(host, run, 'node.resumed', { nodeId, interruptId: resolved['interruptId'], resumeValue }, { nodeId });
+  if (resolved['kind'] === 'conversation.exchange') {
+    // RFC 0239: the accepted council turn, then the close — one exchange per gate.
+    const rv = (resumeValue ?? {}) as { role?: unknown; speakerId?: unknown; content?: unknown };
+    const conversationId = conversationIdFor(run, nodeId);
+    const speakerId = String(rv.speakerId);
+    const turn: Record<string, unknown> = { messageId: `${conversationId}:0:${speakerId}`, from: speakerId, content: String(rv.content), ts: Date.now(), role: rv.role === 'user' ? 'user' : 'agent', turnIndex: 0, speakerId };
+    if (corpusHasParts(host)) turn['parts'] = [{ text: turn['content'] }];
+    appendEvent(host, run, 'conversation.exchanged', { conversationId, turnIndex: 0, turn }, { nodeId });
+    appendEvent(host, run, 'conversation.closed', { conversationId, reason: 'goal-reached', turnCount: 1 }, { nodeId });
+  }
   appendEvent(host, run, 'node.completed', { nodeId, outputs: { resumeValue } }, { nodeId });
   return 'resumed';
 }
