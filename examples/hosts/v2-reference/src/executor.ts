@@ -14,12 +14,13 @@ import { appendEvent, ownerOf, readEvents } from './events.js';
 import { buildCompensationPlan, compensationState, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
 import { SafeFetchRejection, safeFetch } from './safe-fetch.js';
 import { BudgetExhausted, afterToolCall, beforeToolCall, reserveBudget } from './budget.js';
-import { err } from './errors.js';
+import { HostError, err } from './errors.js';
 import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPayload } from './interrupts.js';
 import { nowIso } from './ids.js';
 import { McpClientError, createCtxMcp } from './mcp-client.js';
 import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
 import { NONDETERMINISM_TYPE, runNondeterminism } from './nondeterminism.js';
+import { relay } from './purpose.js';
 import { conversationIdFor, councilSupported, isCouncilGate, rosterOf } from './council.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
@@ -358,6 +359,18 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       const out = runNondeterminism(host, run, node, execution);
       if ('missing' in out) throw new NodeFailure('replay_source_missing', `the replay source recorded no draw for ${node.id} execution ${execution}`);
       return { outputs: out };
+    }
+    case 'core.conformance.a2a-invoke': {
+      // fixtures.md §conformance-purpose-relay: forward the inbound A2A message, re-emitting its label
+      // (security-defaults.md §Onward hops). A replay fork never re-sends it.
+      if (node.config?.['forward'] !== 'inbound-message') throw new NodeFailure('node_config_invalid', 'this host runs core.conformance.a2a-invoke only with config.forward: "inbound-message"');
+      if (run.fork_mode === 'replay') return { outputs: { relayed: 0, suppressed: true } };
+      try {
+        return { outputs: await relay(host, run) };
+      } catch (e) {
+        if (e instanceof HostError) throw new NodeFailure(e.code, e.message, e.details);
+        throw e;
+      }
     }
     case 'core.conformance.side-effect':
       // Side-effecting by classification: suppressed in a replay (effects.ts).

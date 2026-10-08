@@ -47,7 +47,8 @@ import { TERMINAL, type Host, type Subject } from './host.js';
 import type { RunRow } from './store.js';
 import { A2A_FACET } from './interop.js';
 import { createPushConfig, deletePushConfig, getPushConfig, listPushConfigs, PushError, subscribePush } from './a2a-push.js';
-import { agentCardsAdvertised, agentRefOf, resolveRoutingValue, type InventoryEntry } from './agents.js';
+import { agentCardsAdvertised, agentRefOf, resolveRoutingValue, routedWorkflows, type InventoryEntry } from './agents.js';
+import { RELAY_WORKFLOW_ID, inboundLabel, inboundOf } from './purpose.js';
 
 export const A2A_SERVER_PROFILES = ['a2a-1.0'] as const;
 export const AGENT_CARD_PATH = '/.well-known/agent-card.json';
@@ -136,8 +137,8 @@ export async function waitForSettle(host: Host, runId: string, capMs: number): P
 
 // ── the Agent Card ─────────────────────────────────────────────────────────
 
-function routedWorkflow(host: Host): { id: string; name: string; description: string; tags: string[] } | null {
-  const def = host.workflows.get(host.config.a2aWorkflowId);
+function routedWorkflow(host: Host, workflowId: string = host.config.a2aWorkflowId): { id: string; name: string; description: string; tags: string[] } | null {
+  const def = host.workflows.get(workflowId);
   if (!def) return null;
   const tags = Array.isArray(def.metadata?.['tags']) ? (def.metadata['tags'] as unknown[]).map(String) : [];
   return { id: def.id, name: def.name ?? def.id, description: def.description ?? `Runs the OpenWOP workflow ${def.id}`, tags: tags.length > 0 ? tags : ['openwop'] };
@@ -178,6 +179,8 @@ export function perAgentCard(host: Host, baseUrl: string, e: InventoryEntry): Re
     name: e.persona,
     description: e.description ?? e.label,
     version: e.packVersion,
+    // RFC 0202 §C.4: one skill per workflow the host routes to THIS agent.
+    skills: routedWorkflows(host, e.agentId).flatMap((id) => { const k = routedWorkflow(host, id); return k === null ? [] : [k]; }),
     supportedInterfaces: (hostCard['supportedInterfaces'] as Array<Record<string, unknown>>).map((i) => ({ ...i, tenant: r })),
   };
 }
@@ -292,11 +295,16 @@ async function sendMessage(host: Host, subject: Subject, params: Record<string, 
   }
 
   if (m.taskId === undefined) {
-    const def = host.workflows.get(host.config.a2aWorkflowId);
+    const workflowId = agent !== null ? routedWorkflows(host, agent.agentId)[0] : host.config.a2aWorkflowId;
+    const def = workflowId === undefined ? undefined : host.workflows.get(workflowId);
     if (!def) throw new RpcError(A2A_ERR.UNSUPPORTED_OPERATION, 'the interface routes no skill on this host');
     const inputs = Object.fromEntries(def.variables.filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue]));
+    // security-defaults.md §Onward hops: the relay forwards this message's text, carrying its label.
+    const label = inboundLabel(m.metadata);
+    if (label === 'invalid') throw new RpcError(A2A_ERR.INVALID_PARAMS, 'metadata.openwop.permittedPurposes MUST be an array of strings');
+    const a2aInbound = def.id === RELAY_WORKFLOW_ID ? { a2aInbound: inboundOf(m.parts, label) } : {};
     // RFC 0202 §D.9: a run started through R is created in the CALLER'S tenant of record, the agent pinned.
-    const run = acceptRun(host, subject, def.id, inputs, { transport: 'a2a', ...(agent !== null ? { agent: agentRefOf(agent) } : {}), ...(trace !== null ? { traceContext: trace } : {}) }, null);
+    const run = acceptRun(host, subject, def.id, inputs, { transport: 'a2a', ...(agent !== null ? { agent: agentRefOf(agent) } : {}), ...(trace !== null ? { traceContext: trace } : {}), ...a2aInbound }, null);
     const contextId = m.contextId ?? `ctx-${opaque()}`;
     host.store.insertA2ATask({ run_id: run.run_id, tenant: subject.tenant, context_id: contextId, history_json: '[]', created_at: nowIso() });
     appendHistory(host, run, m);

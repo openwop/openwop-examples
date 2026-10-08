@@ -35,6 +35,7 @@ import { HOST_VERSION } from './config.js';
 import { err } from './errors.js';
 import type { Host, Subject } from './host.js';
 import { route, type Route } from './router.js';
+import { RELAY_AGENT_ID, RELAY_WORKFLOW_ID, relayAvailable } from './purpose.js';
 
 const PACK_NAME = 'core.conformance.agent-pack';
 const PACK_VERSION = '1.0.0';
@@ -59,6 +60,12 @@ const BUNDLED: ReadonlyMap<string, BundledAgent> = new Map([
     description: 'Resolves a request by running the approval workflow the host routes to it.', modelClass: 'chat',
     systemPrompt: 'You are the resolver. OPENWOP-CONFORMANCE-CANARY-0202-PROMPT', handoff: { taskSchema: handoffSchema('task'), returnSchema: handoffSchema('return') },
   }],
+  // fixtures.md §conformance-purpose-relay: the agent whose card routes only the relay.
+  [RELAY_AGENT_ID, {
+    agentId: RELAY_AGENT_ID, persona: 'Relay', label: 'Relay',
+    description: 'Relays an inbound message to a configured A2A peer, carrying its purpose label.', modelClass: 'chat',
+    systemPrompt: 'You are the relay. OPENWOP-CONFORMANCE-CANARY-0202-PROMPT', handoff: { taskSchema: handoffSchema('task'), returnSchema: handoffSchema('return') },
+  }],
   ['core.conformance.agent-pack.escalator', {
     agentId: 'core.conformance.agent-pack.escalator', persona: 'Escalator', label: 'Escalator',
     description: 'Escalates a request by running the approval workflow the host routes to it.', modelClass: 'chat',
@@ -74,7 +81,7 @@ export function agentCardsAdvertised(host: Host): boolean {
 /** tenant → the agentIds installed there (RFC 0074 `installScope: "tenant"`). */
 function installsOf(host: Host, tenant: string): string[] {
   const c = host.config;
-  if (tenant === c.tenant) return ['core.conformance.agent-pack.resolver'];
+  if (tenant === c.tenant) return relayAvailable(host) ? ['core.conformance.agent-pack.resolver', RELAY_AGENT_ID] : ['core.conformance.agent-pack.resolver'];
   if (c.tenantBApiKey !== null && tenant === c.tenantB) return ['core.conformance.agent-pack.escalator'];
   return [];
 }
@@ -84,9 +91,14 @@ export function routingValue(host: Host, agentId: string): string {
   return `ag-${createHmac('sha256', host.config.agentCardSecret).update(`${agentId}\n${HOST_VERSION}`).digest('base64url').slice(0, 22)}`;
 }
 
-/** The workflows the host routes to an agent (RFC 0202 §B.3: none ⇒ no `a2aTenant`, no card). */
-export function routedWorkflows(host: Host): string[] {
-  return host.workflows.has(host.config.a2aWorkflowId) ? [host.config.a2aWorkflowId] : [];
+/**
+ * The workflows the host routes to an agent (RFC 0202 §B.3: none ⇒ no `a2aTenant`, no card).
+ * One per agent, since an A2A message carries no skill selector: the relay agent
+ * routes the purpose relay, every other agent the host card's workflow.
+ */
+export function routedWorkflows(host: Host, agentId?: string): string[] {
+  const id = agentId === RELAY_AGENT_ID ? RELAY_WORKFLOW_ID : host.config.a2aWorkflowId;
+  return host.workflows.has(id) ? [id] : [];
 }
 
 export interface InventoryEntry extends Record<string, unknown> {
@@ -99,7 +111,7 @@ function entryOf(host: Host, a: BundledAgent): InventoryEntry {
     agentId: a.agentId, persona: a.persona, label: a.label, description: a.description, modelClass: a.modelClass,
     packName: PACK_NAME, packVersion: PACK_VERSION, toolAllowlist: [], hasHandoffSchemas: true,
   };
-  if (agentCardsAdvertised(host) && routedWorkflows(host).length > 0) e.a2aTenant = routingValue(host, a.agentId);
+  if (agentCardsAdvertised(host) && routedWorkflows(host, a.agentId).length > 0) e.a2aTenant = routingValue(host, a.agentId);
   return e;
 }
 
