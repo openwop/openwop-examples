@@ -3,9 +3,11 @@
  *
  * A host event's envelope has no `runId` and no `sequence`; it rides
  * `/host/events` beside the heartbeat messages. This host emits no host event
- * of its own, so it advertises only the two `example.*` types the conformance
- * seam (§G) drives — one durable, one ephemeral — and only when the seams
- * profile is mounted and the installed contract defines the family.
+ * of its own. It advertises the two `example.*` types the conformance seam (§G)
+ * drives when the seams profile is mounted, and the two reserved `host-test.*`
+ * types RFC 0241's `POST /host/events/test` emits when the installed contract
+ * defines that operation — so a seam-free deployment still lets the suite cause
+ * a host event through a protocol operation.
  *
  * - Tenant scope (§D): a frame reaches only subscribers of the event's tenant.
  * - Ephemeral (§C): never stored, framed without `id:`, never replayed on
@@ -20,9 +22,12 @@ import type { ServerResponse } from 'node:http';
 import type { Host } from './host.js';
 import { nowIso } from './ids.js';
 import { fanOutHostEvent } from './webhooks.js';
+import { err } from './errors.js';
 
 export const EXAMPLE_DURABLE = 'example.thing-happened';
 export const EXAMPLE_EPHEMERAL = 'example.thing-noticed';
+/** RFC 0241 §A — the reserved test types, one per delivery class. */
+export const TEST_TYPES = { durable: 'host-test.durable-triggered', ephemeral: 'host-test.ephemeral-triggered' } as const;
 const RETAINED = 500;
 
 export interface HostEventType { readonly type: string; readonly delivery: 'durable' | 'ephemeral' }
@@ -37,8 +42,11 @@ export interface HostEvent {
 
 /** The advertised `hostEvents.types[]`; empty means the family is not advertised. */
 export function hostEventTypes(host: Host): HostEventType[] {
-  if (!host.artifacts.hostEventsFamily || !host.config.seamsProfile) return [];
-  return [{ type: EXAMPLE_DURABLE, delivery: 'durable' }, { type: EXAMPLE_EPHEMERAL, delivery: 'ephemeral' }];
+  if (!host.artifacts.hostEventsFamily) return [];
+  const out: HostEventType[] = [];
+  if (host.config.seamsProfile) out.push({ type: EXAMPLE_DURABLE, delivery: 'durable' }, { type: EXAMPLE_EPHEMERAL, delivery: 'ephemeral' });
+  if (host.artifacts.hostEventTrigger) out.push({ type: TEST_TYPES.durable, delivery: 'durable' }, { type: TEST_TYPES.ephemeral, delivery: 'ephemeral' });
+  return out;
 }
 
 interface Subscriber { readonly tenant: string; readonly res: ServerResponse }
@@ -72,7 +80,8 @@ export function publishHostEvent(host: Host, tenant: string, type: string, works
     timestamp: nowIso(),
     delivery: advertised.delivery,
     ...(workspaceId !== undefined ? { workspaceId } : {}),
-    payload: { emittedBy: 'conformance-seam' },
+    // RFC 0241 §A.1: a test event carries an empty payload.
+    payload: type === TEST_TYPES.durable || type === TEST_TYPES.ephemeral ? {} : { emittedBy: 'conformance-seam' },
   };
   host.validate('host-event', event, `host event ${type}`);
   for (const s of subscribers) if (s.tenant === tenant) s.res.write(frame(event));
@@ -82,4 +91,24 @@ export function publishHostEvent(host: Host, tenant: string, type: string, works
     fanOutHostEvent(host, tenant, event);
   }
   return event;
+}
+
+/**
+ * RFC 0241 §B — `POST /host/events/test`: emit one test event of the requested class's
+ * reserved type, under the caller's tenant (and `workspaceId`, which must be bound to
+ * it), through `publishHostEvent`, the path every host event takes.
+ */
+export function emitTestHostEvent(host: Host, tenant: string, body: { delivery?: unknown; workspaceId?: unknown }): { eventId: string; type: string } {
+  const delivery = body.delivery;
+  if (delivery !== 'durable' && delivery !== 'ephemeral') throw err('validation_error', 'delivery MUST be durable or ephemeral', { field: 'delivery' });
+  const type = TEST_TYPES[delivery];
+  if (!hostEventTypes(host).some((t) => t.type === type)) throw err('validation_error', `${type} is not listed in hostEvents.types`, { field: 'delivery' });
+  let workspaceId: string | undefined;
+  if (body.workspaceId !== undefined) {
+    if (typeof body.workspaceId !== 'string' || body.workspaceId.length === 0) throw err('validation_error', 'workspaceId MUST be a non-empty string', { field: 'workspaceId' });
+    if (!body.workspaceId.startsWith(`${tenant}/`)) throw err('id_tenant_mismatch', 'workspaceId belongs to another tenant', { field: 'workspaceId' });
+    workspaceId = body.workspaceId;
+  }
+  const event = publishHostEvent(host, tenant, type, workspaceId);
+  return { eventId: event.eventId, type };
 }

@@ -70,6 +70,8 @@ const SCOPE_BY_ROUTE: Readonly<Record<string, string>> = {
   'GET /webhooks/{webhookId}/dead-letters': 'webhooks:manage',
   'GET /host/effect-seams': 'runs:read',
   'GET /host/events': 'runs:read',
+  // RFC 0241 §B: causing deliveries to the tenant's subscribers is a write.
+  'POST /host/events/test': 'webhooks:manage',
   'GET /audit/verify': 'audit:read',
 };
 

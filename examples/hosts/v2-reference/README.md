@@ -94,6 +94,10 @@ When the installed `@openwop/spec-artifacts` carries `ui.a2ui-surface` schema ve
 
 A gate with `participants` and `mockAutoResume: false` (fixture `conformance-multi-party-council`) is a council: `conversation.opened` carries the roster, and the run waits on one `conversation.exchange` interrupt resumed with `{ role, speakerId, content }`. A turn whose `speakerId` is off the roster is refused `422 conversation_speaker_not_participant` before anything is claimed, so the interrupt stays open; a member's turn records `conversation.exchanged` and `conversation.closed`. `multiPartyConversation.maxParticipants` is 8, below the suite's 64-member `conformance-multi-party-council-oversize`, which is refused at run creation with `422 conversation_roster_exceeded` and never truncated (`src/council.ts`). The family is advertised only when the installed contract registers both codes.
 
+## Host events and the test trigger (RFCs 0236, 0241)
+
+`/host/events` carries the heartbeat messages and host events, each frame reaching only its tenant (`src/host-events.ts`). This host emits no host event of its own. With the seams profile it lists the two `example.*` types the §G seam drives. When the installed contract defines `POST /host/events/test` (RFC 0241, corpus 2.45.26+), it also lists `host-test.durable-triggered` and `host-test.ephemeral-triggered` and serves the trigger under `webhooks:manage`. The trigger emits an empty-payload event of the requested class to the caller's tenant through the same publish path, so a seams-off deployment still lets the suite witness every RFC 0236 leg. Without a listed `host-test.*` type the route answers `404`.
+
 ## Budget, backpressure and the guarded HTTP client
 
 Three optional families, added so the suite's v2 witnesses for them run against a real host.

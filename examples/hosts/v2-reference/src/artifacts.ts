@@ -45,6 +45,8 @@ export interface SpecArtifacts {
   readonly budgetOnExhaustionFacet: boolean;
   /** RFC 0236: the installed contract defines the `hostEvents` family (and so the host-event envelope). */
   readonly hostEventsFamily: boolean;
+  /** RFC 0241 — the installed contract defines `emitTestHostEvent` (`POST /host/events/test`). */
+  readonly hostEventTrigger: boolean;
   /** RFC 0204: the installed `ToolDescriptor` defines `annotations` (the MCP ToolAnnotations projection). */
   readonly toolAnnotations: boolean;
   /** RFC 0202: the installed `a2a` facet defines `agentCards` (per-agent A2A cards over the agent inventory). */
@@ -124,6 +126,7 @@ export function loadArtifacts(): SpecArtifacts {
     mcpClientFacet: caps.properties['mcp']?.properties?.['client'] !== undefined,
     budgetOnExhaustionFacet: caps.properties['budget']?.properties?.['onExhaustion'] !== undefined,
     hostEventsFamily: caps.properties['hostEvents'] !== undefined,
+    hostEventTrigger: readFileSync(join(root, 'spec', 'v2', 'path-manifest.json'), 'utf8').includes('"/host/events/test"'),
     toolAnnotations: descriptor.properties['annotations'] !== undefined,
     agentCardsFacet: caps.properties['a2a']?.properties?.['agentCards'] !== undefined,
     auditLogIntegrityFamily: caps.properties['auditLogIntegrity'] !== undefined,
