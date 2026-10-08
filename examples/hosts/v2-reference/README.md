@@ -199,12 +199,15 @@ v2-reference/
 ├── scripts/keygen.mjs    Ed25519 keypair for bundle v3
 ├── keys/                 host.pub.pem (committed), host.pem (gitignored)
 ├── bundle-v3.json        the signed certification bundle
+├── bundle-v3-seams-off.json  the same host cut with the seams profile off (RFC 0241 evidence)
 └── conformance.md        the honest tally
 ```
 
 ## Cutting the bundle
 
 `./scripts/cut-bundle.sh` cuts [`bundle-v3.json`](./bundle-v3.json): it starts the host and the synthetic IdP, **preflights every opt-in fixture**, then runs the suite with `--target-major 2 --require-behavior --max-workers 1 --certify`. `PREFLIGHT_ONLY=1 ./scripts/cut-bundle.sh` checks the fixtures and stops.
+
+`OPENWOP_SEAMS_PROFILE=false ./scripts/cut-public.sh` cuts [`bundle-v3-seams-off.json`](./bundle-v3-seams-off.json): the posture a production host has, with no `/conformance/seams/*` route. RFC 0236's event-causing legs then run through RFC 0241's `POST /host/events/test`. The seam-driven legs, including the v1-coexistence ones, record `inapplicable`, so `check-cut-gates` reports Coexistence `blocked` for this bundle; `bundle-v3.json` remains the host's canonical evidence.
 
 The preflight is the point. RFC 0168 §E.1 denies certification for ANY `blocked` row, and a dead fixture records `blocked` exactly like a broken host would — so the two are indistinguishable in the result. The script therefore drives a real SCIM provision and a real SAML assertion and asserts the `link` field is present, checking the FIELD each scenario reads rather than that a process exists. It also sets `OPENWOP_WEBHOOK_ALLOW_PRIVATE=1`, which is required and not optional: the suite's webhook receivers and the IdP are both on loopback and the egress guard refuses them without it.
 
