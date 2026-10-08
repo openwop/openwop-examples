@@ -150,6 +150,13 @@ ENT=$(curl -fsS "$IDP/metadata" | node -e 'let s="";process.stdin.on("data",d=>s
 [ -n "$ENT" ] || { echo "PREFLIGHT FAIL: synthetic IdP served no entityID at $IDP"; exit 1; }
 echo "  idp entityID: $ENT"
 
+# With the seams profile off (OPENWOP_SEAMS_PROFILE=false: the seam-free
+# posture a production host has, e.g. for RFC 0241's evidence) the SCIM and SAML
+# seams are not mounted, so there is nothing to preflight: their scenarios gate
+# on the seams profile and record `inapplicable`.
+if [ "${OPENWOP_SEAMS_PROFILE:-true}" = "false" ]; then
+  echo "  seams profile OFF: scim/saml seam preflight skipped"
+else
 NID="preflight-$RANDOM$RANDOM"
 SC=$(curl -s -o /tmp/cut-scim-preflight.json -w '%{http_code}' -X POST "$BASE/conformance/seams/sample/auth/scim/provision" \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -H 'OpenWOP-Version: 2.0' \
@@ -163,6 +170,7 @@ LINKED=$(curl -s -X POST "$BASE/conformance/seams/sample/auth/saml/validate" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).link?1:0)}catch{console.log(0)}})')
 [ "$LINKED" = "1" ] || { echo "PREFLIGHT FAIL: saml validate carried no \`link\` — v2-subject-link-record would record \`blocked\`"; exit 1; }
 echo "  saml validate carries link: $LINKED"
+fi
 
 # The A2A / MCP fakes are started IN-PROCESS by the suite, opt-in on these env
 # names — a cut without them records `blocked` on the negotiation and MRTR rows,
