@@ -27,6 +27,7 @@ import { CATALOG, credentialInterruptAdvertised, oauthSupported } from './oauth.
 import { mcpClientAdvertised } from './mcp-client.js';
 import { agentCardsAdvertised } from './agents.js';
 import { MAX_PARTICIPANTS, councilSupported } from './council.js';
+import { DECLARED_SOURCES, nondeterminismAdvertised } from './nondeterminism.js';
 
 const SINCE = '2.0';
 /**
@@ -171,6 +172,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
   // turn carries A2A `parts` when the installed contract declares them.
   if (conversationAdvertised(host)) doc['conversationPrimitive'] = record('claims-check');
   // conversation.md §multiPartyConversation (RFC 0239, council.ts): the roster seat, its refusals, and a ceiling below the suite's 64-member fixture.
+  // replay.md §Declared nondeterminism (RFC 0237, nondeterminism.ts): the declared sources, each recorded and replayed.
+  if (nondeterminismAdvertised(host)) doc['nondeterminismPolicy'] = record('witnessable-gated', { declared: true, sources: [...DECLARED_SOURCES] });
   if (councilSupported(host)) doc['multiPartyConversation'] = record('witnessable-gated', { maxParticipants: MAX_PARTICIPANTS });
   // RFC 0199 (oauth.md): the host is an OAuth authorization-code client for the suite's synthetic
   // providers (oauth.ts). Advertised only when the installed contract carries RFC 0199. Every

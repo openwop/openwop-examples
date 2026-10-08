@@ -98,6 +98,10 @@ A gate with `participants` and `mockAutoResume: false` (fixture `conformance-mul
 
 `/host/events` carries the heartbeat messages and host events, each frame reaching only its tenant (`src/host-events.ts`). This host emits no host event of its own. With the seams profile it lists the two `example.*` types the §G seam drives. When the installed contract defines `POST /host/events/test` (RFC 0241, corpus 2.45.26+), it also lists `host-test.durable-triggered` and `host-test.ephemeral-triggered` and serves the trigger under `webhooks:manage`. The trigger emits an empty-payload event of the requested class to the caller's tenant through the same publish path, so a seams-off deployment still lets the suite witness every RFC 0236 leg. Without a listed `host-test.*` type the route answers `404`.
 
+## Declared nondeterminism (RFC 0237)
+
+`nondeterminismPolicy` lists `clock`, `random` and `id` (`src/nondeterminism.ts`); `env` is not listed because this host reads no configuration during a run. The reserved node `core.conformance.nondeterminism` (fixture `conformance-nondeterminism`) draws one value per listed source and records it where it is read, in its own `node.completed` outputs. A `replay` fork takes the value its source recorded for the same node and execution, following a chain of replays; a branch draws afresh. A completed run's `outputs` are its sink nodes' latest outputs, merged in definition order.
+
 ## Budget, backpressure and the guarded HTTP client
 
 Three optional families, added so the suite's v2 witnesses for them run against a real host.

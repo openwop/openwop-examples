@@ -19,6 +19,7 @@ import { mintInterrupt, payloadOf, tallyVote, validateResolve, type InterruptPay
 import { nowIso } from './ids.js';
 import { McpClientError, createCtxMcp } from './mcp-client.js';
 import { ARTIFACT_EMIT_TYPE, artifactIdFor, corpusHasParts } from './run-artifacts.js';
+import { NONDETERMINISM_TYPE, runNondeterminism } from './nondeterminism.js';
 import { conversationIdFor, councilSupported, isCouncilGate, rosterOf } from './council.js';
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
@@ -280,6 +281,24 @@ function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<st
 type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload };
 
 /**
+ * events.md §run.completed — a completed run's `outputs`: the latest outputs of each sink
+ * node (one with no outgoing edge), merged in definition order. A workflow whose sinks
+ * produce nothing completes with `{}`.
+ */
+function runOutputs(host: Host, run: RunRow, def: WorkflowDefinition): Record<string, unknown> {
+  const sources = new Set(links(def).map((l) => l.from));
+  const latest = new Map<string, Record<string, unknown>>();
+  for (const e of readEvents(host, run)) {
+    if (e.type !== 'node.completed') continue;
+    const p = e.payload as { nodeId?: unknown; outputs?: unknown };
+    if (typeof p.nodeId === 'string' && p.outputs !== null && typeof p.outputs === 'object') latest.set(p.nodeId, p.outputs as Record<string, unknown>);
+  }
+  const out: Record<string, unknown> = {};
+  for (const n of def.nodes) if (!sources.has(n.id)) Object.assign(out, latest.get(n.id) ?? {});
+  return out;
+}
+
+/**
  * conversation.md §multiPartyConversation (RFC 0239, council.ts): a council gate
  * opens its conversation with the configured roster and waits on one
  * `conversation.exchange` turn the caller supplies. The turn is checked against
@@ -333,6 +352,12 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
       const ms = Math.max(0, Math.min(60_000, Number(resolveInput(node, 'delayMs', run, def) ?? 1000)));
       const r = await sleepUnlessCancelled(host, run.run_id, ms);
       return r === 'done' ? { outputs: { sleptMs: ms } } : r;
+    }
+    case NONDETERMINISM_TYPE: {
+      // replay.md §Declared nondeterminism (RFC 0237): draw each listed source, or replay the recorded draw.
+      const out = runNondeterminism(host, run, node, execution);
+      if ('missing' in out) throw new NodeFailure('replay_source_missing', `the replay source recorded no draw for ${node.id} execution ${execution}`);
+      return { outputs: out };
     }
     case 'core.conformance.side-effect':
       // Side-effecting by classification: suppressed in a replay (effects.ts).
@@ -754,7 +779,7 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   run = host.store.getRun(runId) as RunRow;
   if (TERMINAL.has(run.status)) return; // the other delivery of this work already ended it
   if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
-  appendEvent(host, run, 'run.completed', { outputs: {}, durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
+  appendEvent(host, run, 'run.completed', { outputs: runOutputs(host, run, def), durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
   host.store.invalidateInterruptsForRun(run.run_id);
   setStatus(host, run, 'completed', { completed_at: nowIso(), current_node_id: null });
 }

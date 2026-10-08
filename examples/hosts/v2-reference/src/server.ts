@@ -24,6 +24,7 @@ import { openapiHandler } from './openapi.js';
 import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
 import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
+import { NONDETERMINISM_TYPE } from './nondeterminism.js';
 import { startA2APush, a2aServerRoutes } from './a2a-server.js';
 import { agentRoutes } from './agents.js';
 import { mcpServerRoutes } from './mcp-server.js';
@@ -46,7 +47,7 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
   // conformance-reserved typeIds the loop fixtures use (fixtures.md).
   // `core.conformance.mock-agent` is executed for the budget fixture only: it is in `executable`, and only
   // `conformance-budget-tool-calls` of the mock-agent fixtures is in `honoured` (runs.md §budget, budget.ts).
-  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE]);
+  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-safefetch-probe', 'conformance-budget-tool-calls', 'conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
@@ -67,7 +68,9 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
     'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop',
     // RFC 0239 (council.ts): a roster the caller's turns are checked against, and the
     // 64-member roster refused at creation. Executed only as councils when the contract registers the codes.
-    'conformance-multi-party-council', 'conformance-multi-party-council-oversize']);
+    'conformance-multi-party-council', 'conformance-multi-party-council-oversize',
+    // RFC 0237 (nondeterminism.ts): one value per listed source, reproduced by a replay fork.
+    'conformance-nondeterminism']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   const dirs: string[] = [];
