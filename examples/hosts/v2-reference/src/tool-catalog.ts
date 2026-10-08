@@ -100,14 +100,28 @@ async function mcpTools(host: Host): Promise<ToolDescriptor[]> {
   return out;
 }
 
+/**
+ * The catalog last served, per host. An MCP server that fails one `tools/list`
+ * contributes nothing to that read, so without this a tool the list showed a
+ * moment ago could 404 by id on the next read (measured: a tunnelled cut,
+ * 2026-10-08). tool-catalog.md §B: a listed tool is one the caller may see.
+ */
+const lastListed = new WeakMap<Host, { at: number; tools: ToolDescriptor[] }>();
+const RECENT_MS = 60_000;
+
 export async function listTools(host: Host): Promise<ToolDescriptor[]> {
   const all = [...nodeTools(host), ...(await mcpTools(host))];
   const withAnnotations = host.artifacts.toolAnnotations ? all.map((d) => ({ ...d, annotations: annotationsOf(d) })) : all;
-  return withAnnotations.sort((a, b) => (a.toolId < b.toolId ? -1 : a.toolId > b.toolId ? 1 : 0));
+  const tools = withAnnotations.sort((a, b) => (a.toolId < b.toolId ? -1 : a.toolId > b.toolId ? 1 : 0));
+  lastListed.set(host, { at: Date.now(), tools });
+  return tools;
 }
 
 export async function getTool(host: Host, toolId: string): Promise<ToolDescriptor> {
-  const hit = (await listTools(host)).find((d) => d.toolId === toolId);
+  const previous = lastListed.get(host);
+  const hit = (await listTools(host)).find((d) => d.toolId === toolId)
+    // A live re-list that missed it: serve what the catalog showed within RECENT_MS.
+    ?? (previous !== undefined && Date.now() - previous.at < RECENT_MS ? previous.tools.find((d) => d.toolId === toolId) : undefined);
   if (!hit) throw err('not_found', `no tool ${JSON.stringify(toolId)} in this caller's catalog`);
   return hit;
 }
