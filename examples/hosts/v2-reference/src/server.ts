@@ -6,7 +6,7 @@
  *   npm start            → http://127.0.0.1:3838
  *   OPENWOP_API_KEY      → the default api-key credential (openwop-v2-dev-key)
  */
-import { attachHostEventSubscriber } from './host-events.js';
+import { attachHostEventSubscriber, emitTestHostEvent, hostEventTypes } from './host-events.js';
 import { createA2uiAdmission } from './a2ui.js';
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -148,6 +148,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     route('GET', PRM_PATH, false, async (ctx) => ({ status: 200, body: prmDocument(ctx.host, ctx.baseUrl), headers: { 'Cache-Control': 'public, max-age=60' } }), 'both'),
     route('GET', '/v1/openapi.json', false, openapi, 1),
     route('GET', '/host/events', true, hostEvents),
+    route('POST', '/host/events/test', true, testHostEvent),
     route('GET', '/packs', true, async (ctx) => ({ status: 200, body: installedPacks(ctx.host, 'prod') })),
     route('POST', '/webhooks', true, async (ctx) => {
       const text = await ctx.text();
@@ -260,6 +261,14 @@ async function discovery(ctx: Ctx): Promise<Reply> {
  * tenant's data, so it reaches every subscriber and has no `id:` (resumption
  * belongs to durable host events). Host events reach only the caller's tenant.
  */
+/** RFC 0241 §B — served exactly when a `host-test.*` type is listed; otherwise `404`. */
+async function testHostEvent(ctx: Ctx): Promise<Reply> {
+  if (!hostEventTypes(ctx.host).some((t) => t.type.startsWith('host-test.'))) throw err('not_found', 'this host lists no host-test.* type, so it serves no test trigger (RFC 0241 §B.1)');
+  const tenant = ctx.subject?.tenant;
+  if (tenant === undefined) throw err('forbidden', 'host events belong to a tenant; the trigger needs an authenticated caller');
+  return { status: 202, body: emitTestHostEvent(ctx.host, tenant, await ctx.json<{ delivery?: unknown; workspaceId?: unknown }>()) };
+}
+
 async function hostEvents(ctx: Ctx): Promise<Reply | typeof STREAMED> {
   ctx.res.writeHead(200, { ...ctx.responseHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   const send = (): void => {
