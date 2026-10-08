@@ -17,8 +17,8 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@openwop/openwop-conformance": "2.45.27",
-    "@openwop/spec-artifacts": "2.45.27",
+    "@openwop/openwop-conformance": "2.45.28",
+    "@openwop/spec-artifacts": "2.45.28",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "ajv": "^8.17.0",
