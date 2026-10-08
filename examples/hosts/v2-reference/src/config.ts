@@ -164,6 +164,8 @@ export interface HostConfig {
   readonly tenantB: string;
   /** RFC 0208 — the one workflow the A2A interface routes (A2A 1.0 Message carries no skill selector). */
   readonly a2aWorkflowId: string;
+  /** fixtures.md §conformance-purpose-relay — the A2A peer the relay forwards to; null = no relay, no `purposePropagation`. */
+  readonly a2aRelayPeerUrl: string | null;
   /**
    * RFC 0214 — advertise `a2a.pushNotifications` and serve the four push-config methods
    * (`OPENWOP_A2A_PUSH`, default off). Off, all four answer -32003 — the unadvertised refusal leg.
@@ -281,6 +283,7 @@ export function loadConfig(overrides: Partial<HostConfig> = {}): HostConfig {
     tenantBApiKey: process.env['OPENWOP_TENANT_B_API_KEY']?.trim() || null,
     tenantB: env('OPENWOP_TENANT_B', DEFAULT_TENANT_B),
     a2aWorkflowId: env('OPENWOP_A2A_WORKFLOW_ID', 'conformance-approval'),
+    a2aRelayPeerUrl: process.env['OPENWOP_A2A_RELAY_PEER_URL']?.trim() || null,
     a2aPush: envBool('OPENWOP_A2A_PUSH', false),
     mcpStateSecret: env('OPENWOP_MCP_STATE_SECRET', randomBytes(32).toString('hex')),
     publicBaseUrl: process.env['OPENWOP_PUBLIC_BASE_URL']?.trim() || null,

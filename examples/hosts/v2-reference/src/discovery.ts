@@ -28,6 +28,7 @@ import { mcpClientAdvertised } from './mcp-client.js';
 import { agentCardsAdvertised } from './agents.js';
 import { MAX_PARTICIPANTS, councilSupported } from './council.js';
 import { DECLARED_SOURCES, nondeterminismAdvertised } from './nondeterminism.js';
+import { relayAvailable } from './purpose.js';
 
 const SINCE = '2.0';
 /**
@@ -41,7 +42,7 @@ const SINCE = '2.0';
 const EXPERIMENTAL_UNTIL = '2.1';
 
 /** Fixtures whose semantics are v2 claims (the v2 quorum rule; cycles), never offered on the v1 document. */
-const V2_ONLY_FIXTURES = new Set(['conformance-interrupt-quorum', 'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop']);
+const V2_ONLY_FIXTURES = new Set(['conformance-interrupt-quorum', 'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop', 'conformance-purpose-relay']);
 
 export function advertisedFixtures(host: Host, major: 1 | 2 = 2): string[] {
   // The v1 contract refuses core.conversationGate (conversationPrimitive is a v2-root claim here),
@@ -174,6 +175,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
   // conversation.md §multiPartyConversation (RFC 0239, council.ts): the roster seat, its refusals, and a ceiling below the suite's 64-member fixture.
   // replay.md §Declared nondeterminism (RFC 0237, nondeterminism.ts): the declared sources, each recorded and replayed.
   if (nondeterminismAdvertised(host)) doc['nondeterminismPolicy'] = record('witnessable-gated', { declared: true, sources: [...DECLARED_SOURCES] });
+  // security-defaults.md §Onward hops: the relay is this host's one onward hop for labelled data (purpose.ts).
+  if (relayAvailable(host)) doc['purposePropagation'] = record('witnessable-gated', { propagatesOnward: true });
   if (councilSupported(host)) doc['multiPartyConversation'] = record('witnessable-gated', { maxParticipants: MAX_PARTICIPANTS });
   // RFC 0199 (oauth.md): the host is an OAuth authorization-code client for the suite's synthetic
   // providers (oauth.ts). Advertised only when the installed contract carries RFC 0199. Every

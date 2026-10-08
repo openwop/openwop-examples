@@ -94,13 +94,13 @@ export function audit(host: Host, run: RunRow, protocol: Protocol, peerUrl: stri
  */
 const INTEROP_TIMEOUT_MS = 20_000;
 type PeerReply = { status: number; json: Record<string, unknown> | null; transportError?: string };
-async function post(host: Host, url: string, headers: Record<string, string>, body: unknown): Promise<PeerReply> {
+export async function post(host: Host, url: string, headers: Record<string, string>, body: unknown): Promise<PeerReply> {
   const res = await guardedRequest(new URL(url), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: INTEROP_TIMEOUT_MS, allowPrivate: host.config.webhookAllowPrivate });
   let json: Record<string, unknown> | null = null;
   try { json = res.body ? (JSON.parse(res.body) as Record<string, unknown>) : null; } catch { json = null; }
   return { status: res.status, json, ...(res.error === undefined ? {} : { transportError: res.error }) };
 }
-async function get(host: Host, url: string, headers: Record<string, string>): Promise<PeerReply> {
+export async function get(host: Host, url: string, headers: Record<string, string>): Promise<PeerReply> {
   const res = await guardedRequest(new URL(url), { method: 'GET', headers: { Accept: 'application/json', ...headers }, timeoutMs: INTEROP_TIMEOUT_MS, allowPrivate: host.config.webhookAllowPrivate });
   let json: Record<string, unknown> | null = null;
   try { json = res.body ? (JSON.parse(res.body) as Record<string, unknown>) : null; } catch { json = null; }

@@ -80,6 +80,10 @@ SHA="$(git rev-parse HEAD)"
 MCP_FAKE_PORT="${OPENWOP_MCP_FAKE_SERVER_PORT:-3841}"
 MCP_FOR_HOST="${OPENWOP_MCP_FAKE_SERVER_URL:-http://127.0.0.1:${MCP_FAKE_PORT}}"
 MCP_SERVERS="conformance=${MCP_FOR_HOST},conformance.down=http://127.0.0.1:9"
+# fixtures.md §conformance-purpose-relay: the relay forwards to the suite's fake A2A
+# peer, which the host must also know before it boots, so its port is pinned the same way.
+A2A_FAKE_PORT="${OPENWOP_A2A_FAKE_PEER_PORT:-3842}"
+A2A_FOR_HOST="${OPENWOP_A2A_FAKE_PEER_URL:-http://127.0.0.1:${A2A_FAKE_PORT}}"
 
 cleanup() { [ -n "${HOST_PID:-}" ] && kill "$HOST_PID" 2>/dev/null; [ -n "${IDP_PID:-}" ] && kill "$IDP_PID" 2>/dev/null; true; }
 trap cleanup EXIT
@@ -116,7 +120,7 @@ CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 OPENWOP_PUBLIC_BASE_URL="${OPENWOP_HOST_PUBLIC_URL:-}" \
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 OPENWOP_INFLIGHT_CAP="$INFLIGHT_CAP" \
 OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_OAUTH_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
-OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" \
+OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" OPENWOP_A2A_RELAY_PEER_URL="$A2A_FOR_HOST" \
   node scripts/supervisor.mjs --restart-ms 1000 --log "$SUP_LOG" >/tmp/cut-host.log 2>&1 &
 HOST_PID=$!
 # `< /dev/null` would end the IdP's stdin at once; it exits with its parent ONLY
@@ -197,7 +201,7 @@ if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture ans
 # record this host rightly does not advertise (#104), so they run again.
 # An opt-out is a CLAIM, not a hiding place: it appears in the bundle.
 OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported \
-OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 \
+OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 OPENWOP_A2A_FAKE_PEER_PORT="$A2A_FAKE_PORT" \
 OPENWOP_MCP_FAKE_SERVER=true OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_FAKE_PORT" \
 OPENWOP_TEST_SAML_IDP_URL="$IDP_FOR_HOST" \
 OPENWOP_HOST_RELAXATIONS="$RELAXATIONS" \

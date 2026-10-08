@@ -73,6 +73,8 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
     'conformance-nondeterminism']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
+  // fixtures.md §conformance-purpose-relay: only with a relay peer to forward to (purpose.ts).
+  if (config.a2aRelayPeerUrl !== null) { executable.add('core.conformance.a2a-invoke'); honoured.add('conformance-purpose-relay'); }
   const dirs: string[] = [];
   if (config.fixturesDir) dirs.push(config.fixturesDir);
   try {
