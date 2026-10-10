@@ -27,6 +27,7 @@ import { err } from './errors.js';
 export const EXAMPLE_DURABLE = 'example.thing-happened';
 export const EXAMPLE_EPHEMERAL = 'example.thing-noticed';
 /** RFC 0241 §A — the reserved test types, one per delivery class. */
+export const NEGOTIATION_DECIDED = 'negotiation.decided';
 export const TEST_TYPES = { durable: 'host-test.durable-triggered', ephemeral: 'host-test.ephemeral-triggered' } as const;
 const RETAINED = 500;
 
@@ -46,6 +47,8 @@ export function hostEventTypes(host: Host): HostEventType[] {
   const out: HostEventType[] = [];
   if (host.config.seamsProfile) out.push({ type: EXAMPLE_DURABLE, delivery: 'durable' }, { type: EXAMPLE_EPHEMERAL, delivery: 'ephemeral' });
   if (host.artifacts.hostEventTrigger) out.push({ type: TEST_TYPES.durable, delivery: 'durable' }, { type: TEST_TYPES.ephemeral, delivery: 'ephemeral' });
+  // RFC 0242 §B.3: this host serves A2A and MCP inbound, so it lists the runless negotiation record.
+  if (host.artifacts.negotiationHostEvent) out.push({ type: NEGOTIATION_DECIDED, delivery: 'durable' });
   return out;
 }
 
@@ -71,7 +74,7 @@ export function attachHostEventSubscriber(tenant: string, res: ServerResponse, l
 }
 
 /** Produce one host event of an advertised type under `tenant` (the §G seam's production path). */
-export function publishHostEvent(host: Host, tenant: string, type: string, workspaceId: string | undefined): HostEvent {
+export function publishHostEvent(host: Host, tenant: string, type: string, workspaceId: string | undefined, payload?: Record<string, unknown>): HostEvent {
   const advertised = hostEventTypes(host).find((t) => t.type === type);
   if (advertised === undefined) throw new Error(`unadvertised host-event type ${type}`);
   const event: HostEvent = {
@@ -81,7 +84,7 @@ export function publishHostEvent(host: Host, tenant: string, type: string, works
     delivery: advertised.delivery,
     ...(workspaceId !== undefined ? { workspaceId } : {}),
     // RFC 0241 §A.1: a test event carries an empty payload.
-    payload: type === TEST_TYPES.durable || type === TEST_TYPES.ephemeral ? {} : { emittedBy: 'conformance-seam' },
+    payload: payload ?? (type === TEST_TYPES.durable || type === TEST_TYPES.ephemeral ? {} : { emittedBy: 'conformance-seam' }),
   };
   host.validate('host-event', event, `host event ${type}`);
   for (const s of subscribers) if (s.tenant === tenant) s.res.write(frame(event));

@@ -47,6 +47,10 @@ export interface SpecArtifacts {
   readonly hostEventsFamily: boolean;
   /** RFC 0241 — the installed contract defines `emitTestHostEvent` (`POST /host/events/test`). */
   readonly hostEventTrigger: boolean;
+  /** RFC 0242 §B — the installed contract reserves `negotiation.decided` as a durable host-event type. */
+  readonly negotiationHostEvent: boolean;
+  /** RFC 0242 §A — the installed `negotiationDecided` payload seats `requested`. */
+  readonly negotiationRequested: boolean;
   /** RFC 0237 — the installed contract seats `nondeterminismPolicy.sources`. */
   readonly nondeterminismSourcesFacet: boolean;
   /** RFC 0204: the installed `ToolDescriptor` defines `annotations` (the MCP ToolAnnotations projection). */
@@ -130,6 +134,8 @@ export function loadArtifacts(): SpecArtifacts {
     hostEventsFamily: caps.properties['hostEvents'] !== undefined,
     nondeterminismSourcesFacet: caps.properties['nondeterminismPolicy']?.properties?.['sources'] !== undefined,
     hostEventTrigger: readFileSync(join(root, 'spec', 'v2', 'path-manifest.json'), 'utf8').includes('"/host/events/test"'),
+    negotiationHostEvent: readFileSync(join(root, 'schemas', 'v2', 'host-event.schema.json'), 'utf8').includes('"negotiation.decided"'),
+    negotiationRequested: readJson<{ $defs: Record<string, { properties?: Record<string, unknown> }> }>(join(root, 'schemas', 'v2', 'run-event-payloads.schema.json')).$defs['negotiationDecided']?.properties?.['requested'] !== undefined,
     toolAnnotations: descriptor.properties['annotations'] !== undefined,
     agentCardsFacet: caps.properties['a2a']?.properties?.['agentCards'] !== undefined,
     auditLogIntegrityFamily: caps.properties['auditLogIntegrity'] !== undefined,
