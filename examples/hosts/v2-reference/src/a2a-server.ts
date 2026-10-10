@@ -45,7 +45,7 @@ import { acceptRun } from './runs.js';
 import { route, JSONRPC_INTERFACE_PATHS, type Ctx, type Reply, type Route } from './router.js';
 import { TERMINAL, type Host, type Subject } from './host.js';
 import type { RunRow } from './store.js';
-import { A2A_FACET } from './interop.js';
+import { A2A_FACET, auditInbound, decideInbound } from './interop.js';
 import { createPushConfig, deletePushConfig, getPushConfig, listPushConfigs, PushError, subscribePush } from './a2a-push.js';
 import { agentCardsAdvertised, agentRefOf, resolveRoutingValue, routedWorkflows, type InventoryEntry } from './agents.js';
 import { RELAY_WORKFLOW_ID, inboundLabel, inboundOf } from './purpose.js';
@@ -480,6 +480,9 @@ async function jsonRpcHandler(ctx: Ctx): Promise<Reply> {
   const rawId = parsed['id'];
   const id: RpcId = typeof rawId === 'string' || typeof rawId === 'number' ? rawId : null;
   const version = ctx.header('a2a-version');
+  // RFC 0242 §B.2: every inbound negotiation, accepted or refused, is recorded for the caller's tenant.
+  const named = version !== null && version.trim() !== '' ? version.trim() : undefined;
+  auditInbound(ctx.host, subject.tenant, 'a2a', named, decideInbound('a2a', named));
   if (version !== null && version.trim() !== '' && version.trim() !== A2A_VERSION) {
     // RFC 0211 §E: the versions this interface serves, comma-joined (ErrorInfo.metadata is map<string,string>).
     return rpcError(id, A2A_ERR.VERSION_NOT_SUPPORTED, `A2A-Version ${version.trim()} is not served; this interface serves ${A2A_VERSION}`, { supportedVersions: A2A_VERSION });

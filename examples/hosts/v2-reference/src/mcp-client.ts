@@ -102,13 +102,13 @@ async function negotiate(host: Host, run: RunRow | null, serverId: string, url: 
     const supported = (d0.error.details?.['error'] as { data?: { supported?: unknown } } | undefined)?.data?.supported;
     if (!Array.isArray(supported)) throw d0.error;
     const d = decide(MCP_FACET.revisions, MCP_FACET.preferredVersion, MCP_FACET.minimumRevision, supported.map(String), undefined, true);
-    if (run) audit(host, run, 'mcp', url, MCP_FACET.minimumRevision, d);
+    if (run) audit(host, run, 'mcp', url, MCP_FACET.minimumRevision, d, MCP_FACET.preferredVersion);
     if (d.outcome === 'refused') throw new McpClientError('interop_version_unsupported', `mcp negotiation refused: ${d.reason}`, { protocol: 'mcp', supported: [...MCP_FACET.revisions], reason: d.reason });
     return d.version;
   }
   const offers = Array.isArray(d0.result['supportedVersions']) ? (d0.result['supportedVersions'] as unknown[]).map(String) : [];
   const d = decide(MCP_FACET.revisions, MCP_FACET.preferredVersion, MCP_FACET.minimumRevision, offers, undefined, true);
-  if (run) audit(host, run, 'mcp', url, MCP_FACET.minimumRevision, d);
+  if (run) audit(host, run, 'mcp', url, MCP_FACET.minimumRevision, d, MCP_FACET.preferredVersion);
   if (d.outcome === 'refused') throw new McpClientError('interop_version_unsupported', `mcp negotiation refused: ${d.reason}`, { protocol: 'mcp', supported: [...MCP_FACET.revisions], reason: d.reason });
   return d.version;
 }

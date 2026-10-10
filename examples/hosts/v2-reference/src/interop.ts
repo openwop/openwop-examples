@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto';
 import { err } from './errors.js';
 import { guardedRequest } from './egress.js';
 import { appendEvent } from './events.js';
+import { NEGOTIATION_DECIDED, publishHostEvent } from './host-events.js';
 import { nowIso, tenantBound } from './ids.js';
 import { EVENT_LOG_SCHEMA_VERSION } from './config.js';
 import type { Host, Subject } from './host.js';
@@ -79,8 +80,40 @@ function auditRun(host: Host, tenant: string, subject: Subject | null): RunRow {
   return run;
 }
 
-export function audit(host: Host, run: RunRow, protocol: Protocol, peerUrl: string, floor: string, d: Decision): void {
-  appendEvent(host, run, 'negotiation.decided', { protocol, outcome: d.outcome, ...(d.outcome === 'accepted' ? { version: d.version, reason: 'ok' } : { reason: d.reason }), floor, peerDigest: originDigest(peerUrl), at: nowIso() });
+/** The `negotiationDecided` payload; `requested` (RFC 0242 §A.2) only when the installed contract seats it. */
+function record(host: Host, protocol: Protocol, floor: string, d: Decision, requested: string | undefined, peerDigest: string | undefined): Record<string, unknown> {
+  return {
+    protocol, outcome: d.outcome, ...(d.outcome === 'accepted' ? { version: d.version, reason: 'ok' } : { reason: d.reason }),
+    ...(requested !== undefined && host.artifacts.negotiationRequested ? { requested } : {}),
+    floor, ...(peerDigest !== undefined ? { peerDigest } : {}), at: nowIso(),
+  };
+}
+
+/** An outbound (in-run) negotiation: recorded on the run's log. `requested` is the version the host asked the peer for. */
+export function audit(host: Host, run: RunRow, protocol: Protocol, peerUrl: string, floor: string, d: Decision, requested?: string): void {
+  appendEvent(host, run, 'negotiation.decided', record(host, protocol, floor, d, requested, originDigest(peerUrl)));
+}
+
+/**
+ * RFC 0242 §B.2 — an inbound negotiation has no run: it is recorded as the caller's durable
+ * host event. A caller's request is authenticated before it reaches here (interop.md §Authentication),
+ * so the record always has a tenant. `requested` is what the caller named; absent when it named none.
+ */
+export function auditInbound(host: Host, tenant: string, protocol: Protocol, requested: string | undefined, d: Decision): void {
+  if (!host.artifacts.negotiationHostEvent) return;
+  const floor = protocol === 'a2a' ? A2A_FACET.minimumVersion : MCP_FACET.minimumRevision;
+  publishHostEvent(host, tenant, NEGOTIATION_DECIDED, undefined, record(host, protocol, floor, d, requested, undefined));
+}
+
+/** The decision for an inbound request naming `requested` against this host's own offer. */
+export function decideInbound(protocol: Protocol, requested: string | undefined): Decision {
+  const f = protocol === 'a2a' ? A2A_FACET : MCP_FACET;
+  const versions: readonly string[] = protocol === 'a2a' ? A2A_FACET.versions : MCP_FACET.revisions;
+  const floor = protocol === 'a2a' ? A2A_FACET.minimumVersion : MCP_FACET.minimumRevision;
+  const candidate = requested ?? f.preferredVersion;
+  if (lt(candidate, floor)) return { outcome: 'refused', reason: 'below-floor' };
+  if (!versions.includes(candidate)) return { outcome: 'refused', reason: 'unsupported' };
+  return { outcome: 'accepted', version: candidate };
 }
 
 /**
@@ -160,7 +193,7 @@ export async function a2aInvoke(host: Host, tenant: string, subject: Subject | n
   }
   if (typeof body['peerOffersOnly'] === 'string') offers = offers.filter((v) => v === body['peerOffersOnly']);
   const d = decide(A2A_FACET.versions, A2A_FACET.preferredVersion, A2A_FACET.minimumVersion, offers, requested, authenticated);
-  audit(host, run, 'a2a', peerUrl, A2A_FACET.minimumVersion, d);
+  audit(host, run, 'a2a', peerUrl, A2A_FACET.minimumVersion, d, requested ?? A2A_FACET.preferredVersion);
   if (d.outcome === 'refused') {
     // host-sample-test-seams.md §22: `requestVersion` overrides the version the host ASKS for
     // ("used to force an unsupported one"). An unsupported, above-floor request is therefore put
@@ -204,7 +237,7 @@ export async function mcpInvoke(host: Host, tenant: string, subject: Subject | n
   if (result && Array.isArray(result['supportedVersions'])) offers = (result['supportedVersions'] as unknown[]).map(String);
   else if (error && Array.isArray(error.data?.supported)) offers = (error.data?.supported as unknown[]).map(String);
   const d = decide(MCP_FACET.revisions, MCP_FACET.preferredVersion, MCP_FACET.minimumRevision, offers, requested, authenticated);
-  audit(host, run, 'mcp', serverUrl, MCP_FACET.minimumRevision, d);
+  audit(host, run, 'mcp', serverUrl, MCP_FACET.minimumRevision, d, requested ?? MCP_FACET.preferredVersion);
   if (d.outcome === 'refused') refuse('mcp', requested ?? MCP_FACET.preferredVersion, MCP_FACET.revisions, run.run_id, d.reason);
   // interop.md §Trace context (RFC 0207): the caller's trace, as a child span, in _meta (SHOULD) AND the header.
   const tc = trace !== null ? childOf(trace) : null;

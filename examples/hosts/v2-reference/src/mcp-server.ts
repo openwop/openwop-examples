@@ -47,7 +47,7 @@ import { requestCancel, resolveAndResume, scheduleRun } from './executor.js';
 import { principalRef } from './identity.js';
 import { opaque } from './ids.js';
 import { payloadOf } from './interrupts.js';
-import { MCP_FACET } from './interop.js';
+import { MCP_FACET, auditInbound, decideInbound } from './interop.js';
 import { inboundTraceContext, type TraceContext } from './trace-context.js';
 import { acceptRun } from './runs.js';
 import { projectBoundId, TENANT_BOUND, unprojectBoundId } from './ids.js';
@@ -514,6 +514,8 @@ async function mcpHandler(ctx: Ctx): Promise<Reply | typeof STREAMED> {
     // ext-tasks §Streamable HTTP: Routing Headers — Mcp-Name is params.taskId on tasks/*.
     if (method.startsWith('tasks/') && mcpName !== params['taskId']) return reply(id, new McpError(ERR.HEADER_MISMATCH, `Mcp-Name ${mcpName} does not equal the request's taskId`, undefined, 400));
   }
+  // RFC 0242 §B.2: the inbound negotiation is recorded for the caller's tenant, accepted or refused.
+  auditInbound(ctx.host, subject.tenant, 'mcp', requested, decideInbound('mcp', requested));
   // (4) only now: is the (agreed) revision one this mount speaks?
   if (!supported.includes(requested)) return reply(id, new McpError(ERR.UNSUPPORTED_VERSION, `revision ${requested} is not served`, { supported, requested }, 400));
 
