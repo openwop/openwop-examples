@@ -155,6 +155,9 @@ const MULTI_REGION_TEST =
 const HOST = process.env.OPENWOP_HOST ?? '127.0.0.1';
 const PORT = Number(process.env.OPENWOP_PORT ?? 3839);
 const API_KEY = process.env.OPENWOP_API_KEY ?? 'openwop-postgres-dev-key';
+// The startup log names where the key came from, never the key itself.
+const API_KEY_SOURCE =
+  process.env.OPENWOP_API_KEY !== undefined ? 'from OPENWOP_API_KEY' : 'built-in dev default';
 // Phase I.6 — auth-profiles.md §"openwop-auth-api-key-rotation". When a
 // secondary key is configured, both keys authenticate during the overlap
 // window; canonical use is rotation: operator sets the new primary, the
@@ -977,10 +980,21 @@ const HOST_ADVERTISED_GATED_CAPABILITIES: ReadonlySet<string> = new Set([
 const MULTI_PARTY_MAX_PARTICIPANTS = 8;
 const multiPartyCouncils = new Map<string, { participants: ReadonlySet<string> }>();
 
+// A `core.delay` duration comes from run inputs / variables, i.e. from the
+// client. Bound it before it reaches `setTimeout`: a non-finite or negative
+// value waits 0 ms (what `setTimeout` already did with it), and anything past
+// the run ceiling is cut to the ceiling, since the RFC 0058 deadline would
+// abort a longer wait anyway.
+function boundedDelayMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return ms > MAX_RUN_DURATION_MS ? MAX_RUN_DURATION_MS : ms;
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  const waitMs = boundedDelayMs(ms);
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error('aborted'));
-    const t = setTimeout(() => resolve(), ms);
+    const t = setTimeout(() => resolve(), waitMs);
     signal.addEventListener('abort', () => {
       clearTimeout(t);
       reject(new Error('aborted'));
@@ -2614,8 +2628,8 @@ async function runWorkflowClaimed(runId: string): Promise<void> {
   const runTimeoutRaw = (row.configurable_json ?? {}) as { runTimeoutMs?: unknown };
   const rt = runTimeoutRaw.runTimeoutMs;
   const resolvedTimeoutMs =
-    typeof rt === 'number' && Number.isInteger(rt) && rt > 0
-      ? Math.min(rt, MAX_RUN_DURATION_MS)
+    typeof rt === 'number' && Number.isInteger(rt) && rt > 0 && rt < MAX_RUN_DURATION_MS
+      ? rt
       : MAX_RUN_DURATION_MS;
   const runStartMs = Date.now();
   let timedOut = false;
@@ -5637,8 +5651,10 @@ export async function start(): Promise<{ close: () => Promise<void> }> {
 
   const requestHandler = (req: IncomingMessage, res: ServerResponse): void => {
     void route(req, res).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!res.headersSent) sendError(res, 500, 'internal', message);
+      // The full error (with stack) is logged here; the client gets only the
+      // error code and a generic message, so internal detail never leaves the host.
+      console.error('[openwop-host-postgres] unhandled error while routing a request:', err);
+      if (!res.headersSent) sendError(res, 500, 'internal', 'Internal server error.');
       else res.end();
     });
   };
@@ -5673,7 +5689,7 @@ export async function start(): Promise<{ close: () => Promise<void> }> {
   await new Promise<void>((resolve) => _server!.listen(PORT, HOST, () => resolve()));
   const scheme = MTLS_ENABLED ? 'https' : 'http';
   console.log(
-    `[openwop-host-postgres] listening on ${scheme}://${HOST}:${PORT} (api key: ${API_KEY}, processId: ${PROCESS_ID}, ${workflows.size} fixtures${MTLS_ENABLED ? `, mtls=${MTLS_REQUIRED ? 'required' : 'optional'}` : ''})`,
+    `[openwop-host-postgres] listening on ${scheme}://${HOST}:${PORT} (api key: ${API_KEY_SOURCE}, processId: ${PROCESS_ID}, ${workflows.size} fixtures${MTLS_ENABLED ? `, mtls=${MTLS_REQUIRED ? 'required' : 'optional'}` : ''})`,
   );
 
   // Register signal handlers exactly once per process. Calling `start()`

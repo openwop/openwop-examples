@@ -16,7 +16,7 @@ This host is dependency-free except for the Python 3.11 stdlib (`http.server`, `
 ```bash
 cd examples/hosts/python
 PYTHONPATH=src python3 -m openwop_host
-# [openwop-host-in-memory-python 1.0.0] listening on http://127.0.0.1:3737 (api key: openwop-inmem-dev-key, 42 fixtures loaded)
+# [openwop-host-in-memory-python 1.0.0] listening on http://127.0.0.1:3737 (api key: built-in dev default, 42 fixtures loaded)
 ```
 
 Probe with curl:

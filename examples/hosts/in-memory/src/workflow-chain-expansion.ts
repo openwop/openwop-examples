@@ -627,9 +627,12 @@ function verifyPackSignature(sources: PackSources): void {
     }
   } catch (err) {
     if (err instanceof WorkflowChainExpansionError) throw err;
+    // The crypto failure is logged, not echoed: this message reaches the
+    // client as a 500 body.
+    console.error(`[workflow-chain-expansion] signature verification threw for pack '${sources.manifest.name}':`, err);
     throw new WorkflowChainExpansionError(
       'pack_signature_unverifiable',
-      `Failed to verify signature: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to verify signature for pack '${sources.manifest.name}'.`,
     );
   }
 }

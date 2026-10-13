@@ -113,6 +113,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.OPENWOP_HOST ?? '127.0.0.1';
 const PORT = Number(process.env.OPENWOP_PORT ?? 3838);
 const API_KEY = process.env.OPENWOP_API_KEY ?? 'openwop-sqlite-dev-key';
+// The startup log names where the key came from, never the key itself.
+const API_KEY_SOURCE =
+  process.env.OPENWOP_API_KEY !== undefined ? 'from OPENWOP_API_KEY' : 'built-in dev default';
 // auth-profiles.md §"openwop-auth-api-key-rotation". When a secondary
 // key is configured, both keys authenticate within the overlap window;
 // canonical use is rotation: new primary in env, old secondary still
@@ -791,13 +794,24 @@ function stopHeartbeat(runId: string): void {
   runningHeartbeats.delete(runId);
 }
 
+// A `core.delay` duration comes from run inputs / variables, i.e. from the
+// client. Bound it before it reaches `setTimeout`: a non-finite or negative
+// value waits 0 ms (what `setTimeout` already did with it), and anything past
+// the run ceiling is cut to the ceiling, since the RFC 0058 deadline would
+// abort a longer wait anyway.
+function boundedDelayMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return ms > MAX_RUN_DURATION_MS ? MAX_RUN_DURATION_MS : ms;
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  const waitMs = boundedDelayMs(ms);
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error('aborted'));
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);
       resolve();
-    }, ms);
+    }, waitMs);
     const onAbort = (): void => {
       clearTimeout(timer);
       reject(new Error('aborted'));
@@ -1704,8 +1718,8 @@ async function runWorkflow(runId: string): Promise<void> {
     : {};
   const rt = rtParsed.runTimeoutMs;
   const resolvedTimeoutMs =
-    typeof rt === 'number' && Number.isInteger(rt) && rt > 0
-      ? Math.min(rt, MAX_RUN_DURATION_MS)
+    typeof rt === 'number' && Number.isInteger(rt) && rt > 0 && rt < MAX_RUN_DURATION_MS
+      ? rt
       : MAX_RUN_DURATION_MS;
   const runStartMs = Date.now();
   let timedOut = false;
@@ -3840,15 +3854,17 @@ startMetricLoop(db);
 
 const server = createServer((req, res) => {
   void route(req, res).catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!res.headersSent) sendError(res, 500, 'internal', message);
+    // The full error (with stack) is logged here; the client gets only the
+    // error code and a generic message, so internal detail never leaves the host.
+    console.error('[openwop-host-sqlite] unhandled error while routing a request:', err);
+    if (!res.headersSent) sendError(res, 500, 'internal', 'Internal server error.');
     else res.end();
   });
 });
 
 server.listen(PORT, HOST, () => {
   console.log(
-    `[openwop-host-sqlite] listening on http://${HOST}:${PORT} (api key: ${API_KEY}, db: ${DB_PATH}, processId: ${PROCESS_ID}, ${workflows.size} fixtures)`,
+    `[openwop-host-sqlite] listening on http://${HOST}:${PORT} (api key: ${API_KEY_SOURCE}, db: ${DB_PATH}, processId: ${PROCESS_ID}, ${workflows.size} fixtures)`,
   );
 });
 

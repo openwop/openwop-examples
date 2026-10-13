@@ -32,6 +32,11 @@ on:
   pull_request:
     branches: [main]
 
+# Every job only checks out the repo and runs npm/node; none writes to the
+# repo, issues, PRs or packages, so the token is read-only throughout.
+permissions:
+  contents: read
+
 jobs:
   # Detect whether this PR touches example-relevant paths. The real jobs gate on
   # this so a docs/registry-only PR skips the matrix, while the always-run `gate`
