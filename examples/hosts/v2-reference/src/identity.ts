@@ -25,15 +25,28 @@ import { JWT_SHAPE, verifyOidcBearer } from './oidc-lane.js';
 import { scopesEnforced, scopesOfCredential } from './scopes.js';
 import type { Host, Subject } from './host.js';
 
+// Stored credentials are looked up by their SHA-256. Every value hashed here is
+// a machine credential, not a human password: minted ones are 192 random bits
+// (`mintCredential`), and api keys are operator-provisioned secrets. A slow,
+// salted password KDF would make the hash unindexable without adding
+// meaningful resistance against guessing a high-entropy secret, so a fast
+// digest is the right tool — provided operators set high-entropy keys.
 function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
 
+// Parsed without a regex: a backtracking `/^Bearer\s+(.+)$/` is polynomial in
+// a header of repeated whitespace (CodeQL js/polynomial-redos).
 export function bearerOf(req: IncomingMessage): string | null {
   const h = req.headers['authorization'];
   if (typeof h !== 'string') return null;
-  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
-  return m ? (m[1] as string).trim() : null;
+  const v = h.trim();
+  const scheme = 'bearer';
+  if (v.length <= scheme.length || v.slice(0, scheme.length).toLowerCase() !== scheme) return null;
+  // The scheme must be followed by whitespace (the same set `\s` matched).
+  if (v.charAt(scheme.length).trim() !== '') return null;
+  const token = v.slice(scheme.length).trim();
+  return token.length > 0 ? token : null;
 }
 
 export function ensureDefaultCredential(host: Host): void {

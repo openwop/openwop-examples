@@ -16,11 +16,14 @@ def main() -> int:
     port = int(os.environ.get("OPENWOP_PORT", "3737"))
 
     server, state, thread = serve(host, port)
-    api_key = state.api_key
+    # Name where the key came from, never the key itself.
+    key_source = (
+        "from OPENWOP_API_KEY" if "OPENWOP_API_KEY" in os.environ else "built-in dev default"
+    )
     fixture_count = len(state.workflows)
     print(
         f"[openwop-host-in-memory-python {__version__}] listening on "
-        f"http://{host}:{port} (api key: {api_key}, {fixture_count} fixtures loaded)",
+        f"http://{host}:{port} (api key: {key_source}, {fixture_count} fixtures loaded)",
         flush=True,
     )
 

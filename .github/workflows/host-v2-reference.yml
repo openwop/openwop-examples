@@ -17,6 +17,10 @@ on:
       - 'examples/hosts/v2-reference/**'
       - '.github/workflows/host-v2-reference.yml'
 
+# The job only checks out the repo and runs npm/node; the token stays read-only.
+permissions:
+  contents: read
+
 jobs:
   v2-reference:
     runs-on: ubuntu-latest

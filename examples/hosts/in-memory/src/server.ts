@@ -44,6 +44,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.OPENWOP_HOST ?? '127.0.0.1';
 const PORT = Number(process.env.OPENWOP_PORT ?? 3737);
 const API_KEY = process.env.OPENWOP_API_KEY ?? 'openwop-inmem-dev-key';
+// The startup log names where the key came from, never the key itself.
+const API_KEY_SOURCE =
+  process.env.OPENWOP_API_KEY !== undefined ? 'from OPENWOP_API_KEY' : 'built-in dev default';
 // RFC 0013 Phase 3 — filesystem-mounted registry mirror for workflow-
 // chain pack expansion. When unset OR the dir doesn't exist, the host
 // omits `capabilities.workflowChainPacks` and the expand endpoint
@@ -589,7 +592,10 @@ async function runWorkflow(run: Run): Promise<void> {
   // deadline rather than a caller cancel. `observed` is measured, not the
   // limit, per `cap.breached` semantics (limit=resolvedMs, observed=elapsedMs).
   const startMs = Date.now();
-  const deadlineMs = run.runTimeoutMs ?? MAX_RUN_DURATION_MS;
+  // Run-create already clamped `runTimeoutMs`; the bound is re-checked here so
+  // the timer below never depends on that happening upstream.
+  const requestedMs = run.runTimeoutMs ?? MAX_RUN_DURATION_MS;
+  const deadlineMs = requestedMs < MAX_RUN_DURATION_MS ? requestedMs : MAX_RUN_DURATION_MS;
   const timeoutTimer = setTimeout(() => {
     run.timedOut = true;
     run.abortController.abort();
@@ -665,7 +671,18 @@ function resolveInputAsNumber(
   return fallback;
 }
 
+// A `core.delay` duration comes from run inputs / variables, i.e. from the
+// client. Bound it before it reaches `setTimeout`: a non-finite or negative
+// value waits 0 ms (what `setTimeout` already did with it), and anything past
+// the run ceiling is cut to the ceiling, since the RFC 0058 deadline would
+// abort a longer wait anyway.
+function boundedDelayMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return ms > MAX_RUN_DURATION_MS ? MAX_RUN_DURATION_MS : ms;
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  const waitMs = boundedDelayMs(ms);
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error('aborted'));
@@ -674,7 +691,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);
       resolve();
-    }, ms);
+    }, waitMs);
     const onAbort = (): void => {
       clearTimeout(timer);
       reject(new Error('aborted'));
@@ -2582,9 +2599,11 @@ await loadWasmPacks();
 
 const server = createServer((req, res) => {
   void route(req, res).catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
+    // The full error (with stack) is logged here; the client gets only the
+    // error code and a generic message, so internal detail never leaves the host.
+    console.error('[openwop-host-in-memory] unhandled error while routing a request:', err);
     if (!res.headersSent) {
-      sendError(res, 500, 'internal', message);
+      sendError(res, 500, 'internal', 'Internal server error.');
     } else {
       res.end();
     }
@@ -2593,6 +2612,6 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(
-    `[openwop-host-in-memory] listening on http://${HOST}:${PORT} (api key: ${API_KEY}, ${workflows.size} fixtures loaded, ${wasmTypeRegistry.size} WASM node types)`,
+    `[openwop-host-in-memory] listening on http://${HOST}:${PORT} (api key: ${API_KEY_SOURCE}, ${workflows.size} fixtures loaded, ${wasmTypeRegistry.size} WASM node types)`,
   );
 });
