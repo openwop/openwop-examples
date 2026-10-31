@@ -248,7 +248,14 @@ function interruptFor(host: Host, node: WorkflowNode, run: RunRow, visit: number
     return payload;
   }
   if (node.typeId === 'core.clarificationGate') {
-    return { kind: 'clarification', key, data: { questions: Array.isArray(c['questions']) ? c['questions'] : [{ id: 'q1', question: String(c['question'] ?? 'Please clarify') }] } };
+    const questions = Array.isArray(c['questions']) ? c['questions'] : [{ id: 'q1', question: String(c['question'] ?? 'Please clarify') }];
+    if (c['form'] === undefined) return { kind: 'clarification', key, data: { questions } };
+    // interrupt.md §Forms: the form is raised verbatim beside its `questions` fallback, or not at all.
+    if (host.forms === null) throw new NodeFailure('capability_not_provided', 'this host cannot check a clarification form, so it raises none', { typeId: node.typeId });
+    const ids = (questions as Array<{ id?: unknown }>).map((q) => String(q?.id));
+    const verdict = host.forms(c['form'], ids);
+    if (!verdict.ok) throw new NodeFailure('node_config_invalid', verdict.reason, { field: 'config.form' });
+    return { kind: 'clarification', key, data: { questions, form: c['form'] } };
   }
   const payload: InterruptPayload = { kind: String(c['kind'] ?? 'custom'), key, data: (c['data'] as Record<string, unknown>) ?? { customKind: node.id } };
   if (typeof c['timeoutMs'] === 'number') payload.timeoutMs = c['timeoutMs'];

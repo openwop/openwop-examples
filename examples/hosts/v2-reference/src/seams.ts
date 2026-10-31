@@ -37,7 +37,6 @@ import { invokeSandboxed, sandboxPackIds } from './sandbox.js';
 import { samlValidate, scimProvision, subjectLink } from './saml-scim.js';
 import { a2aInvoke, mcpInvoke } from './interop.js';
 import { unregisterChainPack } from './chains.js';
-import { admitSurface } from './a2ui.js';
 import { loadRun } from './runs.js';
 import { armHold, MAX_HOLD_MS } from './idempotency-hold.js';
 import { beginGrant, configureProvider, expireAccessToken, oauthSupported, registerReachProvider, type ProviderRow } from './oauth.js';
@@ -377,21 +376,6 @@ async function expireRefreshRoute(ctx: Ctx): Promise<Reply> {
 }
 
 /**
- * `emitA2uiSurface` (RFC 0209) — supplies the envelope a model would have emitted and
- * nothing else: admission is a2ui.ts, the one path production uses. Not mounted when
- * the host cannot enforce the profile (no validator ⇒ the kind is not advertised).
- */
-async function emitSurfaceRoute(ctx: Ctx): Promise<Reply> {
-  const adm = ctx.host.a2ui;
-  if (adm === null) throw err('not_found', 'ui.a2ui-surface is not advertised on this host');
-  const body = await ctx.json<{ runId?: unknown; envelope?: unknown }>();
-  for (const k of Object.keys(body)) if (k !== 'runId' && k !== 'envelope') throw err('validation_error', `unknown key ${k}`);
-  if (typeof body.runId !== 'string' || body.runId.length === 0) throw err('validation_error', 'runId is REQUIRED');
-  const run = loadRun(ctx, body.runId);
-  return { status: 201, body: admitSurface(ctx.host, adm, run, body.envelope) };
-}
-
-/**
  * RFC 0236 §G — produce one host event of an advertised type under the caller's
  * tenant, through `publishHostEvent` (the same path any emitter would take).
  */
@@ -427,7 +411,6 @@ export function seamRoutes(host: Host): Route[] {
     route('GET', `${p}/sample/auth/subject-links`, true, subjectLinksRoute),
     route('POST', `${p}/sample/a2a/invoke`, true, a2aInvokeRoute),
     route('POST', `${p}/sample/mcp/invoke`, true, mcpInvokeRoute),
-    ...(host.a2ui !== null ? [route('POST', `${p}/sample/a2ui/emit-surface`, true, emitSurfaceRoute)] : []),
     ...(oauthSupported(host) ? [route('POST', `${p}/sample/oauth/authorize-start`, true, authorizeStartRoute), route('POST', `${p}/sample/oauth/expire-refresh`, true, expireRefreshRoute)] : []),
     route('POST', `${p}/sample/test/sandbox-load`, true, sandboxLoad),
     route('POST', `${p}/sample/test/sandbox-invoke`, true, sandboxInvoke),

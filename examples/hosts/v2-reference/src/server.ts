@@ -7,7 +7,6 @@
  *   OPENWOP_API_KEY      → the default api-key credential (openwop-v2-dev-key)
  */
 import { attachHostEventSubscriber, emitTestHostEvent, hostEventTypes } from './host-events.js';
-import { createA2uiAdmission } from './a2ui.js';
 import { EventEmitter } from 'node:events';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -34,6 +33,7 @@ import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './
 import { startApprovalTimeoutSweep } from './executor.js';
 import { Store } from './store.js';
 import { AuditLog } from './audit.js';
+import { createFormCheck } from './forms.js';
 import { createValidator } from './validate.js';
 import { deadLetterProjection, registerWebhook, rotateWebhookSecret, startDeliveryWorker, subscribeFanout, unregisterWebhook } from './webhooks.js';
 import { installedPacks } from './packs.js';
@@ -42,7 +42,7 @@ import { withIdempotency } from './router.js';
 import type { Host, WorkflowDefinition } from './host.js';
 
 /** The fixture catalog: the suite's `fixtures/` (conformance package) plus the host-defined approvers fixture. */
-export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string, WorkflowDefinition> {
+export function loadWorkflows(config: HostConfig, mcpClient = false, forms = false): Map<string, WorkflowDefinition> {
   // core.conformance.hold (pure) and core.conformance.side-effect (side-effecting by classification) are the
   // conformance-reserved typeIds the loop fixtures use (fixtures.md).
   // `core.conformance.mock-agent` is executed for the budget fixture only: it is in `executable`, and only
@@ -75,6 +75,8 @@ export function loadWorkflows(config: HostConfig, mcpClient = false): Map<string
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   // fixtures.md §conformance-purpose-relay: only with a relay peer to forward to (purpose.ts).
   if (config.a2aRelayPeerUrl !== null) { executable.add('core.conformance.a2a-invoke'); honoured.add('conformance-purpose-relay'); }
+  // interrupt.md §Forms (forms.ts): the form and its two refusal probes, together, only when the host can check a form.
+  if (forms) for (const id of ['conformance-interrupt-form', 'conformance-interrupt-form-refused', 'conformance-interrupt-form-unbound']) honoured.add(id);
   const dirs: string[] = [];
   if (config.fixturesDir) dirs.push(config.fixturesDir);
   try {
@@ -124,11 +126,11 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   const artifacts = loadArtifacts();
   const store = new Store(config.dbPath);
   const validate = await createValidator(artifacts.schemasDir, config.devValidate);
-  const a2ui = await createA2uiAdmission(artifacts.schemasDir, config.envelopeStrictness);
+  const forms = await createFormCheck(artifacts.schemasDir);
   store.db.exec(OAUTH_DDL);
   migrateOAuth(store.db);
   const audit = artifacts.auditLogIntegrityFamily ? new AuditLog(store.db, config.dbPath, { checkpointIntervalEntries: config.auditCheckpointEntries, checkpointIntervalSeconds: config.auditCheckpointSeconds }) : null;
-  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0), startedAt: new Date().toISOString(), validate, a2ui, audit };
+  const host: Host = { config, store, artifacts, bus: new EventEmitter(), workflows: loadWorkflows(config, artifacts.mcpClientFacet && config.mcpServers.size > 0, forms !== null), startedAt: new Date().toISOString(), validate, forms, audit };
   // conformance-credential needs `oauth` (RFC 0199), which needs a contract that carries it.
   if (!oauthSupported(host)) (host.workflows as Map<string, WorkflowDefinition>).delete('conformance-credential');
   host.bus.setMaxListeners(0);
