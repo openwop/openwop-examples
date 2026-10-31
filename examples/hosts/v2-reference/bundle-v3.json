@@ -8091,7 +8091,7 @@
   "signature": {
     "alg": "ed25519",
     "keyId": "v2-reference-4",
-    "sig": "WdYCWqun1SGWJqP7CNcO0_f07P35sLwsliLaPHlJRPog0FJq3Th7ucK8AYpEiyTyik7AFT3OV4zFGXF-BI1OAA",
+    "sig": "q-XUrDPzE28tenMWPptw042ME90-d51KrZq3zQJiN0f-zLnPltiQWPb_rGLAed3vBAAJj4tEJXztYlQDm0faBQ",
     "over": [
       "witnessSha256",
       "host.build",
