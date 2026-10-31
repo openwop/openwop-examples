@@ -16,7 +16,6 @@ import { nowIso, tenantBound } from './ids.js';
 import { TERMINAL, type Host, type Subject } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 import { principalRef } from './identity.js';
-import { taintedSurfaces } from './a2ui.js';
 import { credentialResolves, subjectKey } from './oauth.js';
 import { rosterOf } from './council.js';
 import { ownerOf } from './events.js';
@@ -137,12 +136,6 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
     if (approvers.length > 0 && subject !== null && !listed(approvers, subject)) {
       throw err('forbidden', 'the resolver is not in approversList (interrupt.md §Approver enforcement)');
     }
-    // RFC 0209 §C.12 / a2ui-untrusted-blocks-approval: a surface bound to this gate whose fold holds an
-    // untrusted envelope cannot advance it — whatever trusted updates followed.
-    const tainted = taintedSurfaces(host, run, row.node_id);
-    if (tainted.length > 0) {
-      throw err('forbidden', 'an untrusted ui.a2ui-surface is bound to this approval gate (untrusted_content_blocks_approval)', { reason: 'untrusted_content_blocks_approval', surfaceIds: tainted });
-    }
     if (action === 'refine' && (rv as { refineFeedback?: unknown })?.refineFeedback === undefined) throw err('validation_error', 'refine requires refineFeedback');
     if (action === 'edit-accept' && (rv as { editedArtifactData?: unknown })?.editedArtifactData === undefined) throw err('validation_error', 'edit-accept requires editedArtifactData');
     return { payload, decision: action === 'reject' ? 'rejected' : 'granted', exitsSuspend: action !== 'ask' };
@@ -181,8 +174,19 @@ export function validateResolve(host: Host, run: RunRow, row: InterruptRow, resu
   }
   if (payload.kind === 'clarification') {
     const questions = Array.isArray(data['questions']) ? (data['questions'] as Array<{ id?: string }>) : [];
-    if (resumeValue === null || typeof resumeValue !== 'object') throw err('validation_error', 'a clarification resumeValue is an object keyed by question id');
-    for (const q of questions) if (q.id !== undefined && (resumeValue as Record<string, unknown>)[q.id] === undefined) throw err('validation_error', `answer ${q.id} is missing`, { questionId: q.id });
+    if (resumeValue === null || typeof resumeValue !== 'object') throw err('validation_error', 'a clarification resumeValue is { answers: [{ id, answer }] } or an object keyed by question id');
+    // interrupt.md §Forms: a form and its `questions` fallback both resume with { answers: [{ id, answer }] }.
+    // The object keyed by question id stays accepted for callers that predate it.
+    const listed = (resumeValue as { answers?: unknown }).answers;
+    const answered = new Set<string>();
+    if (Array.isArray(listed)) {
+      for (const a of listed) {
+        const id = (a as { id?: unknown } | null)?.id;
+        if (typeof id !== 'string' || !('answer' in (a as object))) throw err('validation_error', 'each answers[] entry is { id, answer }', { field: 'resumeValue.answers' });
+        answered.add(id);
+      }
+    } else for (const [k, v] of Object.entries(resumeValue as Record<string, unknown>)) if (v !== undefined) answered.add(k);
+    for (const q of questions) if (q.id !== undefined && !answered.has(q.id)) throw err('validation_error', `answer ${q.id} is missing`, { questionId: q.id });
   }
   return { payload, exitsSuspend: true };
 }

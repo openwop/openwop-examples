@@ -5,11 +5,11 @@
  */
 import { EventEmitter } from 'node:events';
 import type { SpecArtifacts } from './artifacts.js';
-import type { A2uiAdmission } from './a2ui.js';
 import type { HostConfig } from './config.js';
 import type { Store } from './store.js';
 import type { RunEventDoc } from './codemap.js';
 import type { AuditLog } from './audit.js';
+import type { FormCheck } from './forms.js';
 
 export interface Subject {
   issuer: string;
@@ -56,8 +56,8 @@ export interface Host {
   readonly startedAt: string;
   /** dev-mode schema validation hook (validate.ts); a no-op when off. */
   validate(schemaName: string, doc: unknown, context: string): void;
-  /** RFC 0209 envelope admission for `ui.a2ui-surface` (a2ui.ts); null ⇒ the kind is not advertised. */
-  readonly a2ui: A2uiAdmission | null;
+  /** interrupt.md §Forms (forms.ts); null ⇒ the host cannot check a form, raises none and advertises no form fixture. */
+  readonly forms: FormCheck | null;
   /** RFC 0224 (audit.ts): the audit log; null ⇒ the installed contract has no `auditLogIntegrity` family, and nothing is advertised or served. */
   readonly audit: AuditLog | null;
 }

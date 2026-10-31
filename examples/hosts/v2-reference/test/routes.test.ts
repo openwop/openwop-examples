@@ -253,6 +253,12 @@ describe('interrupts', () => {
     expect((await waitStatus(c.b.runId, ['waiting-input'])).status).toBe('waiting-input');
     expect((await call('POST', `/runs/${enc(c.b.runId)}/interrupts/ask`, { resumeValue: { q1: 'blue' } })).s).toBe(200);
     expect((await waitStatus(c.b.runId, ['completed'])).status).toBe('completed');
+    // interrupt.md §Forms: { answers: [{ id, answer }] } resolves a clarification too; a missing answer is refused.
+    const f = await call('POST', '/runs', { workflowId: 'conformance-interrupt-form' });
+    expect((await waitStatus(f.b.runId, ['waiting-input'])).status).toBe('waiting-input');
+    expect((await call('POST', `/runs/${enc(f.b.runId)}/interrupts/ask`, { resumeValue: { answers: [{ id: 'q9', answer: 'x' }] } })).s).toBe(400);
+    expect((await call('POST', `/runs/${enc(f.b.runId)}/interrupts/ask`, { resumeValue: { answers: [{ id: 'q1', answer: 'blue' }] } })).s).toBe(200);
+    expect((await waitStatus(f.b.runId, ['completed'])).status).toBe('completed');
     const e = await call('POST', '/runs', { workflowId: 'conformance-interrupt-external-event' });
     expect((await waitStatus(e.b.runId, ['waiting-external'])).status).toBe('waiting-external');
     expect((await call('POST', `/runs/${enc(e.b.runId)}/interrupts/wait-for-external`, { resumeValue: { ok: true } })).s).toBe(200);

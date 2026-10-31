@@ -22,7 +22,6 @@ import { a2aFacet, MCP_FACET } from './interop.js';
 import { A2A_SERVER_PROFILES, AGENT_CARD_PATH } from './a2a-server.js';
 import { MCP_MOUNT_PATH, MCP_SERVER_FEATURES, MCP_SERVER_PROFILES } from './mcp-server.js';
 import { secretRotation, signatureAlgorithms } from './webhooks.js';
-import { A2UI_FLOOR, A2UI_KIND } from './a2ui.js';
 import { CATALOG, credentialInterruptAdvertised, oauthSupported } from './oauth.js';
 import { mcpClientAdvertised } from './mcp-client.js';
 import { agentCardsAdvertised } from './agents.js';
@@ -107,7 +106,7 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     // RFC 0231: `onExhaustion` names the behaviours served — `fail` only (budget.ts refuses `interrupt`). Advertised
     // once the installed contract defines the facet; before that the refusal is a stated deviation (README).
     budget: record('witnessable-gated', { dimensions: [...BUDGET_DIMENSIONS], enforce: 'hard', scopes: ['run'], ...(host.artifacts.budgetOnExhaustionFacet ? { onExhaustion: ['fail'] } : {}) }),
-    limits: stable('witnessable-gated', { clarificationRounds: 0, schemaRounds: 0, envelopesPerTurn: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
+    limits: stable('witnessable-gated', { clarificationRounds: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
     eventLog: record('claims-check', { crossEngineOrdering: { orderingModel: 'global-sequencer' } }),
     interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),
     runList: record('witnessable-gated', { maxPageSize: 100, filters: ['workflowId', 'status'] }),
@@ -200,13 +199,6 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
   }
   if (host.audit !== null) doc['auditLogIntegrity'] = record('witnessable-gated', host.audit.facets());
   if (agentCardsAdvertised(host)) doc['agents'] = record('witnessable-gated', { manifestRuntime: { installScope: 'tenant', handoffValidation: false } });
-  if (host.a2ui !== null) {
-    // events.md §"The envelope-kind catalog" + RFC 0209: one non-universal kind, admitted at schema version 2
-    // (a2ui.ts is the one admission path). declaration.json marks the first two families stable.
-    doc['supportedEnvelopes'] = stable('witnessable-gated', { kinds: [A2UI_KIND] });
-    doc['schemaVersions'] = stable('witnessable-gated', { kinds: { [A2UI_KIND]: A2UI_FLOOR } });
-    doc['envelopeStrictness'] = record('claims-check', { mode: host.a2ui.strictness });
-  }
   if (c.seamsProfile) {
     // RFC 0168 §C.1 reconciliation (suite lib/seams.ts): the seams profile is
     // advertised under the `conformance` METADATA key. NOTE: the generated
