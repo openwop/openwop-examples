@@ -103,6 +103,10 @@ A gate with `participants` and `mockAutoResume: false` (fixture `conformance-mul
 
 `nondeterminismPolicy` lists `clock`, `random` and `id` (`src/nondeterminism.ts`); `env` is not listed because this host reads no configuration during a run. The reserved node `core.conformance.nondeterminism` (fixture `conformance-nondeterminism`) draws one value per listed source and records it where it is read, in its own `node.completed` outputs. A `replay` fork takes the value its source recorded for the same node and execution, following a chain of replays; a branch draws afresh. A completed run's `outputs` are its sink nodes' latest outputs, merged in definition order.
 
+## Every terminal skipped (RFC 0257)
+
+When no node failed and every terminal node (one with no outgoing edge) was skipped, the run still ends `run.completed`, and its payload carries `skippedTerminals`: each terminal's id, in `nodes[]` order. A run in which any terminal completed carries no marker. The list is computed from the definition and the recorded node outcomes (`allTerminalsSkipped`, `src/executor.ts`), so a replay fork ends with the same list. A terminal is skipped either by its `triggerRule` (`conformance-error-route-only`) or by an `EdgeCondition` that declines (`conformance-all-terminals-skipped`). The scheduler evaluates `truthy`, `falsy`, `equals`, `notEquals`, `contains` and `regex`, with `left` read as a dot path into the source node's `node.completed` outputs. It does not evaluate `expression`: such an edge contributes as if it had no condition. `core.identity` echoes its inputs. The `core.subWorkflow` parent leg is opted out (`family.subWorkflow`), because this host has no sub-workflow node.
+
 ## Budget, backpressure and the guarded HTTP client
 
 Three optional families, added so the suite's v2 witnesses for them run against a real host.

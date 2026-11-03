@@ -4,11 +4,15 @@
  * loop), executes them, and records every transition as a registered v2
  * event with a payload from the registry (events.md §Payloads).
  *
- * Node types: core.noop, core.delay, core.conformance.hold (pure), core.fail, core.approvalGate,
+ * Node types: core.noop, core.identity (echoes its inputs), core.delay, core.conformance.hold (pure), core.fail, core.approvalGate,
  * core.clarificationGate, core.interrupt, core.httpFetch, core.conversationGate
  * (the conformance mock), conformance.artifact.emit (RFC 0205), and (RFC 0204,
  * when `mcp.client` is advertised) core.conformance.mcp-client. Anything else fails
  * the node (and the run) closed.
+ *
+ * Edges: `triggerRule` (RFC 0125) and `EdgeCondition` (`truthy`, `falsy`, `equals`, `notEquals`,
+ * `contains`, `regex`; `left` a dot path into the source's `node.completed` outputs, RFC 0257).
+ * An `expression` condition is not evaluated: its edge contributes as if unconditioned.
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
 import { buildCompensationPlan, compensationState, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
@@ -38,17 +42,22 @@ function waitingStatusFor(kind: string): string {
   return 'waiting-approval';
 }
 
-interface Link { from: string; to: string; triggerRule: string }
+interface Link { from: string; to: string; triggerRule: string; condition?: EdgeCondition }
+
+/** workflow-definition.schema.json `$defs/EdgeCondition`. */
+interface EdgeCondition { type?: string; left?: string; right?: unknown; expression?: string }
 
 /** The definition's edges between known nodes, whichever spelling they use; `triggerRule` defaults to `all_success`. */
 function links(def: WorkflowDefinition): Link[] {
   const ids = new Set(def.nodes.map((n) => n.id));
   const out: Link[] = [];
   for (const e of def.edges) {
-    const edge = e as { from?: string; to?: string; source?: string; target?: string; sourceNodeId?: string; targetNodeId?: string; triggerRule?: unknown };
+    const edge = e as { from?: string; to?: string; source?: string; target?: string; sourceNodeId?: string; targetNodeId?: string; triggerRule?: unknown; condition?: unknown };
     const from = edge.from ?? edge.source ?? edge.sourceNodeId; const to = edge.to ?? edge.target ?? edge.targetNodeId;
     if (!from || !to || !ids.has(from) || !ids.has(to)) continue;
-    out.push({ from, to, triggerRule: typeof edge.triggerRule === 'string' ? edge.triggerRule : 'all_success' });
+    const link: Link = { from, to, triggerRule: typeof edge.triggerRule === 'string' ? edge.triggerRule : 'all_success' };
+    if (edge.condition !== null && typeof edge.condition === 'object') link.condition = edge.condition as EdgeCondition;
+    out.push(link);
   }
   return out;
 }
@@ -62,16 +71,49 @@ function failureRouted(def: WorkflowDefinition, nodeId: string): boolean {
 }
 
 /**
+ * `EdgeCondition.left` (RFC 0257): a dot path into the source node's `node.completed`
+ * `outputs`; a missing segment resolves to undefined, never an error.
+ */
+function atPath(outputs: Record<string, unknown> | undefined, path: string): unknown {
+  let cur: unknown = outputs;
+  for (const seg of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
+}
+
+/**
+ * Whether a completed source's edge contributes. `truthy`/`falsy` (RFC 0134) ignore
+ * `right`. `expression` names no evaluation language this host implements, so such an
+ * edge contributes as if it carried no condition (the behaviour before conditions were read).
+ */
+function conditionHolds(c: EdgeCondition, outputs: Record<string, unknown> | undefined): boolean {
+  if (c.type === 'expression' || typeof c.left !== 'string') return true;
+  const left = atPath(outputs, c.left);
+  switch (c.type) {
+    case 'truthy': return Boolean(left);
+    case 'falsy': return !left;
+    case 'equals': return JSON.stringify(left) === JSON.stringify(c.right);
+    case 'notEquals': return JSON.stringify(left) !== JSON.stringify(c.right);
+    case 'contains': return typeof left === 'string' ? typeof c.right === 'string' && left.includes(c.right) : Array.isArray(left) && left.some((x) => JSON.stringify(x) === JSON.stringify(c.right));
+    case 'regex': { try { return typeof left === 'string' && typeof c.right === 'string' && new RegExp(c.right).test(left); } catch { return false; } }
+    default: return true;
+  }
+}
+
+/**
  * Whether a node fires, from the states of its incoming edges' sources (the
  * scheduler reads `triggerRule` from the target's incoming edges, RFC 0125). A
  * node with no incoming edge always fires. One rule governs a target; if its
  * incoming edges disagree, the first edge's rule does.
  */
-function fires(def: WorkflowDefinition, nodeId: string, state: { completed: string[]; failed: string[]; skipped: string[] }): { fires: boolean; rule: string } {
+function fires(def: WorkflowDefinition, nodeId: string, state: Outcomes): { fires: boolean; rule: string } {
   const incoming = links(def).filter((l) => l.to === nodeId);
   if (incoming.length === 0) return { fires: true, rule: 'none' };
   const rule = (incoming[0] as Link).triggerRule;
-  const ok = incoming.filter((l) => state.completed.includes(l.from)).length;
+  // A completed source whose edge condition declines contributes like a skipped one: done, never a success.
+  const ok = incoming.filter((l) => state.completed.includes(l.from) && (l.condition === undefined || conditionHolds(l.condition, state.outputs.get(l.from)))).length;
   const bad = incoming.filter((l) => state.failed.includes(l.from)).length;
   const done = incoming.filter((l) => state.completed.includes(l.from) || state.failed.includes(l.from) || state.skipped.includes(l.from)).length;
   const verdict = rule === 'any_success' ? ok > 0
@@ -148,9 +190,11 @@ function nextNode(def: WorkflowDefinition, order: WorkflowNode[], st: Folded): W
   return null;
 }
 
-/** Each node's latest outcome, as the three lists `fires` reads. */
-function latestOutcomes(st: Folded): { completed: string[]; failed: string[]; skipped: string[] } {
-  const out = { completed: [] as string[], failed: [] as string[], skipped: [] as string[] };
+type Outcomes = { completed: string[]; failed: string[]; skipped: string[]; outputs: Map<string, Record<string, unknown>> };
+
+/** Each node's latest outcome, as the three lists `fires` reads, plus each node's latest `node.completed` outputs. */
+function latestOutcomes(st: Folded): Outcomes {
+  const out = { completed: [] as string[], failed: [] as string[], skipped: [] as string[], outputs: st.outputs };
   for (const [id, t] of st.outcome) (t.type === 'node.completed' ? out.completed : t.type === 'node.failed' ? out.failed : out.skipped).push(id);
   return out;
 }
@@ -289,6 +333,20 @@ function runConversation(host: Host, run: RunRow, node: WorkflowNode): Record<st
 type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload };
 
 /**
+ * run-event-payloads.schema.json `$defs/runCompleted.skippedTerminals` (RFC 0257): when
+ * the definition has a terminal node (no outgoing edge), none completed and no node's
+ * latest outcome is failed, the run still completes, naming every terminal once in
+ * `nodes[]` order. A function of the definition and the recorded outcomes only, so a
+ * replay fork that reproduces the outcomes ends with the same list.
+ */
+function allTerminalsSkipped(def: WorkflowDefinition, st: Outcomes): string[] | null {
+  const sources = new Set(links(def).map((l) => l.from));
+  const terminals = def.nodes.filter((n) => !sources.has(n.id)).map((n) => n.id);
+  if (terminals.length === 0 || st.failed.length > 0 || terminals.some((id) => st.completed.includes(id))) return null;
+  return terminals;
+}
+
+/**
  * events.md §run.completed — a completed run's `outputs`: the latest outputs of each sink
  * node (one with no outgoing edge), merged in definition order. A workflow whose sinks
  * produce nothing completes with `{}`.
@@ -356,6 +414,9 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
   switch (node.typeId) {
     case 'core.noop':
       return { outputs: {} };
+    case 'core.identity':
+      // fixtures.md: echoes each declared input as the output of the same name.
+      return { outputs: Object.fromEntries(Object.keys(node.inputs).map((name) => [name, resolveInput(node, name, run, def)])) };
     case 'core.delay': {
       const ms = Math.max(0, Math.min(60_000, Number(resolveInput(node, 'delayMs', run, def) ?? 1000)));
       const r = await sleepUnlessCancelled(host, run.run_id, ms);
@@ -531,6 +592,8 @@ interface Folded {
   outcome: Map<string, { seq: number; type: string }>;
   /** Each node's latest node.started sequence: a start with no terminal after it is an execution still owed. */
   lastStart: Map<string, number>;
+  /** Each node's latest `node.completed` outputs, which an edge condition's `left` reads. */
+  outputs: Map<string, Record<string, unknown>>;
   /** node.started events in the run (inherited prefix included) — what configurable.run.recursionLimit counts. */
   starts: number;
   /**
@@ -554,6 +617,7 @@ function fold(host: Host, run: RunRow): Folded {
   const skipped: string[] = [];
   const outcome = new Map<string, { seq: number; type: string }>();
   const lastStart = new Map<string, number>();
+  const outputs = new Map<string, Record<string, unknown>>();
   const resolvedCount = new Map<string, number>();
   let starts = 0;
   let started = false;
@@ -566,6 +630,7 @@ function fold(host: Host, run: RunRow): Folded {
     if ((e.type === 'node.completed' || e.type === 'node.failed' || e.type === 'node.skipped') && e.nodeId) outcome.set(e.nodeId, { seq: e.sequence, type: e.type });
     if (e.type === 'interrupt.resolved' && e.nodeId) resolvedCount.set(e.nodeId, (resolvedCount.get(e.nodeId) ?? 0) + 1);
     if (e.type === 'node.completed' && e.nodeId && !completed.includes(e.nodeId)) completed.push(e.nodeId);
+    if (e.type === 'node.completed' && e.nodeId) { const o = payload['outputs']; outputs.set(e.nodeId, o !== null && typeof o === 'object' ? o as Record<string, unknown> : {}); }
     if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) terminals.set(e.nodeId, (terminals.get(e.nodeId) ?? 0) + 1);
     if (e.type === 'node.suspended' && e.nodeId) suspended = e.nodeId;
     if (e.type === 'interrupt.requested' && e.nodeId && typeof payload['key'] === 'string') requested.set(e.nodeId, payload['key']);
@@ -577,7 +642,7 @@ function fold(host: Host, run: RunRow): Folded {
     if ((e.type === 'node.completed' || e.type === 'node.failed') && e.nodeId) { requested.delete(e.nodeId); resolved.delete(e.nodeId); resumed.delete(e.nodeId); rejectedEmitted.delete(e.nodeId); }
     if (e.type === 'node.resumed' || e.type === 'node.completed' || e.type === 'node.failed') suspended = null;
   }
-  return { started, completed, attempts, terminals, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, outcome, lastStart, starts, resolvedCount, startedAt };
+  return { started, completed, attempts, terminals, suspended, requested, resolved, resumed, rejectedEmitted, failed, skipped, outcome, lastStart, outputs, starts, resolvedCount, startedAt };
 }
 
 function setStatus(host: Host, run: RunRow, status: string, patch: Partial<RunRow> = {}): void {
@@ -799,7 +864,10 @@ export async function continueRun(host: Host, runId: string): Promise<void> {
   run = host.store.getRun(runId) as RunRow;
   if (TERMINAL.has(run.status)) return; // the other delivery of this work already ended it
   if (run.cancel_requested === 1) { terminalCancel(host, run, takeCancelReason(runId), 'caller', startedAt); return; }
-  appendEvent(host, run, 'run.completed', { outputs: runOutputs(host, run, def), durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 });
+  const completedPayload: Record<string, unknown> = { outputs: runOutputs(host, run, def), durationMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0 };
+  const skippedTerminals = allTerminalsSkipped(def, latestOutcomes(fold(host, run)));
+  if (skippedTerminals) completedPayload['skippedTerminals'] = skippedTerminals;
+  appendEvent(host, run, 'run.completed', completedPayload);
   host.store.invalidateInterruptsForRun(run.run_id);
   setStatus(host, run, 'completed', { completed_at: nowIso(), current_node_id: null });
 }

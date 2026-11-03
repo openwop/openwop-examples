@@ -47,7 +47,7 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
   // conformance-reserved typeIds the loop fixtures use (fixtures.md).
   // `core.conformance.mock-agent` is executed for the budget fixture only: it is in `executable`, and only
   // `conformance-budget-tool-calls` of the mock-agent fixtures is in `honoured` (runs.md §budget, budget.ts).
-  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
+  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.identity', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-safefetch-probe', 'conformance-budget-tool-calls', 'conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
@@ -70,7 +70,10 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
     // 64-member roster refused at creation. Executed only as councils when the contract registers the codes.
     'conformance-multi-party-council', 'conformance-multi-party-council-oversize',
     // RFC 0237 (nondeterminism.ts): one value per listed source, reproduced by a replay fork.
-    'conformance-nondeterminism']);
+    'conformance-nondeterminism',
+    // RFC 0257: a run whose every terminal is skipped completes with skippedTerminals — over a
+    // triggerRule, and over an EdgeCondition whose left reads the source's outputs.
+    'conformance-error-route-only', 'conformance-all-terminals-skipped']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   // fixtures.md §conformance-purpose-relay: only with a relay peer to forward to (purpose.ts).

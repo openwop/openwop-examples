@@ -196,11 +196,13 @@ if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture ans
 #                    surface this host does not have (the ninth host-tier id).
 #   family.memory  — no agent-memory layer.
 #   connections.packsSupported — no connection-provider surface.
+#   family.subWorkflow — no core.subWorkflow node; the RFC 0257 parent leg (suite 2.46.41) is
+#                    the first scenario to gate on this family through the behavior gate.
 # `family.packs` was a fourth until suite 2.43.1 (openwop#1706): the manifest
 # and pack-isolation scenarios now gate on the seams profile, not on the packs
 # record this host rightly does not advertise (#104), so they run again.
 # An opt-out is a CLAIM, not a hiding place: it appears in the bundle.
-OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported \
+OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported,family.subWorkflow \
 OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 OPENWOP_A2A_FAKE_PEER_PORT="$A2A_FAKE_PORT" \
 OPENWOP_MCP_FAKE_SERVER=true OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_FAKE_PORT" \
 OPENWOP_TEST_SAML_IDP_URL="$IDP_FOR_HOST" \
