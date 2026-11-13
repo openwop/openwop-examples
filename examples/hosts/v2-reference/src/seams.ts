@@ -15,6 +15,7 @@
  *   POST sample/auth/{saml/validate,scim/provision} + GET sample/auth/subject-links   RFC 0050 seams; the link record (RFC 0159/0163; saml-scim.ts)
  *   PUT/GET/DELETE packs-test/{name}/-/{version}[.tgz|.sig]   the isolated pack catalog
  *   GET/PUT/DELETE workspace/files[/{path}]     the minimal RFC 0059 workspace
+ *   POST sample/interrupts/token                readInterruptToken — RFC 0259 §C.1: the PRODUCTION token, and with bind the PRODUCTION binding, for a run the caller owns
  *   POST sample/oauth/{authorize-start,expire-refresh}   RFC 0199 — point a provider at the suite's AS double, then the PRODUCTION builder (oauth.ts)
  */
 import { hostEventTypes, publishHostEvent } from './host-events.js';
@@ -38,6 +39,9 @@ import { samlValidate, scimProvision, subjectLink } from './saml-scim.js';
 import { a2aInvoke, mcpInvoke } from './interop.js';
 import { unregisterChainPack } from './chains.js';
 import { loadRun } from './runs.js';
+import { bindingMembers, mintToken } from './interrupts.js';
+import { ownerOf } from './events.js';
+import { subjectKey } from './oauth.js';
 import { armHold, MAX_HOLD_MS } from './idempotency-hold.js';
 import { beginGrant, configureProvider, expireAccessToken, oauthSupported, registerReachProvider, type ProviderRow } from './oauth.js';
 
@@ -391,6 +395,26 @@ async function emitHostEventRoute(ctx: Ctx): Promise<Reply> {
   return { status: 202, body: { eventId: event.eventId } };
 }
 
+/**
+ * RFC 0259 §C.1 — the resume token of an open interrupt, minted by the same
+ * `mintToken` the production issuance path uses, for a run the caller created.
+ * `bind: true` adds the binding the host would put in a link it addressed to the
+ * caller. It resolves nothing; no open interrupt (or an already resolved one) is 404.
+ */
+async function readInterruptTokenRoute(ctx: Ctx): Promise<Reply> {
+  const body = await ctx.json<{ runId?: unknown; nodeId?: unknown; bind?: unknown }>();
+  for (const k of Object.keys(body)) if (!['runId', 'nodeId', 'bind'].includes(k)) throw err('validation_error', `unknown key ${k}`);
+  if (typeof body.runId !== 'string' || typeof body.nodeId !== 'string') throw err('validation_error', 'runId and nodeId are REQUIRED strings');
+  if (body.bind !== undefined && typeof body.bind !== 'boolean') throw err('validation_error', 'bind is a boolean');
+  const run = loadRun(ctx, body.runId);
+  const owner = ownerOf(ctx.host, run).subject;
+  if (ctx.subject === null || subjectKey(ctx.subject) !== subjectKey(owner)) throw err('not_found', 'no open interrupt on a run the caller created');
+  const row = ctx.host.store.pendingInterruptForNode(run.run_id, body.nodeId);
+  if (!row || TERMINAL.has(run.status)) throw err('not_found', 'no open interrupt on that node');
+  const token = mintToken(ctx.host, { i: row.interrupt_id, r: run.run_id, n: row.node_id, e: row.expires_at, t: 'resolve' });
+  return { status: 200, body: body.bind === true ? { token, resumeValueMembers: bindingMembers(ctx.host, row, owner) } : { token } };
+}
+
 export function seamRoutes(host: Host): Route[] {
   if (!host.config.seamsProfile) return [];
   const p = SEAMS_PREFIX;
@@ -411,6 +435,7 @@ export function seamRoutes(host: Host): Route[] {
     route('GET', `${p}/sample/auth/subject-links`, true, subjectLinksRoute),
     route('POST', `${p}/sample/a2a/invoke`, true, a2aInvokeRoute),
     route('POST', `${p}/sample/mcp/invoke`, true, mcpInvokeRoute),
+    ...(host.artifacts.interruptResolvedViaFacet ? [route('POST', `${p}/sample/interrupts/token`, true, readInterruptTokenRoute)] : []),
     ...(oauthSupported(host) ? [route('POST', `${p}/sample/oauth/authorize-start`, true, authorizeStartRoute), route('POST', `${p}/sample/oauth/expire-refresh`, true, expireRefreshRoute)] : []),
     route('POST', `${p}/sample/test/sandbox-load`, true, sandboxLoad),
     route('POST', `${p}/sample/test/sandbox-invoke`, true, sandboxInvoke),

@@ -41,6 +41,8 @@ export interface SpecArtifacts {
   readonly peerAliases: ReadonlyMap<string, AliasRow>;
   /** RFC 0204: the installed `mcp` facet defines `client` (`ctx.mcp` is part of the contract this host ships). */
   readonly mcpClientFacet: boolean;
+  /** RFC 0259: the installed contract defines `interrupt.resolvedVia` (and so the `readInterruptToken` seam). */
+  readonly interruptResolvedViaFacet: boolean;
   /** RFC 0231: the installed contract defines `budget.onExhaustion` (the exhaustion behaviours a host serves). */
   readonly budgetOnExhaustionFacet: boolean;
   /** RFC 0236: the installed contract defines the `hostEvents` family (and so the host-event envelope). */
@@ -131,6 +133,7 @@ export function loadArtifacts(): SpecArtifacts {
     peerAliases,
     mcpClientFacet: caps.properties['mcp']?.properties?.['client'] !== undefined,
     budgetOnExhaustionFacet: caps.properties['budget']?.properties?.['onExhaustion'] !== undefined,
+    interruptResolvedViaFacet: caps.properties['interrupt']?.properties?.['resolvedVia'] !== undefined,
     hostEventsFamily: caps.properties['hostEvents'] !== undefined,
     nondeterminismSourcesFacet: caps.properties['nondeterminismPolicy']?.properties?.['sources'] !== undefined,
     hostEventTrigger: readFileSync(join(root, 'spec', 'v2', 'path-manifest.json'), 'utf8').includes('"/host/events/test"'),
