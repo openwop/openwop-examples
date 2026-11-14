@@ -14,7 +14,7 @@ import { ownerOf, parseStreamModes, pollResponse, readEvents, streamRun } from '
 import { docForMajor, ownerForMajor } from './codemap.js';
 import { ifNoneMatchMatches } from './discovery.js';
 import { checkTenantBound, nowIso, NODE_ID, projectBoundId, tenantBound, VERSION, WORKFLOW_ID } from './ids.js';
-import { mintToken, payloadOf, verifyToken } from './interrupts.js';
+import { BINDING_MEMBER, mintToken, payloadOf, requireEligibleBinding, verifiedBinding, verifyToken } from './interrupts.js';
 import { MAX_PARTICIPANTS, councilSupported, oversizedRoster } from './council.js';
 import { forkRun } from './replay.js';
 import { route, STREAMED, withIdempotency, type Ctx, type Reply, type Route } from './router.js';
@@ -502,7 +502,18 @@ async function resolveByToken(ctx: Ctx): Promise<Reply> {
   const body = parseJsonBody(text);
   for (const k of Object.keys(body)) if (k !== 'resumeValue') throw err('validation_error', 'the resolve body is { resumeValue } (closed)');
   if (!('resumeValue' in body)) throw err('validation_error', 'resumeValue is REQUIRED');
-  const r = resolveAndResume(ctx.host, run, row, body['resumeValue'], null);
+  let resumeValue = body['resumeValue'];
+  let resolvedVia: Record<string, unknown> | undefined;
+  if (ctx.host.artifacts.interruptResolvedViaFacet) {
+    // RFC 0259: the binding member is the instrument, not part of the decision, so it
+    // is taken off the resume value; boundTo is set only from a binding whose MAC verifies.
+    const rv = resumeValue !== null && typeof resumeValue === 'object' && !Array.isArray(resumeValue) ? (resumeValue as Record<string, unknown>) : undefined;
+    const boundTo = rv === undefined ? undefined : verifiedBinding(ctx.host, row, rv[BINDING_MEMBER]);
+    if (rv !== undefined && BINDING_MEMBER in rv) resumeValue = Object.fromEntries(Object.entries(rv).filter(([k]) => k !== BINDING_MEMBER));
+    requireEligibleBinding(row, boundTo);
+    resolvedVia = { scheme: 'interrupt-token', ...(boundTo !== undefined ? { boundTo } : {}) };
+  }
+  const r = resolveAndResume(ctx.host, run, row, resumeValue, null, resolvedVia);
   return { status: 200, body: r };
 }
 

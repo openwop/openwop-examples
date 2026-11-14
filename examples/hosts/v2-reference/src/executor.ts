@@ -938,7 +938,7 @@ export function requestResume(host: Host, run: RunRow, reason: string | undefine
 }
 
 /** Both resolve surfaces converge here: validate, count the vote, claim atomically, record, resume. */
-export function resolveAndResume(host: Host, run: RunRow, row: InterruptRow, resumeValue: unknown, subject: Subject | null): { runId: string; nodeId: string; status: string } {
+export function resolveAndResume(host: Host, run: RunRow, row: InterruptRow, resumeValue: unknown, subject: Subject | null, resolvedVia?: Record<string, unknown>): { runId: string; nodeId: string; status: string } {
   const outcome = validateResolve(host, run, row, resumeValue, subject);
   if (!outcome.exitsSuspend) return { runId: run.run_id, nodeId: row.node_id, status: run.status };
   const payload = payloadOf(row);
@@ -954,6 +954,8 @@ export function resolveAndResume(host: Host, run: RunRow, row: InterruptRow, res
   if (!host.store.resolveInterrupt(row.interrupt_id, JSON.stringify(resumeValue ?? null))) throw err('interrupt_already_resolved', 'a concurrent resolve won');
   const resolved: Record<string, unknown> = { nodeId: row.node_id, interruptId: row.interrupt_id, kind: payload.kind, resumeValue };
   if (subject !== null) resolved['resolvedBy'] = subject;
+  // RFC 0259 §A.2: the instrument, recorded only on a token presentation.
+  if (resolvedVia !== undefined) resolved['resolvedVia'] = resolvedVia;
   if (decision !== undefined) resolved['decision'] = decision;
   if (payload.kind === 'approval') {
     // interrupt.md §Events (RFC 0183) / §Rejection (RFC 0223): the applied action, and the field it requires.

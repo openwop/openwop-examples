@@ -108,7 +108,8 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     budget: record('witnessable-gated', { dimensions: [...BUDGET_DIMENSIONS], enforce: 'hard', scopes: ['run'], ...(host.artifacts.budgetOnExhaustionFacet ? { onExhaustion: ['fail'] } : {}) }),
     limits: stable('witnessable-gated', { clarificationRounds: 0, maxNodeExecutions: 1000, maxRunDurationMs: 600_000, maxRequestBodyBytes: 4_194_304 }),
     eventLog: record('claims-check', { crossEngineOrdering: { orderingModel: 'global-sequencer' } }),
-    interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),
+    // RFC 0259: resolvedVia recorded on every token resolution (runs.ts resolveByToken), once the installed contract defines it.
+    interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'], ...(host.artifacts.interruptResolvedViaFacet ? { resolvedVia: true } : {}) }),
     runList: record('witnessable-gated', { maxPageSize: 100, filters: ['workflowId', 'status'] }),
     replay: record('witnessable-gated', { modes: ['replay', 'branch'], retention: { days: c.replayRetentionDays }, effectSeamsManifest: '/host/effect-seams' }),
     // RFC 0188 §A.5 — the DELIVERY dead-letter sink, distinct from the top-level

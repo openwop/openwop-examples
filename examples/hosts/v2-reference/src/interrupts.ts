@@ -106,6 +106,36 @@ export function mintInterrupt(host: Host, run: RunRow, nodeId: string, payload: 
   return { row, token: mintToken(host, { i: row.interrupt_id, r: run.run_id, n: nodeId, e: expiresAt, t: 'resolve' }) };
 }
 
+/**
+ * RFC 0259 §A.4 — a presentation the host addresses to one Subject. The member
+ * is `<base64url(JSON {i, s})>.<mac>`, MAC'd under the interrupt secret over the
+ * interrupt id and that Subject, so a binding the host did not make (or one
+ * altered to name someone else) fails the MAC and binds no one.
+ */
+export const BINDING_MEMBER = 'binding';
+
+export function bindingMembers(host: Host, row: InterruptRow, subject: Subject): Record<string, string> {
+  const body = B64(JSON.stringify({ i: row.interrupt_id, s: subject }));
+  return { [BINDING_MEMBER]: `${body}.${mac(host.config.interruptSecret, `bind.${body}`)}` };
+}
+
+/** The Subject a presented binding names, or undefined when it is absent, malformed, for another interrupt, or fails the MAC. */
+export function verifiedBinding(host: Host, row: InterruptRow, presented: unknown): Subject | undefined {
+  if (typeof presented !== 'string') return undefined;
+  const dot = presented.lastIndexOf('.');
+  if (dot <= 0) return undefined;
+  const body = presented.slice(0, dot);
+  const a = Buffer.from(presented.slice(dot + 1), 'utf8');
+  const b = Buffer.from(mac(host.config.interruptSecret, `bind.${body}`), 'utf8');
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return undefined;
+  try {
+    const claims = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { i?: unknown; s?: Subject };
+    return claims.i === row.interrupt_id && claims.s !== undefined ? claims.s : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function payloadOf(row: InterruptRow): InterruptPayload {
   return JSON.parse(row.payload_json) as InterruptPayload;
 }
@@ -113,6 +143,18 @@ export function payloadOf(row: InterruptRow): InterruptPayload {
 function listed(list: unknown[], subject: Subject): boolean {
   const ids = new Set([subject.subjectId, principalRef(subject), `${subject.issuer}:${subject.subjectId}`]);
   return list.some((entry) => ids.has(String(entry)));
+}
+
+/**
+ * RFC 0259 §A.4 — eligibility on a token resolution. An approval that declares
+ * `approversList` is resolved through its token only by a presentation the host
+ * bound to a listed Subject; anything else is refused, never recorded unattributed.
+ */
+export function requireEligibleBinding(row: InterruptRow, boundTo: Subject | undefined): void {
+  const payload = payloadOf(row);
+  const approvers = payload.kind === 'approval' && Array.isArray(payload.data?.['approversList']) ? (payload.data['approversList'] as unknown[]) : [];
+  if (approvers.length === 0) return;
+  if (boundTo === undefined || !listed(approvers, boundTo)) throw err('forbidden', 'this gate declares approversList: a token resolution needs a link the host addressed to a listed approver (RFC 0259 §A.4)');
 }
 
 /**
