@@ -26,6 +26,18 @@ export interface Owner {
   subject: Subject;
 }
 
+/**
+ * workflow-definition.schema.json `WorkflowNode.compensation` (RFC 0151 §B): the node's
+ * inverse action, closed. `inputMapping` derives from recorded facts only.
+ */
+export interface NodeCompensation {
+  nodeTypeId: string;
+  inputMapping?: Record<string, unknown>;
+  retry?: { maxAttempts?: number; backoffMs?: number };
+  requiresApproval?: boolean;
+  waiveRequiresApproval?: boolean;
+}
+
 export interface WorkflowNode {
   id: string;
   typeId: string;
@@ -33,6 +45,7 @@ export interface WorkflowNode {
   config: Record<string, unknown>;
   inputs: Record<string, unknown>;
   agent?: { agentId?: string };
+  compensation?: NodeCompensation;
 }
 
 export interface WorkflowDefinition {

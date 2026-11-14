@@ -41,7 +41,8 @@ const SINCE = '2.0';
 const EXPERIMENTAL_UNTIL = '2.1';
 
 /** Fixtures whose semantics are v2 claims (the v2 quorum rule; cycles), never offered on the v1 document. */
-const V2_ONLY_FIXTURES = new Set(['conformance-interrupt-quorum', 'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop', 'conformance-purpose-relay']);
+// RFC 0265's unwind fixture is a v2 witness (v2-compensation-unwind); the frozen v1 tree has no scenario for it.
+const V2_ONLY_FIXTURES = new Set(['conformance-interrupt-quorum', 'conformance-approval-reject-loopback', 'conformance-replay-ordinal-loop', 'conformance-purpose-relay', 'conformance-compensate-unwind']);
 
 export function advertisedFixtures(host: Host, major: 1 | 2 = 2): string[] {
   // The v1 contract refuses core.conversationGate (conversationPrimitive is a v2-root claim here),

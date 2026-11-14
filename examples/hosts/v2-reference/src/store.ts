@@ -598,10 +598,12 @@ export class Store {
    * The terminal outcome a replay resolves from, keyed (sourceRunId, nodeId, n):
    * the last transport attempt of the node's n-th execution (replay.md
    * §Suppression rule 2). It used to ignore n and take the node's LAST outcome,
-   * so every execution of a re-executed node replayed as the final one.
+   * so every execution of a re-executed node replayed as the final one. An INVERSE
+   * row (RFC 0265, effects.ts `isInverseRow`) shares the forward's node and ordinal
+   * and is never the forward's outcome.
    */
   effectOutcome(runId: string, nodeId: string, execution: number): EffectRow | undefined {
-    return this.db.prepare('SELECT * FROM effects WHERE run_id = ? AND node_id = ? AND COALESCE(execution, 1) = ? AND outcome_json IS NOT NULL ORDER BY attempt DESC LIMIT 1').get(runId, nodeId, execution) as EffectRow | undefined;
+    return this.db.prepare(`SELECT * FROM effects WHERE run_id = ? AND node_id = ? AND COALESCE(execution, 1) = ? AND outcome_json IS NOT NULL AND business_key NOT LIKE 'inverse#%' ORDER BY attempt DESC LIMIT 1`).get(runId, nodeId, execution) as EffectRow | undefined;
   }
   /** The terminal outcome recorded under one effect identity in a run (the fallback for an execution that resolved to an earlier one's record). */
   effectOutcomeById(runId: string, effectId: string): EffectRow | undefined {
