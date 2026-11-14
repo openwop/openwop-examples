@@ -4,7 +4,8 @@
  * loop), executes them, and records every transition as a registered v2
  * event with a payload from the registry (events.md §Payloads).
  *
- * Node types: core.noop, core.identity (echoes its inputs), core.delay, core.conformance.hold (pure), core.fail, core.approvalGate,
+ * Node types: core.noop, core.identity (echoes its inputs), core.delay, core.conformance.hold (pure),
+ * core.conformance.side-effect and core.conformance.compensable-effect (ledgered, RFC 0265), core.fail, core.approvalGate,
  * core.clarificationGate, core.interrupt, core.httpFetch, core.conversationGate
  * (the conformance mock), conformance.artifact.emit (RFC 0205), and (RFC 0204,
  * when `mcp.client` is advertised) core.conformance.mcp-client. Anything else fails
@@ -15,7 +16,7 @@
  * An `expression` condition is not evaluated: its edge contributes as if unconditioned.
  */
 import { appendEvent, ownerOf, readEvents } from './events.js';
-import { buildCompensationPlan, compensationState, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
+import { COMPENSABLE_EFFECT_TYPE, buildCompensationPlan, compensationState, performCompensableEffect, performCompensationInverse, performConformanceSideEffect, performHttpFetch, recordAttempt } from './effects.js';
 import { SafeFetchRejection, safeFetch } from './safe-fetch.js';
 import { BudgetExhausted, afterToolCall, beforeToolCall, reserveBudget } from './budget.js';
 import { HostError, err } from './errors.js';
@@ -449,6 +450,22 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         const code = (e as { code?: string }).code;
         throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'internal_error', (e as Error).message);
       }
+    case COMPENSABLE_EFFECT_TYPE: {
+      // RFC 0265 §A: the forward effect, one ledger row per execution, suppressed in a
+      // replay (effects.ts). Its inverse (`inverse: true`) is a compensation plan step,
+      // run by unwind() against the forward record it undoes — as a graph node it has
+      // no forward to invert, so it is refused rather than recorded as a forward.
+      if (resolveInput(node, 'inverse', run, def) === true) {
+        throw new NodeFailure('node_config_invalid', `${COMPENSABLE_EFFECT_TYPE} runs as the inverse action only from a compensation plan step`);
+      }
+      try {
+        const r = performCompensableEffect(host, run, node, execution);
+        return { outputs: { ...r.outputs, effectId: r.effectId } };
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        throw new NodeFailure(code === 'replay_source_missing' ? 'replay_source_missing' : 'internal_error', (e as Error).message);
+      }
+    }
     case 'core.conformance.hold': {
       // A reserved, PURE conformance node: it holds for inputs.delayMs, then completes
       // with its resolved inputs as its outputs. It performs nothing observable outside
@@ -665,7 +682,17 @@ function terminalCancel(host: Host, run: RunRow, reason: string, cancelledBy: st
   setStatus(host, run, 'cancelled', { completed_at: nowIso(), current_node_id: null, cancel_requested: 0, pause_requested: 0 });
 }
 
-/** Run the compensation plan (reverse completion) when a run fails after compensable nodes completed. */
+/**
+ * Run the compensation plan (reverse completion) when a run fails after compensable nodes
+ * completed. `compensation.requested` (the durable plan) precedes `compensation.started`,
+ * and each inverse is recorded in `attempts[]` in the order it ran (asyncapi
+ * `compensation.*`; compensation-projection.schema.json, RFC 0265 §B.1/§B.2).
+ *
+ * A step whose node declares node-level `compensation.nodeTypeId` PERFORMS that inverse
+ * (effects.ts performCompensationInverse): a ledgered effect of its own identity, which a
+ * replay fork resolves from the source's record and never re-performs (RFC 0265 §B.5). A
+ * legacy `config.compensation` step stays the recorded no-op it always was.
+ */
 function unwind(host: Host, run: RunRow, def: WorkflowDefinition, completed: string[]): void {
   const plan = buildCompensationPlan(def.nodes, completed);
   if (plan.length === 0) return;
@@ -678,18 +705,28 @@ function unwind(host: Host, run: RunRow, def: WorkflowDefinition, completed: str
   recordAttempt(host, run, state);
   appendEvent(host, run, 'compensation.started', { compensationId: `c-${run.run_id.split('/')[1] ?? ''}`, orderingModel: 'reverse-completion' });
   let failed = 0;
+  let inverseFailed = false;
   for (const step of plan) {
-    // The inverse action of every compensable fixture node is a recorded no-op.
-    const outcome: 'succeeded' | 'skipped' = step.irreversibleEffect ? 'skipped' : 'succeeded';
-    if (outcome === 'skipped') failed++;
-    state.attempts.push(outcome === 'skipped' ? { nodeId: step.nodeId, attempt: 1, outcome, at: nowIso(), reason: 'irreversible-effect' } : { nodeId: step.nodeId, attempt: 1, outcome, at: nowIso() });
+    const inverse = def.nodes.find((n) => n.id === step.nodeId)?.compensation;
+    if (step.irreversibleEffect) {
+      failed++;
+      state.attempts.push({ nodeId: step.nodeId, attempt: 1, outcome: 'skipped', at: nowIso(), reason: 'irreversible-effect' });
+    } else if (inverse !== undefined) {
+      // The fixture's inverses never fail, so `compensation.retry` is not exercised: one attempt.
+      const r = performCompensationInverse(host, run, step.nodeId, inverse);
+      if (r.outcome === 'failed') { failed++; inverseFailed = true; }
+      state.attempts.push(r.reason === undefined ? { nodeId: step.nodeId, attempt: 1, outcome: r.outcome, at: nowIso() } : { nodeId: step.nodeId, attempt: 1, outcome: r.outcome, at: nowIso(), reason: r.reason });
+    } else {
+      // Legacy `config.compensation`: the inverse action is a recorded no-op.
+      state.attempts.push({ nodeId: step.nodeId, attempt: 1, outcome: 'succeeded', at: nowIso() });
+    }
     recordAttempt(host, run, state);
   }
   state.status = failed === 0 ? 'completed' : failed === plan.length ? 'failed' : 'partial';
   recordAttempt(host, run, state);
   appendEvent(host, run, failed === 0 ? 'compensation.completed' : 'compensation.failed', failed === 0
     ? { compensationId: `c-${run.run_id.split('/')[1] ?? ''}`, orderingModel: 'reverse-completion' }
-    : { compensationId: `c-${run.run_id.split('/')[1] ?? ''}`, orderingModel: 'reverse-completion', reason: 'operator-terminated' });
+    : { compensationId: `c-${run.run_id.split('/')[1] ?? ''}`, orderingModel: 'reverse-completion', reason: inverseFailed ? 'retries-exhausted' : 'operator-terminated' });
 }
 
 /**

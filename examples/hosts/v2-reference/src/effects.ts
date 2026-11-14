@@ -12,8 +12,12 @@
  *   - The effect-seam manifest (GET /host/effect-seams) enumerates both seams
  *     this runtime can reach: `http.fetch` and `webhook.fanout`.
  *   - Compensation (security-defaults.md §Compensation): a reverse-completion
- *     plan over completed nodes that declare `config.compensation`, unwound
- *     when the run fails; GET /runs/{runId}/compensation projects plan + attempts.
+ *     plan over completed nodes that declare a compensation — node-level
+ *     `compensation` (workflow-definition.schema.json `WorkflowNode.compensation`,
+ *     RFC 0151 §B) or the legacy `config.compensation` — unwound when the run
+ *     fails; GET /runs/{runId}/compensation projects plan + attempts. A node-level
+ *     inverse of `core.conformance.compensable-effect` (RFC 0265) is PERFORMED and
+ *     ledgered; a legacy declaration stays a recorded no-op.
  */
 import { createHash } from 'node:crypto';
 import { HOST_NAME } from './config.js';
@@ -21,7 +25,7 @@ import { guardedRequest, validateEgressUrl } from './egress.js';
 import { err } from './errors.js';
 import { readEvents } from './events.js';
 import { nowIso, opaque } from './ids.js';
-import type { Host, WorkflowNode } from './host.js';
+import type { Host, NodeCompensation, WorkflowNode } from './host.js';
 import type { EffectRow, RunRow } from './store.js';
 
 export function effectSeamManifest(host: Host): Record<string, unknown> {
@@ -66,9 +70,14 @@ export function compensationStatusOf(run: RunRow): string {
   return compensationState(run).status;
 }
 
-/** Reverse-completion plan over the completed nodes that declare a compensation (RFC 0151 §A). */
+/**
+ * Reverse-completion plan over the completed nodes that declare a compensation (RFC 0151 §A):
+ * node-level `compensation` (the v2 schema's home for it) or the legacy `config.compensation`,
+ * which only the host's own `conformance-http-effect` workflow still uses. `irreversibleEffect`
+ * is a legacy-form key; node-level `compensation` is closed and carries none.
+ */
 export function buildCompensationPlan(nodes: readonly WorkflowNode[], completedInOrder: readonly string[]): CompensationState['plan'] {
-  const declared = new Map(nodes.filter((n) => n.config['compensation'] !== undefined).map((n) => [n.id, n] as const));
+  const declared = new Map(nodes.filter((n) => n.compensation !== undefined || n.config['compensation'] !== undefined).map((n) => [n.id, n] as const));
   const plan: CompensationState['plan'] = [];
   let order = 0;
   for (const id of [...completedInOrder].reverse()) {
@@ -297,7 +306,9 @@ export function replayRecordedEffect(host: Host, run: RunRow, node: WorkflowNode
   // attempt the source did not make. Each row keeps the source's attempt number,
   // state and `at`: a replay proves recorded history and MUST NOT regenerate it
   // (replay.md §Suppression rule 1; RFC 0173 §C.2, suite 2.42.2).
-  for (const src of host.store.effectsForRun(sourceRunId).filter((e) => e.node_id === node.id && (e.execution ?? 1) === execution)) {
+  // An inverse row (RFC 0265) carries its forward's node and ordinal but is not the
+  // forward's history: the fork's own unwind resolves it (performCompensationInverse).
+  for (const src of host.store.effectsForRun(sourceRunId).filter((e) => e.node_id === node.id && (e.execution ?? 1) === execution && !isInverseRow(e))) {
     host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
   }
   // A recorded failure replays as the same failure: the outcome is derived, never re-decided.
@@ -325,6 +336,114 @@ export function performConformanceSideEffect(host: Host, run: RunRow, node: Work
 }
 
 const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
+
+/**
+ * core.conformance.compensable-effect — the conformance-RESERVED compensable typeId
+ * (RFC 0265 §A; fixtures.md §"The compensate-unwind fixture"). A host that serves
+ * `conformance-compensate-unwind` MUST record it on the Layer-2 ledger as exactly one
+ * effect per execution, forward and inverse alike, and MUST run it as the inverse
+ * action when its resolved inputs carry `inverse: true`. What the effect does is
+ * irrelevant; like core.conformance.side-effect it performs nothing outside the host.
+ */
+export const COMPENSABLE_EFFECT_TYPE = 'core.conformance.compensable-effect';
+
+/**
+ * The business-key prefix of an INVERSE ledger row. The inverse is its own effect
+ * (its own effectId, its own record) but is attributed to the forward node's id, so
+ * the readers keyed (runId, nodeId, execution) — store.effectOutcome and the replay
+ * copy above — must tell it from the forward record. `#` is outside the tenant
+ * alphabet (ids.schema.json `tenantId`) and the hex of a business-identity key, so no
+ * forward key can carry the prefix.
+ */
+const INVERSE_KEY_PREFIX = 'inverse#';
+export function isInverseRow(e: EffectRow): boolean {
+  return e.business_key.startsWith(INVERSE_KEY_PREFIX);
+}
+
+/**
+ * The forward execution of `core.conformance.compensable-effect`: one activity-recipe
+ * ledger row per execution, exactly as core.conformance.side-effect records (the
+ * effect id differs only in its `ce-` prefix). In a replay it resolves execution n
+ * from the source run's record or fails closed (replay.md §Suppression).
+ */
+export function performCompensableEffect(host: Host, run: RunRow, node: WorkflowNode, execution: number): { outputs: Record<string, unknown>; effectId: string } {
+  if (run.fork_mode === 'replay' && run.source_run_id !== null) return replayRecordedEffect(host, run, node, execution, COMPENSABLE_EFFECT_TYPE);
+  const recipe = `${run.tenant}|${run.run_id}|${node.id}|${execution}`;
+  const effectId = `${run.tenant}/ce-${createHash('sha256').update(recipe).digest('base64url').slice(0, 22)}`;
+  const outcome: FetchOutcome = { status: 200 };
+  const claim = host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: node.id, attempt: 1, keying: 'activity-recipe', state: 'completed', provider_key: null, invocation_id: null, at: nowIso(), business_key: recipe, outcome_json: JSON.stringify(outcome), execution });
+  return { outputs: { status: outcome.status, effectId, ...(claim.won ? {} : { deduplicated: true }) }, effectId };
+}
+
+/**
+ * The forward record an inverse undoes: the node's latest forward row in this run's
+ * ledger, else in its source's (a fork whose inherited prefix covered the node holds
+ * no row of its own for it — the source performed it).
+ */
+function forwardRecord(host: Host, run: RunRow, nodeId: string): EffectRow | undefined {
+  for (let r: RunRow | undefined = run; r !== undefined; r = r.source_run_id === null ? undefined : host.store.getRun(r.source_run_id)) {
+    const rows = host.store.effectsForRun(r.run_id).filter((e) => e.node_id === nodeId && !isInverseRow(e) && e.state === 'completed');
+    const latest = rows.sort((a, b) => (a.execution ?? 1) - (b.execution ?? 1) || Date.parse(a.at) - Date.parse(b.at)).at(-1);
+    if (latest !== undefined) return latest;
+  }
+  return undefined;
+}
+
+/** An instant strictly after `iso`: the inverse is recorded after the effect it undoes, even inside one millisecond. */
+function strictlyAfter(iso: string): string {
+  return new Date(Math.max(Date.now(), Date.parse(iso) + 1)).toISOString();
+}
+
+export interface InverseOutcome { outcome: 'succeeded' | 'failed'; reason?: string; effectId?: string }
+
+/**
+ * One inverse action of a compensation plan step (RFC 0265 §A; RFC 0151 §B): node-level
+ * `compensation.nodeTypeId` run with the resolved `inputMapping` as its inputs. Only
+ * `core.conformance.compensable-effect` with `inverse: true` is executable here.
+ *
+ * Identity. The inverse is a SEPARATE effect with its own id, derived from the forward
+ * record's effectId (`inverse#<forwardEffectId>`), so one forward effect has exactly one
+ * inverse identity however often an unwind reaches it — a re-delivery of the same unwind
+ * dedupes on the ledger claim. The row carries the forward node's id and ordinal, and an
+ * `at` strictly after the forward's, which is what lets a reader attribute it by
+ * elimination (the suite's `splitLedger`: a node's earliest row is the forward).
+ *
+ * Replay (replay.md §Suppression; invariant compensation-replay-no-refire). A replay
+ * fork that fails and unwinds again performs NO inverse: it resolves the source run's
+ * recorded inverse for the same forward identity and copies the source's row verbatim
+ * (attempt, state, `at`) as inherited history, exactly as replayRecordedEffect does for
+ * forward effects — so the fork's ledger holds no row the source never made. Absent a
+ * recorded inverse, the step fails closed with `replay_source_missing`, recording nothing.
+ */
+export function performCompensationInverse(host: Host, run: RunRow, nodeId: string, compensation: NodeCompensation): InverseOutcome {
+  // inputMapping derives from recorded facts only (workflow-definition.schema.json); the
+  // fixture's mapping is the literal `{ inverse: true }`, so its values are the inputs.
+  const inputs = compensation.inputMapping ?? {};
+  if (compensation.nodeTypeId !== COMPENSABLE_EFFECT_TYPE) return { outcome: 'failed', reason: `capability_not_provided: ${compensation.nodeTypeId} is not executed as an inverse by this host` };
+  if (inputs['inverse'] !== true) return { outcome: 'failed', reason: 'node_config_invalid: an inverse of core.conformance.compensable-effect carries inputs.inverse: true' };
+  const forward = forwardRecord(host, run, nodeId);
+  if (forward === undefined) return { outcome: 'failed', reason: `no forward effect is recorded for ${nodeId}, so there is nothing to invert` };
+  const key = `${INVERSE_KEY_PREFIX}${forward.effect_id}`;
+  if (run.fork_mode === 'replay' && run.source_run_id !== null) {
+    const recorded = host.store.effectsForRun(run.source_run_id).filter((e) => e.business_key === key);
+    const last = recorded.at(-1);
+    if (last === undefined || last.outcome_json === null) return { outcome: 'failed', reason: `replay_source_missing: the source run recorded no inverse of ${forward.effect_id} — the inverse is not performed` };
+    for (const src of recorded) host.store.claimEffect({ ...src, run_id: run.run_id, invocation_id: `replay-of:${src.run_id}` });
+    const o = JSON.parse(last.outcome_json) as FetchOutcome;
+    return o.error === undefined ? { outcome: 'succeeded', effectId: last.effect_id } : { outcome: 'failed', reason: `recorded, not performed: ${o.error}`, effectId: last.effect_id };
+  }
+  const effectId = `${run.tenant}/ci-${createHash('sha256').update(key).digest('base64url').slice(0, 22)}`;
+  // A forward effect another run already compensated (a branch whose inherited prefix
+  // covered the node) resolves to that inverse rather than undoing the effect twice.
+  const done = host.store.completedEffect(key);
+  if (done !== undefined && done.run_id !== run.run_id) {
+    host.store.claimEffect({ ...done, run_id: run.run_id, at: nowIso(), invocation_id: `deduplicated-of:${done.run_id}` });
+    return { outcome: 'succeeded', effectId: done.effect_id };
+  }
+  const outcome: FetchOutcome = { status: 200 };
+  host.store.claimEffect({ effect_id: effectId, run_id: run.run_id, node_id: nodeId, attempt: 1, keying: 'activity-recipe', state: 'completed', provider_key: null, invocation_id: null, at: strictlyAfter(forward.at), business_key: key, outcome_json: JSON.stringify(outcome), execution: forward.execution ?? 1 });
+  return { outcome: 'succeeded', effectId };
+}
 
 export function recordAttempt(host: Host, run: RunRow, state: CompensationState): void {
   host.store.updateRun(run.run_id, { compensation_json: JSON.stringify(state) });

@@ -24,6 +24,7 @@ import { route, Router, STREAMED, type Ctx, type Reply } from './router.js';
 import { runRoutes } from './runs.js';
 import { artifactRoutes, ARTIFACT_EMIT_TYPE } from './run-artifacts.js';
 import { NONDETERMINISM_TYPE } from './nondeterminism.js';
+import { COMPENSABLE_EFFECT_TYPE } from './effects.js';
 import { startA2APush, a2aServerRoutes } from './a2a-server.js';
 import { agentRoutes } from './agents.js';
 import { mcpServerRoutes } from './mcp-server.js';
@@ -47,7 +48,9 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
   // conformance-reserved typeIds the loop fixtures use (fixtures.md).
   // `core.conformance.mock-agent` is executed for the budget fixture only: it is in `executable`, and only
   // `conformance-budget-tool-calls` of the mock-agent fixtures is in `honoured` (runs.md §budget, budget.ts).
-  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.identity', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
+  // `core.conformance.compensable-effect` (RFC 0265, effects.ts) is the ledgered forward/inverse effect of
+  // `conformance-compensate-unwind`; `compensation` is always advertised (discovery.ts), so the fixture may be.
+  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.identity', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', COMPENSABLE_EFFECT_TYPE, 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-safefetch-probe', 'conformance-budget-tool-calls', 'conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
@@ -73,7 +76,9 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
     'conformance-nondeterminism',
     // RFC 0257: a run whose every terminal is skipped completes with skippedTerminals — over a
     // triggerRule, and over an EdgeCondition whose left reads the source's outputs.
-    'conformance-error-route-only', 'conformance-all-terminals-skipped']);
+    'conformance-error-route-only', 'conformance-all-terminals-skipped',
+    // RFC 0265: three ledgered compensable effects, then core.fail — a real reverse-completion unwind.
+    'conformance-compensate-unwind']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   // fixtures.md §conformance-purpose-relay: only with a relay peer to forward to (purpose.ts).
@@ -93,8 +98,9 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
       try {
         const def = JSON.parse(readFileSync(join(dir, f), 'utf8')) as WorkflowDefinition;
         if (!Array.isArray(def.nodes) || typeof def.id !== 'string' || !honoured.has(def.id)) continue;
-        // Only fixtures every node of which this host executes are advertised (an honest `fixtures[]`).
-        if (!def.nodes.every((n) => executable.has(n.typeId))) continue;
+        // Only fixtures every node of which this host executes are advertised (an honest `fixtures[]`) —
+        // a node-level inverse included: `compensation.nodeTypeId` MUST resolve at registration (RFC 0151 §B).
+        if (!def.nodes.every((n) => executable.has(n.typeId) && (n.compensation === undefined || executable.has(n.compensation.nodeTypeId)))) continue;
         out.set(def.id, { ...def, edges: def.edges ?? [], variables: def.variables ?? [] });
       } catch { /* skip an unreadable fixture */ }
     }
