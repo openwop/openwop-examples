@@ -97,7 +97,9 @@ jobs:
           # The fakes are in-process and match the cut. The SAML/SCIM seam
           # opt-ins are deliberately NOT set: they need the synthetic IdP that
           # only cut-bundle.sh starts, and those rows skip honestly without it.
-          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported,family.subWorkflow'
+          # family.production: without OPENWOP_INFLIGHT_CAP this lane does not advertise production (see the
+          # note on the first lane), so v2-production-profile (suite >= 2.49.0) is opted out here; the cut runs it.
+          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported,family.subWorkflow,family.production'
           # The relaxation this leg's host runs under, declared. Suite >= 2.33.0
           # checks: `v2-webhook-egress-refusal` registers eight destinations the
           # guard MUST refuse, and with the guard open and NOTHING declared it
@@ -181,7 +183,9 @@ jobs:
           # The fakes are in-process and match the cut. The SAML/SCIM seam
           # opt-ins are deliberately NOT set: they need the synthetic IdP that
           # only cut-bundle.sh starts, and those rows skip honestly without it.
-          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported,family.subWorkflow'
+          # family.production: without OPENWOP_INFLIGHT_CAP this lane does not advertise production (see the
+          # note on the first lane), so v2-production-profile (suite >= 2.49.0) is opted out here; the cut runs it.
+          OPENWOP_OPTED_OUT_PROFILES: 'family.forms,family.memory,connections.packsSupported,family.subWorkflow,family.production'
           # The relaxation this leg's host runs under, declared. Suite >= 2.33.0
           # checks: `v2-webhook-egress-refusal` registers eight destinations the
           # guard MUST refuse, and with the guard open and NOTHING declared it
