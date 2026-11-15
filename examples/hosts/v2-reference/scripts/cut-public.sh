@@ -2,7 +2,7 @@
 # The CERTIFYING cut: front every suite fixture publicly, keep the host's egress
 # guard CLOSED, relax nothing. Wraps `PUBLIC=1 ./scripts/cut-bundle.sh`.
 #
-# THIS OPENS PUBLIC INGRESS TO THIS MACHINE for the duration of the cut - four
+# THIS OPENS PUBLIC INGRESS TO THIS MACHINE for the duration of the cut - eight
 # Cloudflare quick tunnels, each forwarding one pinned loopback port:
 #
 #   3841  the suite's webhook receiver AND the RFC 0158 effect receiver
@@ -11,9 +11,13 @@
 #   3842  the A2A fake peer
 #   3843  the MCP fake server
 #   3839  the synthetic IdP
+#   3844  the authorization server double, 3845 a second (foreign-issuer) AS,
+#   3846  the protected-resource double (RFC 0199/0200)
+#   3838  THE HOST ITSELF (RFC 0199 §C.2), serving under the repo's published
+#         dev API keys - anyone holding the name can call its API for the cut
 #
-# What is exposed is test fixtures that answer canned data, for a few minutes,
-# at unguessable *.trycloudflare.com names. It is still ingress, and opening it
+# Seven tunnels front test fixtures that answer canned data; the eighth fronts
+# the host. All for a few minutes, at unguessable *.trycloudflare.com names. It is still ingress, and opening it
 # is an OPERATOR DECISION EACH TIME - do not run this from automation, and do not
 # assume a previous approval carries. Every tunnel is torn down on exit, however
 # the script exits.
@@ -78,7 +82,7 @@ open_tunnel() {
   [ -n "$TUNNEL_URL" ] || { echo "tunnel $name (port $port) never reported a URL - see $log" >&2; exit 1; }
 }
 
-echo "opening seven public tunnels..."
+echo "opening eight public tunnels..."
 open_tunnel receiver "$RX_PORT"; RX_URL="$TUNNEL_URL"
 open_tunnel a2a "$A2A_PORT";      A2A_URL="$TUNNEL_URL"
 open_tunnel mcp "$MCP_PORT";      MCP_URL="$TUNNEL_URL"
@@ -121,7 +125,7 @@ wait_resolves() {
   done
   echo "the SYSTEM resolver cannot resolve $url although its A record exists - a negatively-cached early lookup (negative TTL 1800 s). Waiting will not help; re-run, and the new tunnels get new names." >&2; exit 1
 }
-echo "letting the seven names settle for ${SETTLE_SECONDS}s before anything looks them up..."
+echo "letting the eight names settle for ${SETTLE_SECONDS}s before anything looks them up..."
 sleep "$SETTLE_SECONDS"
 for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL" "$AS_URL" "$AS2_URL" "$RES_URL"; do wait_resolves "$u"; done
 echo "all seven public names resolve"
