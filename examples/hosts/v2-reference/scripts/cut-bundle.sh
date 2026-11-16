@@ -113,11 +113,16 @@ trap cleanup EXIT
 # once under --max-workers 1 (the saturation leg itself opens 32 event streams), so no other
 # scenario meets a 503. A cap low enough to be hit elsewhere would fail those rows, not this one.
 INFLIGHT_CAP="${OPENWOP_INFLIGHT_CAP:-32}"
+# RFC 0262: the suite's OTLP collector, and the host exporting to it (src/telemetry.ts).
+# Both run on this machine, so a PUBLIC=1 cut needs no tunnel for it: the host reaches
+# the collector over loopback, and the collector is never a public name.
+OTEL_PORT="${OPENWOP_OTEL_COLLECTOR_PORT:-3847}"
 SUP_LOG="$(mktemp -t v2ref-supervisor.XXXXXX)"
 CUT_DB="$(mktemp -d -t v2ref-cut.XXXXXX)/cut.sqlite"
 # RFC 0199 §C.2: the host advertises oauth.credentialInterrupt only with an https
 # public base; under PUBLIC=1 that is the host tunnel (suite: OPENWOP_HOST_PUBLIC_URL).
 OPENWOP_PUBLIC_BASE_URL="${OPENWOP_HOST_PUBLIC_URL:-}" \
+OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$OTEL_PORT" \
 OPENWOP_PORT="$PORT" OPENWOP_DB_PATH="$CUT_DB" OPENWOP_DURABILITY_SEAM=1 OPENWOP_INFLIGHT_CAP="$INFLIGHT_CAP" \
 OPENWOP_WEBHOOK_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_OAUTH_ALLOW_PRIVATE="$ALLOW_PRIVATE" OPENWOP_A2A_PUSH="$A2A_PUSH" OPENWOP_IMPLEMENTED_CHANGE_IDS=rfc-0176-witness \
 OPENWOP_MCP_SERVERS="$MCP_SERVERS" OPENWOP_TENANT_B_API_KEY="$KEY_B" OPENWOP_A2A_RELAY_PEER_URL="$A2A_FOR_HOST" \
@@ -205,6 +210,7 @@ if [ -n "${PREFLIGHT_ONLY:-}" ]; then echo "preflight only — every fixture ans
 OPENWOP_OPTED_OUT_PROFILES=family.forms,family.memory,connections.packsSupported,family.subWorkflow \
 OPENWOP_A2A_FAKE_PEER=true OPENWOP_A2A_FAKE_PEER_VERSIONS=1.0,0.3 OPENWOP_A2A_FAKE_PEER_PORT="$A2A_FAKE_PORT" \
 OPENWOP_MCP_FAKE_SERVER=true OPENWOP_MCP_FAKE_SERVER_PORT="$MCP_FAKE_PORT" \
+OPENWOP_OTEL_COLLECTOR=true OPENWOP_OTEL_COLLECTOR_PORT="$OTEL_PORT" \
 OPENWOP_TEST_SAML_IDP_URL="$IDP_FOR_HOST" \
 OPENWOP_HOST_RELAXATIONS="$RELAXATIONS" \
 OPENWOP_TEST_SCIM_URL="urn:openwop:conformance:scim" \
