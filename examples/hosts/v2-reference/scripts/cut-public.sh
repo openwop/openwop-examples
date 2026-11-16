@@ -69,7 +69,9 @@ trap cleanup EXIT
 # open_tunnel <name> <port>  ->  sets TUNNEL_URL. Called DIRECTLY, never in $( ):
 # the pid must be recorded in THIS shell or the trap cannot see it.
 # quick_tunnel_url / valid_tunnel_url: the one place a tunnel name is accepted.
-. "$(dirname "$0")/tunnel-name.sh"
+# Line 30 has already moved into the host directory, so this path is fixed (a
+# "$(dirname "$0")" relative to the caller would break from any other cwd).
+. scripts/tunnel-name.sh
 TUNNEL_URL=""
 open_tunnel() {
   local name="$1" port="$2" log="$LOGDIR/$1.log"
