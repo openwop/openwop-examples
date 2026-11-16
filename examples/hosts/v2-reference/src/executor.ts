@@ -30,6 +30,7 @@ import { conversationIdFor, councilSupported, isCouncilGate, rosterOf } from './
 import { TERMINAL, type Host, type Subject, type WorkflowDefinition, type WorkflowNode } from './host.js';
 import type { InterruptRow, RunRow } from './store.js';
 import { CREDENTIAL_RESUME_SCHEMA, OAUTH_USE_TYPE, acquireForNode, connectUrlFor, credentialInterruptAdvertised, oauthSupported, provider as oauthProvider, setGrantCompletedHandler } from './oauth.js';
+import { SECRET_ECHO_TYPE, secretEcho } from './secrets.js';
 
 const active = new Set<string>();
 
@@ -513,6 +514,12 @@ async function executeNode(host: Host, run: RunRow, def: WorkflowDefinition, nod
         if (e instanceof SafeFetchRejection) throw new NodeFailure(e.code, e.message, e.details);
         throw e;
       }
+    }
+    case SECRET_ECHO_TYPE: {
+      // host-services.md §secrets (secrets.ts): resolve the store canary, surface only its digest and length.
+      const echo = secretEcho(node.config?.['secretId']);
+      if (echo === null) throw new NodeFailure('credential_not_found', 'this host holds no secret by that id');
+      return { outputs: echo };
     }
     case 'core.fail':
       // fixtures.md §core.fail: a vendor code under the registered `example` org (errors.md §The registry, openwop#1698).

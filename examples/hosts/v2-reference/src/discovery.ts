@@ -28,6 +28,7 @@ import { agentCardsAdvertised } from './agents.js';
 import { MAX_PARTICIPANTS, councilSupported } from './council.js';
 import { DECLARED_SOURCES, nondeterminismAdvertised } from './nondeterminism.js';
 import { relayAvailable } from './purpose.js';
+import { OTLP_PROTOCOLS, telemetryEnabled } from './telemetry.js';
 
 const SINCE = '2.0';
 /**
@@ -113,6 +114,12 @@ export function v2Document(host: Host, baseUrl: string): Record<string, unknown>
     interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'], ...(host.artifacts.interruptResolvedViaFacet ? { resolvedVia: true } : {}) }),
     runList: record('witnessable-gated', { maxPageSize: 100, filters: ['workflowId', 'status'] }),
     replay: record('witnessable-gated', { modes: ['replay', 'branch'], retention: { days: c.replayRetentionDays }, effectSeamsManifest: '/host/effect-seams' }),
+    // host-services.md §secrets (secrets.ts) — the host's own store, which holds the suite's canary.
+    // No facet is claimed: no scopes, no runSecrets, no in-pack resolution.
+    secrets: record('witnessable-gated'),
+    // telemetry.md (RFC 0262) — presence is the claim that this host exports OTLP traces,
+    // so it is made only while the operator has configured an endpoint (telemetry.ts).
+    ...(telemetryEnabled() ? { telemetry: record('witnessable-gated', { otlp: { protocols: [...OTLP_PROTOCOLS] } }) } : {}),
     // RFC 0188 §A.5 — the DELIVERY dead-letter sink, distinct from the top-level
     // `deadLetter` FAMILY (RFC 0053), which is the RUN sink. `retentionDays` is
     // read from the same config the purge timer uses and that `expiresAt` is
