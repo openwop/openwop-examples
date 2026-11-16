@@ -68,6 +68,8 @@ trap cleanup EXIT
 
 # open_tunnel <name> <port>  ->  sets TUNNEL_URL. Called DIRECTLY, never in $( ):
 # the pid must be recorded in THIS shell or the trap cannot see it.
+# quick_tunnel_url / valid_tunnel_url: the one place a tunnel name is accepted.
+. "$(dirname "$0")/tunnel-name.sh"
 TUNNEL_URL=""
 open_tunnel() {
   local name="$1" port="$2" log="$LOGDIR/$1.log"
@@ -75,11 +77,14 @@ open_tunnel() {
   PIDS+=("$!")
   TUNNEL_URL=""
   for _ in $(seq 1 60); do
-    TUNNEL_URL="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$log" | head -1 || true)"
+    # Refuse a failed request at once: its log names cloudflared's API, not a tunnel.
+    grep -q 'failed to request quick Tunnel' "$log" && { echo "tunnel $name (port $port): cloudflared could not create a quick tunnel - see $log. Nothing has run; re-run for new tunnels." >&2; exit 1; }
+    TUNNEL_URL="$(quick_tunnel_url "$log")"
     [ -n "$TUNNEL_URL" ] && break
     sleep 1
   done
-  [ -n "$TUNNEL_URL" ] || { echo "tunnel $name (port $port) never reported a URL - see $log" >&2; exit 1; }
+  [ -n "$TUNNEL_URL" ] || { echo "tunnel $name (port $port) never reported a quick-tunnel URL - see $log" >&2; exit 1; }
+  valid_tunnel_url "$TUNNEL_URL" || { echo "tunnel $name (port $port) reported $TUNNEL_URL, which is not a quick-tunnel name - see $log" >&2; exit 1; }
 }
 
 echo "opening eight public tunnels..."
@@ -127,8 +132,8 @@ wait_resolves() {
 }
 echo "letting the eight names settle for ${SETTLE_SECONDS}s before anything looks them up..."
 sleep "$SETTLE_SECONDS"
-for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL" "$AS_URL" "$AS2_URL" "$RES_URL"; do wait_resolves "$u"; done
-echo "all seven public names resolve"
+for u in "$RX_URL" "$A2A_URL" "$MCP_URL" "$IDP_URL" "$AS_URL" "$AS2_URL" "$RES_URL" "$HOST_URL"; do wait_resolves "$u"; done
+echo "all eight public names resolve"
 # The expected count is the number of top-level `open_tunnel` calls in THIS
 # script, not a literal: #86 added the host tunnel (8th) without updating a
 # hardcoded 7, and the check then refused a correct run. It still catches the
