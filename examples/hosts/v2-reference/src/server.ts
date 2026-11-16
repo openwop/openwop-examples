@@ -32,6 +32,8 @@ import { OAUTH_DDL, OAUTH_USE_TYPE, migrateOAuth, oauthRoutes, oauthSupported } 
 import { seamRoutes } from './seams.js';
 import { durabilityRoutes, durabilitySeamMounted, recoverInFlightRuns } from './durability.js';
 import { startApprovalTimeoutSweep } from './executor.js';
+import { startTelemetry } from './telemetry.js';
+import { SECRET_ECHO_TYPE } from './secrets.js';
 import { Store } from './store.js';
 import { AuditLog } from './audit.js';
 import { createFormCheck } from './forms.js';
@@ -50,7 +52,7 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
   // `conformance-budget-tool-calls` of the mock-agent fixtures is in `honoured` (runs.md §budget, budget.ts).
   // `core.conformance.compensable-effect` (RFC 0265, effects.ts) is the ledgered forward/inverse effect of
   // `conformance-compensate-unwind`; `compensation` is always advertised (discovery.ts), so the fixture may be.
-  const executable = new Set(['core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.identity', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', COMPENSABLE_EFFECT_TYPE, 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
+  const executable = new Set([SECRET_ECHO_TYPE, 'core.conformance.safefetch-probe', 'core.conformance.mock-agent', 'core.noop', 'core.identity', 'core.delay', 'core.conformance.hold', 'core.conformance.side-effect', COMPENSABLE_EFFECT_TYPE, 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt', 'core.httpFetch', 'core.conversationGate', ARTIFACT_EMIT_TYPE, OAUTH_USE_TYPE, NONDETERMINISM_TYPE]);
   // The fixtures whose SEMANTICS this host honours end to end (not merely whose node types it recognises).
   const honoured = new Set(['conformance-safefetch-probe', 'conformance-budget-tool-calls', 'conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-idempotent', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event',
     // RFC 0205: the artifact getArtifact reads back, and the one conversation fixture whose
@@ -78,7 +80,10 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
     // triggerRule, and over an EdgeCondition whose left reads the source's outputs.
     'conformance-error-route-only', 'conformance-all-terminals-skipped',
     // RFC 0265: three ledgered compensable effects, then core.fail — a real reverse-completion unwind.
-    'conformance-compensate-unwind']);
+    'conformance-compensate-unwind',
+    // host-services.md §secrets (secrets.ts): the store canary resolved and surfaced as a digest only,
+    // once to completion and once followed by core.fail.
+    'openwop-smoke-byok-roundtrip', 'conformance-secret-resolve-then-fail']);
   // RFC 0204: the ctx.mcp fixture, only when mcp.client is advertised (a host that does not advertise it MUST NOT advertise the fixture).
   if (mcpClient) { executable.add('core.conformance.mcp-client'); honoured.add('conformance-mcp-client'); }
   // fixtures.md §conformance-purpose-relay: only with a relay peer to forward to (purpose.ts).
@@ -94,7 +99,7 @@ export function loadWorkflows(config: HostConfig, mcpClient = false, forms = fal
   const out = new Map<string, WorkflowDefinition>();
   for (const dir of dirs) {
     if (!existsSync(dir)) continue;
-    for (const f of readdirSync(dir).filter((n) => n.startsWith('conformance-') && n.endsWith('.json'))) {
+    for (const f of readdirSync(dir).filter((n) => (n.startsWith('conformance-') || n === 'openwop-smoke-byok-roundtrip.json') && n.endsWith('.json'))) {
       try {
         const def = JSON.parse(readFileSync(join(dir, f), 'utf8')) as WorkflowDefinition;
         if (!Array.isArray(def.nodes) || typeof def.id !== 'string' || !honoured.has(def.id)) continue;
@@ -239,6 +244,8 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
   startA2APush(host);
   const stopWorker = startDeliveryWorker(host);
   const stopTimeouts = startApprovalTimeoutSweep(host);
+  // telemetry.md (RFC 0262) — OTLP export, only with OTEL_EXPORTER_OTLP_ENDPOINT set.
+  const stopTelemetry = startTelemetry(host);
   // Runs left non-terminal by a previous process re-enter the loop (durability across restart),
   // and a run that had started is RECORDED as recovered (`workflow.restored`) — durability.ts.
   recoverInFlightRuns(host);
@@ -254,6 +261,7 @@ export async function startHost(overrides: Partial<HostConfig> = {}): Promise<Ru
     close: async () => {
       stopWorker();
       stopTimeouts();
+      await stopTelemetry();
       await new Promise<void>((ok) => server.close(() => ok()));
       store.close();
     },
