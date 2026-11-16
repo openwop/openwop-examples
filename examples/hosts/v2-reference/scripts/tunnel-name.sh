@@ -10,12 +10,17 @@
 # OAuth authorization server (2026-11-16: 18 failures, an uncertified bundle).
 # A failed request prints nothing here, and so does any name not of the
 # quick-tunnel shape.
+# It always returns 0: cut-public.sh runs under `set -euo pipefail`, and a non-zero
+# status from a function inside `$( )` ends the script with no message. While a log
+# is still empty, `grep` finds nothing and exits 1, so without the `|| true` the first
+# tunnel killed the cut silently (2026-11-16, the first run of this helper).
 quick_tunnel_url() {
-  local log="$1"
-  grep -q 'failed to request quick Tunnel' "$log" 2>/dev/null && return 0
-  grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$log" 2>/dev/null | while read -r u; do
-    valid_tunnel_url "$u" && { echo "$u"; break; }
-  done
+  local log="$1" u
+  if grep -q 'failed to request quick Tunnel' "$log" 2>/dev/null; then return 0; fi
+  while read -r u; do
+    if valid_tunnel_url "$u"; then echo "$u"; break; fi
+  done < <(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$log" 2>/dev/null || true)
+  return 0
 }
 
 # valid_tunnel_url <url>  ->  exit 0 iff the URL has the quick-tunnel shape: at
