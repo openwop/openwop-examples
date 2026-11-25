@@ -180,6 +180,30 @@ jobs:
         if: failure() && matrix.example.host == 'v2-reference'
         run: cat /tmp/openwop-host.log
 
+  # The SQLite v2 host's own checks: typecheck (which also checks the
+  # v2-reference contract modules it imports) and the durability test, which
+  # SIGKILLs a host process mid-run and resumes the run from the file.
+  host-sqlite:
+    name: host (sqlite)
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install
+        working-directory: examples/hosts/sqlite
+        run: npm install --legacy-peer-deps
+      - name: Typecheck
+        working-directory: examples/hosts/sqlite
+        run: npm run typecheck
+      - name: Test
+        working-directory: examples/hosts/sqlite
+        run: npm test
+        timeout-minutes: 3
+
   # Single, always-run required check. Aggregates the (possibly-skipped) real
   # jobs so branch protection has one stable context to require with
   # `strict: true` — a docs-only PR skips the matrix and this still passes; an
@@ -188,7 +212,7 @@ jobs:
   # examples are added or removed.
   gate:
     name: Examples gate
-    needs: [changes, validate-workflow-defs, examples]
+    needs: [changes, validate-workflow-defs, examples, host-sqlite]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -196,10 +220,11 @@ jobs:
         env:
           VALIDATE_RESULT: ${{ needs.validate-workflow-defs.result }}
           EXAMPLES_RESULT: ${{ needs.examples.result }}
+          HOST_SQLITE_RESULT: ${{ needs.host-sqlite.result }}
         run: |
-          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT"
+          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT  host-sqlite=$HOST_SQLITE_RESULT"
           # 'success' and 'skipped' are OK; 'failure'/'cancelled' fail the gate.
-          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT"; do
+          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT" "$HOST_SQLITE_RESULT"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required examples job did not succeed ($r)."
               exit 1
