@@ -194,6 +194,19 @@ class FloorTest(unittest.TestCase):
         # The replay takes the recorded resolution: no new interrupt is raised.
         self.assertNotIn("interrupt.requested", self.c.types(fork["runId"]))
 
+    def test_fork_deadline_starts_at_the_fork(self) -> None:
+        # runTimeoutMs 1500: the source completes, then ages past its deadline before the fork.
+        run_id = self.create("conformance-approval", configurable={"version": 1, "run": {"runTimeoutMs": 1500}})
+        self.c.until(run_id, {"waiting-approval"})
+        self.c.call("POST", f"/runs/{project(run_id)}/interrupts/gate", {"resumeValue": {"action": "accept"}})
+        self.c.until(run_id, {"completed"})
+        time.sleep(2)
+        # A branch re-executes from seq 1, so the deadline check runs (a replay of a completed run would not).
+        status, fork, _ = self.c.call("POST", f"/runs/{project(run_id)}:fork", {"mode": "branch", "fromSeq": 1})
+        self.assertEqual(status, 201, fork)
+        snap = self.c.until(fork["runId"], {"waiting-approval", "failed"})
+        self.assertEqual(snap["status"], "waiting-approval", self.c.types(fork["runId"]))
+
     def test_approval_by_token(self) -> None:
         run_id = self.create("conformance-approval")
         self.c.until(run_id, {"waiting-approval"})

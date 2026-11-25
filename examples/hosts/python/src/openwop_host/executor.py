@@ -472,6 +472,9 @@ class Executor:
         elif run["status"] == "pending":
             self.store.update_run(run_id, status="running")
         assert started_at is not None
+        # A fork's copied prefix carries its source's `run.started`; the child's own clock starts when it was created.
+        if run.get("fork_mode") is not None and run.get("created_at") and run["created_at"] > started_at:
+            started_at = run["created_at"]
         deadline_ms = iso_to_ms(started_at) + self.run_deadline_ms(run)
         limit = self.recursion_limit(run)
         nodes = topological(definition)
