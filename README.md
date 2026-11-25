@@ -11,17 +11,19 @@ protocol repo stays a lean spec + conformance contract.
   - **`v2-reference/`** — **the v2 reference host**: implemented from `spec/v2/core/*.md` and the
     generated v2 documents, never adapted from a v1 host. Certified on the 2.x suite (see its
     `conformance.md`). Start here for a new integration — v2 is the current protocol major.
-  - `sqlite/` — durable single-file v1 host (`better-sqlite3`)
+  - `sqlite/` — durable single-file **v2** host (`better-sqlite3`): claim-based dispatch, crash
+    resume, and a walkthrough of porting a v1 host; serves the core run floor
   - `postgres/` — production-profile v1 host (`pg`; pglite for in-process tests)
   - `wasm-sandbox/` — RFC 0035 sandboxed-execution reference
 - `examples/` (top level) — runnable workflow samples (`tiny-workflow`, `approval-workflow`,
   `streaming-client`, `mcp-tool`, `branch-fork`, …). Samples are `fetch`-only, speak v2, and default
   to the v2 reference host; see [`examples/README.md`](examples/README.md) for what each one needs.
 
-> **v2 only.** v1 reached end of support on 2026-10-04 (RFC 0234). The two remaining v1 hosts
-> under `hosts/`, `sqlite` and `postgres`, are frozen history being ported to v2, not reference
-> implementations. The v1-only `in-memory` and `python` hosts were removed. Build new hosts against
-> `hosts/v2-reference/` and measure them with `@openwop/openwop-conformance` at `--target-major 2`.
+> **v2 only.** v1 reached end of support on 2026-10-04 (RFC 0234). `postgres` is the one remaining
+> v1 host under `hosts/`: frozen history being ported to v2, not a reference implementation.
+> `sqlite` has been ported; the v1-only `in-memory` and `python` hosts were removed. Build new hosts
+> against `hosts/v2-reference/` and measure them with `@openwop/openwop-conformance` at
+> `--target-major 2`.
 
 ## Quick start
 
@@ -45,8 +47,8 @@ These hosts are measured against the published `@openwop/openwop-conformance` su
 bundle and is a row in the corpus [`INTEROP-MATRIX.md`](https://github.com/openwop/openwop/blob/main/INTEROP-MATRIX.md)
 v2 table. The host-conformance regression gates (SQLite soak + Postgres) live in the
 [`openwop/openwop`](https://github.com/openwop/openwop) repo (co-located with the suite),
-which checks this repo out to obtain the host source. `examples.yml` here builds/tests the
-hosts and runs the samples, and validates that workflow-definition pack references resolve
+which checks this repo out to obtain the host source. `examples.yml` here runs the samples
+against the v2 reference host, typechecks and tests the SQLite host, and validates that workflow-definition pack references resolve
 against the live registry at [`packs.openwop.dev`](https://packs.openwop.dev).
 
 ## License

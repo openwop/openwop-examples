@@ -1,279 +1,149 @@
-# openwop Reference Host: SQLite
+# OpenWOP host: SQLite (v2)
 
-Single-process OpenWOP host backed by SQLite. Demonstrates **durable execution** — runs survive process restarts; events persist; claim acquisition prevents double-execution across crash-recovery cycles.
+A single-process OpenWOP **v2** host backed by one SQLite file. Runs, events, interrupts and idempotency records are rows in that file, so a run outlives the process executing it: kill the host mid-run, start it again, and the run continues from its event log.
 
-This README doubles as the **"Build Your Own Host" walkthrough**: read it top-to-bottom and you'll understand how to wire any backend store (Postgres, Cassandra, DynamoDB) to the openwop wire contract.
+This README is also a **build-your-own-host walkthrough**. `src/server.ts` is one file meant to be read top to bottom; the sections below follow its `// ─── N. … ───` markers. It was a v1 host, and the last section shows what porting a v1 host to v2 took.
 
-> **Not for production.** This host has no multi-tenancy, no real auth, no production hardening. SQLite is single-writer, so this host is single-process by design. Use it for understanding + reference, not for serving real traffic.
+> **Not for production.** One API-key lane, no rate limiting, no webhooks yet (see [What is left](#what-is-left)). SQLite is single-writer: several processes may share the file (claims keep them from double-executing a run), but this is not a scaling design.
 
-## Contents
-
-- [Quick start](#quick-start) — boot the host
-- [Demonstrate durability](#demonstrate-durability) — kill the process, restart, verify run state survived
-- [Build Your Own Host: the walkthrough](#build-your-own-host-the-walkthrough) — guided 8-section reading of `src/server.ts`
-  1. [Schema](#1-schema)
-  2. [The event log IS the source of truth](#2-the-event-log-is-the-source-of-truth)
-  3. [Claim acquisition](#3-claim-acquisition)
-  4. [Run execution](#4-run-execution)
-  5. [Idempotency](#5-idempotency)
-  6. [The HTTP layer](#6-the-http-layer)
-  7. [SSE event stream](#7-sse-event-stream)
-  8. [Graceful shutdown](#8-graceful-shutdown)
-- [Run conformance against this host](#run-conformance-against-this-host)
-- [Stale-claim recovery (live as of 2026-05-01)](#stale-claim-recovery-live-as-of-2026-05-01)
-- [What's next](#whats-next)
+| | |
+|---|---|
+| Protocol | v2 only: `protocolVersions: ["2.0"]`, unversioned paths, `OpenWOP-Version: 2` |
+| Families advertised | `auth` (api-key lane), `eventLog`, `idempotency`, `interrupt`, `limits`, `replay`, `runList` |
+| Conformance | `@openwop/openwop-conformance@2.49.14 --target-major 2`: one known failure, the effect-seam manifest ([conformance.md](./conformance.md)) |
+| Default port | `3839` (the v2 reference host uses `3838`) |
 
 ## Quick start
 
 ```bash
-npm install
-npm start
+npm install --legacy-peer-deps   # the conformance suite (fixtures) has strict peer pins
+npm start                        # http://127.0.0.1:3839
 ```
 
-The server listens on `http://127.0.0.1:3838` by default. SQLite database lives at `./data/openwop-host.sqlite` (auto-created).
+The v2 samples run against it unchanged:
+
+```bash
+OPENWOP_BASE_URL=http://127.0.0.1:3839 OPENWOP_API_KEY=openwop-sqlite-dev-key \
+  npm test --prefix ../../tiny-workflow        # also streaming-client, idempotent-runs, approval-workflow, branch-fork
+```
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENWOP_HOST` | `127.0.0.1` | Bind address |
-| `OPENWOP_PORT` | `3838` | Bind port |
-| `OPENWOP_API_KEY` | `openwop-sqlite-dev-key` | Bearer token |
-| `OPENWOP_SQLITE_PATH` | `./data/openwop-host.sqlite` | SQLite file location |
-| `OPENWOP_CLAIM_TTL_MS` | `30000` | Lifetime of a run claim before another process can steal it. Tests use ≤ 2000. |
-| `OPENWOP_HEARTBEAT_INTERVAL_MS` | `10000` | How often a holding process renews `claim_expires_at`. SHOULD be ≤ `OPENWOP_CLAIM_TTL_MS / 2`. |
-| `OPENWOP_FIXTURES_DIR` | _(unset)_ | Explicit path to the conformance fixture catalog (the spec repo's `conformance/fixtures/`). Takes priority over the upward probe and the sibling-checkout probe (`../openwop/conformance/fixtures`). The host logs the resolved dir + fixture count at boot. |
+| `OPENWOP_HOST` / `OPENWOP_PORT` | `127.0.0.1` / `3839` | Bind address |
+| `OPENWOP_API_KEY` | `openwop-sqlite-dev-key` | Bearer key for tenant `openwop-sqlite-tenant` |
+| `OPENWOP_TENANT2_API_KEY` | _(unset)_ | A second key, bound to tenant `openwop-sqlite-tenant-b`; set it (and `OPENWOP_TEST_TENANT_B_API_KEY` for the suite) to exercise cross-tenant refusals |
+| `OPENWOP_SQLITE_PATH` | `./data/openwop-host.sqlite` | The database file |
+| `OPENWOP_CLAIM_TTL_MS` | `30000` | Lifetime of a run claim before another process may take the run over |
+| `OPENWOP_HEARTBEAT_INTERVAL_MS` | `10000` | How often the executing process renews its claim (keep it under half the TTL) |
+| `OPENWOP_MAX_RUN_DURATION_MS` | `600000` | `limits.maxRunDurationMs`; a run's `configurable.run.runTimeoutMs` is clamped to it |
+| `OPENWOP_FIXTURES_DIR` | _(unset)_ | Extra fixture directory, read before the installed `@openwop/openwop-conformance/fixtures` |
+| `OPENWOP_LOG_RESUME_TOKENS` | `false` | Log each interrupt's `ow2.` resume token, the host's stand-in for out-of-band delivery |
+
+Checks: `npm run typecheck`, `npm test` (the durability test below), `npm run conformance -- --base-url http://127.0.0.1:3839 --api-key openwop-sqlite-dev-key`.
 
 ## Demonstrate durability
 
 ```bash
-# Terminal 1: start the host
-npm start
+# Terminal 1: a short claim TTL so the takeover is quick
+OPENWOP_CLAIM_TTL_MS=2000 OPENWOP_HEARTBEAT_INTERVAL_MS=500 npm start
 ```
 
 ```bash
-# Terminal 2: create a long-running run, then kill the host mid-flight
-RUN_ID=$(curl -s -X POST http://127.0.0.1:3838/v1/runs \
-  -H "Authorization: Bearer openwop-sqlite-dev-key" \
-  -H "Content-Type: application/json" \
-  -d '{"workflowId":"conformance-cancellable","inputs":{"delayMs":30000}}' \
-  | jq -r '.runId')
-echo "runId: $RUN_ID"
-
-# Wait a moment, then kill the host (Ctrl-C in Terminal 1).
-# In Terminal 1: restart with `npm start`.
-
-# Back in Terminal 2: read the events the run already wrote
-curl -s -H "Authorization: Bearer openwop-sqlite-dev-key" \
-  "http://127.0.0.1:3838/v1/runs/$RUN_ID/events/poll" | jq
+# Terminal 2: start a 20-second run
+H=(-H 'OpenWOP-Version: 2' -H 'Authorization: Bearer openwop-sqlite-dev-key' -H 'Content-Type: application/json')
+RUN=$(curl -s "${H[@]}" -X POST http://127.0.0.1:3839/runs \
+  -d '{"workflowId":"conformance-delay","inputs":{"delayMs":20000}}' | jq -r .runId)
+ID=$(printf %s "$RUN" | sed 's|/|~2F|')   # a tenant-bound id travels as one path segment
+# Now kill -9 the host in terminal 1, wait 2 s, and start it again.
+curl -s "${H[@]}" "http://127.0.0.1:3839/runs/$ID/events/poll?timeout=30" | jq '[.events[].type]'
 ```
 
-You'll see `run.started` + `node.started` (everything written before the kill) preserved on the SQLite side. A host that keeps events in process memory loses them with the process.
+The second process logs `resumed 1 orphaned run(s)`, claims the run, and finishes it. The log has one `run.started` and one `run.completed`; the delay node shows two `node.started` events, because the first attempt was cut by the crash. `test/durability.test.ts` does exactly this with a real `SIGKILL`, and also checks that a second process does not touch a run while the first one's claim is live.
 
-## Build Your Own Host: the walkthrough
-
-This section is a guided reading of `src/server.ts`. The file is ~700 lines; it's intentionally a single file so you can read top-to-bottom without jumping. Section markers in the file (`// ─── ... ───`) match the headings below.
+## The walkthrough
 
 ### 1. Schema
 
-The schema is **3 tables**:
+Five tables carry the v2 host: `runs`, `events` (both inherited from the v1 host and grown with `ALTER TABLE ADD COLUMN`), `interrupts_v2`, `idempotency_v2` and `host_secrets`. The era key is stamped by a trigger, not by call sites: every row inserted into `runs` gets `event_log_schema_version = 3` unless it says otherwise. The v1 host's trigger stamped `2`; replacing it is the cut. `host_secrets` holds the token and cursor MAC keys, so a resume token or a `listRuns` cursor survives a restart.
 
-```sql
-CREATE TABLE runs (
-  run_id TEXT PRIMARY KEY,
-  workflow_id TEXT NOT NULL,
-  status TEXT NOT NULL,
-  inputs_json TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  ended_at TEXT,
-  error_json TEXT,
-  claim_holder_id TEXT,         -- NULL when unclaimed
-  claim_expires_at INTEGER      -- ms epoch
-);
+### 2. Identity
 
-CREATE TABLE events (
-  run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  node_id TEXT,
-  data_json TEXT,
-  timestamp TEXT NOT NULL,
-  PRIMARY KEY (run_id, seq)
-);
+One lane, `api-key`. Each configured key is bound to one tenant and resolves to one Subject (`identity.md` §1.1), with the key realm `urn:openwop-host-sqlite:api-key` as its issuer. Run ids are tenant-bound (`<tenant>/<opaque>`) and travel projected (`tenant~2Fopaque`). A tenant segment that is not the caller's is `403 id_tenant_mismatch`; a bare id is `400 validation_error`, because this host advertises no 1.x member.
 
-CREATE TABLE idempotency (
-  cache_key TEXT PRIMARY KEY,
-  status INTEGER NOT NULL,
-  body TEXT NOT NULL,
-  body_hash TEXT NOT NULL,
-  stored_at INTEGER NOT NULL
-);
-```
+### 3. The event log
 
-Translates verbatim to Postgres / MySQL / DynamoDB. The composite primary key `(run_id, seq)` on `events` is what makes monotonic event ordering free.
+Append-only, `sequence` from 0. Every reader (poll, SSE, the snapshot, fork, the executor itself) goes through `readEvents`, the storage boundary; every writer goes through `appendEvent`. Both delegate the era rules to the reference host's `codemap.ts`: `rowToDoc` translates an era-2 row on read, and `toStorageVocabulary` picks the name an append must use for the run's era (`persistence.md` §The reader rule, §The writer rule).
 
-### 2. The event log IS the source of truth
+### 4. Fixtures
 
-Per `spec/v1/observability.md`, the event log is the durable record of run state. Every state transition writes an event before any side effect; on read, the snapshot view (`GET /v1/runs/{runId}`) is computed from the latest known state plus implicit defaults.
+The host runs only the conformance fixtures whose semantics it honours end to end: noop, delay, cancellable, multi-node, failure, approval, clarification, external-event and idempotent, plus an `approversList` variant of the approval gate. They are read from the installed `@openwop/openwop-conformance` package, so `fixtures[]` in discovery is exactly what can run.
 
-In this host, every `appendEvent()` call is a single `INSERT` that commits before the function returns. SQLite's WAL mode (`pragma journal_mode = WAL`) keeps writes fast without sacrificing durability.
+### 5. Claims
 
-When the process crashes, the next start sees:
-- All `runs` rows with their current status (likely stuck at `running` if the crash was mid-execution).
-- All `events` rows up to the last committed write.
-- No in-flight aborters (process-local; gone with the process).
+A process executes a run only while it holds the run's claim: `claim_holder_id` plus `claim_expires_at`, set by one conditional `UPDATE` and renewed by a heartbeat. A claim that is not renewed lapses. On startup, and every TTL after that, the host claims every `pending`, `running` or `cancelling` run with no live claim and re-enters its loop. A cancel or a pause on a run another live process is executing is written to the run row, and that process acts on it.
 
-A real crash-recovery loop scans for runs with status `running` whose claim is expired, attempts to re-acquire the claim, and resumes. This reference host implements that behavior so the `staleClaim` conformance scenario can verify it.
+### 6. Executor
 
-### 3. Claim acquisition
+The log is the executor's only state. Each step re-folds the run's events, so a restart, a resolved interrupt and a fork all continue from what is recorded. Nodes run in topological order and any node failure ends the run. `configurable.run.recursionLimit` and `runTimeoutMs` are enforced with `cap.breached`.
 
-A run that's mid-execution holds a **claim** — a lease on the right to execute it. Other processes seeing the run respect the claim until it expires. The mechanism:
+### 7. Interrupts
 
-```sql
-UPDATE runs
-SET claim_holder_id = ?, claim_expires_at = ?
-WHERE run_id = ?
-  AND (claim_holder_id IS NULL OR claim_expires_at < ?)
-  AND status NOT IN ('completed', 'failed', 'cancelled');
-```
+An approval, clarification or external-event gate records `interrupt.requested` (the `InterruptPayload` verbatim) and `node.suspended`, and the run waits. The re-entry key K is `<run>:<node>:<visit>`, where a replay fork uses its source run, so a replay finds the source's `interrupt.resolved` and applies it without raising a new interrupt. Approval resolves enforce the gate's `actions` and its `approversList`; a reject fails the gate with `approval_rejected`. Resume tokens are `ow2.hs256.sqlite-1.<payload>.<mac>`.
 
-`UPDATE` returns affected-row-count. 1 = we won the claim; 0 = someone else holds it (or the run is terminal).
+### 8. Projections
 
-The claim TTL is 30 seconds. A process that holds a claim for longer than 30s without renewal MUST assume another process can steal it; renewal is the heartbeat pattern. The `staleClaim` conformance scenario exercises the lapse-then-steal pattern.
+The snapshot is `run-snapshot.schema.json`, `owner` and `eventLogSchemaVersion` included. Its `ETag` is the last sequence plus the status. SSE frames carry `id:` (the sequence), `event:` and `data:` and honour `streamMode`, `Last-Event-ID` (an exclusive cursor) and `bufferMs`. The tail reads the durable log, so an event another process appends reaches the stream too.
 
-This pattern translates to:
-- Postgres: `SELECT FOR UPDATE SKIP LOCKED` plus an explicit lease column.
-- DynamoDB: conditional UPDATE on the lease attribute.
-- Redis: `SET NX EX 30`.
+### 9. The front door
 
-The protocol doesn't prescribe the mechanism, only the property: **two processes MUST NOT execute the same run concurrently and MUST NOT lose the run if the holder dies.**
+`OpenWOP-Version` absent, `2` or `2.<n>` is served; any other major is `406 protocol_version_unsupported` with `details.protocolVersions`; a malformed value is `400`. There is no `/v1/` path space. Every response carries `OpenWOP-Version: 2.0` and every error is `{ error, message, details? }` with a code from `spec/v2/errors.json` (the reference `errors.ts` refuses to construct an unregistered one). Layer-1 idempotency covers every mutating operation.
 
-### 4. Run execution
+### 10–13. Discovery, runs, interrupt surfaces, bootstrap
 
-The execution loop is in `runWorkflow()`:
+Discovery is the closed v2 root with an `ETag`. The run routes are `POST /runs`, `GET /runs`, `GET /runs/{runId}`, `…/events`, `…/events/poll`, `…/cancel`, `POST /runs:bulk-cancel`, `…:pause`, `…:resume`, `…:fork` and `…/effects`; the interrupt routes are `POST /runs/{runId}/interrupts/{nodeId}` and `GET`/`POST /interrupts/{token}`; `GET /host/effect-seams` is the replay manifest. Bootstrap resumes orphaned runs and starts the listener.
 
-```
-runWorkflow(runId):
-  load run, abort if missing
-  load workflow definition by workflow_id
-  set status = 'running', emit 'run.started'
-  for each node in definition:
-    if status == 'cancelling', emit 'run.cancelled', terminate
-    outcome = executeNode(node)
-    if outcome == 'failed', emit 'run.failed', terminate
-    if outcome == 'cancelled', emit 'run.cancelled', terminate
-  emit 'run.completed' (or 'cancelled' if user requested mid-loop)
-```
+## What it reuses from v2-reference
 
-Every state transition is an `appendEvent()` call. The status column is also updated for fast snapshot reads, but **events are the truth**; if status and last-event ever disagree (e.g., a partial write), prefer events.
+The host imports the pure, contract-level modules of `../v2-reference/src/` and nothing with state:
 
-Cancellation propagates two ways: (1) within the executing process, an `AbortController` aborts in-flight `core.delay` sleeps; (2) across processes, the status column flip to `cancelling` is detected at the next loop iteration. Both paths converge on `run.cancelled` + setRunTerminal.
+| Module | Used for |
+|---|---|
+| `artifacts.ts` | Loads `@openwop/spec-artifacts` (this package's copy): the error registry, the event codemap, the v2 event-type enum |
+| `errors.ts` | `HostError` / `err()`: the status comes from the registry, the body is the closed envelope |
+| `ids.ts` | Id grammars, `tenantBound()`, the `~` projection, `checkTenantBound()` |
+| `codemap.ts` | The era-2 reader (`rowToDoc`) and writer (`toStorageVocabulary`) rules |
 
-### 5. Idempotency
+The store, the claims, the executor, the routes and the discovery document are this host's own. Running the host needs only this package installed; `npm run typecheck` checks the imported modules too.
 
-Layer-1 (HTTP) idempotency lives in the `idempotency` table. Cache key is `sha256(tenantId + endpoint + idempotency-key)`; stored entry includes `body_hash` so a retry with the same key + different body returns 409 per RFC 0002.
+## Porting from v1
 
-The cache TTL is 24 hours per `spec/v1/idempotency.md`. Eviction is done lazily (`pruneIdempotency()` runs on every `POST /v1/runs`); a real production host would run it on a schedule.
+What changed, in order of how much code it took:
 
-Layer-2 (per-side-effect) idempotency isn't needed here — this host's nodes (`core.noop` / `core.delay`) are pure. A host running `core.ai.callPrompt` or `core.payment.charge` would persist invocation results before returning to the executor and dedupe on retry.
+1. **Paths and negotiation.** `/v1/runs` became `/runs`, and every request is negotiated on `OpenWOP-Version`.
+2. **Discovery.** The v1 document (`protocolVersion`, `supportedEnvelopes`, `debugBundle`, …) became the closed v2 root: metadata keys plus `{ status, since, until?, witness, …facets }` records, one per family actually served.
+3. **Identity.** One hard-coded tenant and a bare `run-<uuid>` id became Subjects, tenant-bound ids and the `~` projection.
+4. **Events.** The envelope gained `eventId`, `sequence` and `schemaVersion`; payloads moved to the closed v2 definitions; the poll response became `{ runId, events, lastSequence, status, isTerminal }`.
+5. **Interrupts.** v1 callback tokens became `ow2.` tokens; the interrupt key K and replay short-circuiting are new.
+6. **Fork.** New in this host: `replay` and `branch`, with the prefix copied through the storage boundary.
 
-### 6. The HTTP layer
+**The v1 database keeps working.** Point the v2 host at a file the v1 host wrote and it is read, not migrated. v1 runs stay era 2 with their v1 rows untouched: their logs are translated through the codemap on every read, their owner is legacy-stamped once (`issuer: urn:openwop:legacy`), and their ids are served as `openwop-sqlite-tenant/run-<uuid>`. They can be forked; the child is an era-3 run. A v1 run left waiting on an approval resumes: the first v2 resolve adopts the suspension, and the run finishes in v1 vocabulary (the writer rule). One limit: a v1 row stored no payload for some events (`run.started`, `node.completed`), so those read back with an empty payload, as with the reference reader.
 
-Routes match openwop v1's spec:
+Per-store disposition (`persistence.md` §Per-store disposition):
 
-| Method | Path | Owner |
-|---|---|---|
-| GET | `/.well-known/openwop` | `handleDiscovery` |
-| GET | `/v1/openapi.json` | `handleOpenApi` |
-| POST | `/v1/runs` | `handleCreateRun` |
-| GET | `/v1/runs/{runId}` | `handleGetRun` |
-| POST | `/v1/runs/{runId}/cancel` | `handleCancelRun` |
-| GET | `/v1/runs/{runId}/events` | `handleEventsSse` (SSE stream) |
-| GET | `/v1/runs/{runId}/events/poll` | `handleEventsPoll` (polling JSON) |
-| GET | `/v1/runs/{runId}/debug-bundle` | `handleDebugBundle` (per `spec/v1/debug-bundle.md`) |
+| Store | Disposition |
+|---|---|
+| `runs` | legacy-stamped: `tenant` and `owner_json` filled at first v2 read; NULL or 2 in `event_log_schema_version` is era 2 |
+| `events` | translated: era-2 rows read through the codemap, never rewritten |
+| `interrupts_v2`, `idempotency_v2`, `host_secrets` | new in v2 |
+| `interrupts` (v1) | drained: a suspended v1 run is adopted into `interrupts_v2` on its first v2 resolve; v1 tokens are not accepted |
+| `idempotency` (v1), `annotations`, `memory_entries`, webhook and audit tables | never-upgraded: kept, not read |
 
-Authentication is a single `checkAuth()` helper that requires `Authorization: Bearer <key>` matching `OPENWOP_API_KEY`. Real hosts would verify a JWT or API-key DB lookup; this is the simplest correct contract.
+## What is left
 
-### 7. SSE event stream
+The host serves the core floor. Still to port or build, roughly in order:
 
-The SSE handler:
-1. Replays the backlog (every event already in the DB) on connect.
-2. Subscribes to a Node `EventEmitter` for new events emitted by the executor.
-3. Closes the connection after the terminal event (`run.completed` / `run.failed` / `run.cancelled`).
-
-If you want a simpler streaming model, drop the EventEmitter and have the executor poll the DB for new events between writes — but EventEmitter is cheaper for single-process hosts.
-
-### 8. Graceful shutdown
-
-On SIGINT/SIGTERM, the host:
-1. Aborts every in-flight node (`runningAborters.abort()`).
-2. Releases every claim it holds (so another process can pick up the run).
-3. Closes the HTTP server.
-4. Closes the SQLite connection.
-
-This prevents stale claims that would block re-execution after a clean restart. A crash skips step 2; the next process picks up the claim after the 30s expiry.
-
-## Run conformance against this host
-
-```bash
-# Terminal 1
-cd examples/hosts/sqlite
-npm install
-npm start
-
-# Terminal 2 (from repo root)
-cd conformance
-OPENWOP_BASE_URL=http://127.0.0.1:3838 OPENWOP_API_KEY=openwop-sqlite-dev-key npx vitest run
-```
-
-See `conformance.md` (alongside this file) for the per-scenario pass/fail record.
-
-## Stale-claim recovery (live as of 2026-05-01)
-
-This host implements **heartbeat renewal + resume-on-startup**, the two halves of stale-claim recovery:
-
-- **Heartbeat.** Every `OPENWOP_HEARTBEAT_INTERVAL_MS` (default 10s) while a run is mid-execution, the holding process renews `claim_expires_at`. As long as the process is alive and writing, the claim stays valid.
-- **Resume on startup.** On boot, before the HTTP server starts accepting traffic, the host scans for runs with `status IN ('pending', 'running', 'cancelling')` AND `claim_holder_id IS NULL OR claim_expires_at < now`. For each, it tries to acquire the claim and dispatch `runWorkflow()`. If `run.started` is already in the event log, the resumed execution emits a `run.resumed` event with `data.resumedBy: <processId>` so observers see the handover.
-
-This unlocks the `staleClaim.test.ts` conformance scenario. Try it manually:
-
-```bash
-# Terminal 1: short TTL so the test is fast
-OPENWOP_PORT=4801 OPENWOP_SQLITE_PATH=/tmp/openwop-test.sqlite \
-  OPENWOP_CLAIM_TTL_MS=2000 OPENWOP_HEARTBEAT_INTERVAL_MS=500 \
-  npm start
-# Wait for "listening on" message
-
-# Terminal 2: start a long-running run, then SIGKILL terminal 1
-RUN_ID=$(curl -s -X POST http://127.0.0.1:4801/v1/runs \
-  -H "Authorization: Bearer openwop-sqlite-dev-key" \
-  -H "Content-Type: application/json" \
-  -d '{"workflowId":"conformance-cancellable","inputs":{"delayMs":10000}}' \
-  | jq -r '.runId')
-echo "runId: $RUN_ID"
-# Now SIGKILL the host in terminal 1 (or kill -9 by PID).
-
-# Wait 3s for the claim to expire, then start a new host on a different port:
-OPENWOP_PORT=4802 OPENWOP_SQLITE_PATH=/tmp/openwop-test.sqlite \
-  OPENWOP_CLAIM_TTL_MS=2000 OPENWOP_HEARTBEAT_INTERVAL_MS=500 \
-  npm start
-# Boot output should include: "resume-on-startup: claimed 1 of 1 orphaned run(s)"
-
-# Confirm B finished what A started:
-curl -s -H "Authorization: Bearer openwop-sqlite-dev-key" \
-  "http://127.0.0.1:4802/v1/runs/$RUN_ID/events/poll" | jq '.events[].type'
-# Expected: run.started, node.started, run.resumed, node.completed, run.completed
-```
-
-The host's `core.delay` and `core.noop` nodes are pure — re-executing them after a kill is safe. **A production host with non-pure nodes (LLM calls, payments, emails) MUST persist invocation results before returning to the executor (Layer-2 idempotency per `idempotency.md`)** so a resume after a node-completion event doesn't double-fire side effects. Wiring Layer-2 dedup is host-implementation-defined; this reference example doesn't need it.
-
-## What's next
-
-If you want to evolve this into a more production-shaped host:
-
-1. **Replace SQLite with Postgres.** `pg` driver; same schema; replace `BEGIN IMMEDIATE` with `SELECT FOR UPDATE SKIP LOCKED`. Now you can run multiple processes against the same DB.
-2. ~~**Add heartbeating.**~~ ✅ Done.
-3. ~~**Add resume-on-startup.**~~ ✅ Done.
-4. **Wire a real auth layer.** JWT verification, scope checks, tenant isolation.
-5. **Add the missing profiles.** This host claims `openwop-core` + `openwop-stream-{sse,poll}` + `openwop-debug-bundle`. Add `clarification.request` to `supportedEnvelopes` to claim `openwop-interrupts`. Wire `aiProviders.policies` to claim `openwop-provider-policy`. Etc.
-6. **Add Layer-2 idempotency** before adding non-pure nodes. Persist invocation results in a separate table; on resume, skip re-execution if the prior result is already recorded.
-
-The wire contract doesn't change as you add capabilities — your discovery payload advertises more, the conformance scenarios that gate on profiles run additional checks, and you're suddenly on multiple rows of `INTEROP-MATRIX.md`.
+1. **Webhooks** (`webhooks.md`): registration, signed durable delivery with retries and dead letters, the egress guard. `openwop-core-standard` needs the `webhooks` family, and its fan-out is the first outbound effect seam, which the effect-seam manifest is required to list (the one conformance failure today).
+2. **Audit-log integrity** (RFC 0224): the v1 host had a signed, checkpointed chain; it was removed with the v1 wire.
+3. **Annotations** (`feedback`), OTel export (`telemetry`), cost metrics and model-capability checks: v1 features, removed with the v1 wire, each its own v2 family.
+4. **Workflow features**: edge `triggerRule` and conditions, failure routing, approval quorum and timeouts, sub-workflows and dispatch.
+5. **CORS preflight**, `minClientVersion`, rate limiting and revocable keys.
