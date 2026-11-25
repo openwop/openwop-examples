@@ -137,6 +137,26 @@ await test('the v2 floor: discovery, create, interrupt, replay fork', async () =
   } finally { await host.close(); }
 });
 
+await test('a fork\'s deadline starts when the fork is created, not at its source\'s start', async () => {
+  // runTimeoutMs 1500: the source completes, then ages past its deadline before the fork.
+  const host = await startHost({ port: 0, dbPath: join(dir, 'fork-deadline.sqlite') });
+  try {
+    const base = `http://127.0.0.1:${host.port}`;
+    const configurable = { version: 1, run: { runTimeoutMs: 1500 } };
+    const run = (await call(base, 'POST', '/runs', { workflowId: 'conformance-approval', configurable })).json.runId as string;
+    await until(async () => ((await statusOf(base, run)) === 'waiting-approval' ? true : undefined));
+    await call(base, 'POST', `/runs/${project(run)}/interrupts/gate`, { resumeValue: { action: 'accept' } });
+    await until(async () => ((await statusOf(base, run)) === 'completed' ? true : undefined));
+    await sleep(2000);
+    // A branch re-executes from seq 1, so the executor's deadline check runs (a replay of a completed run would not).
+    const fork = await call(base, 'POST', `/runs/${project(run)}:fork`, { mode: 'branch', fromSeq: 1 });
+    assert.equal(fork.status, 201);
+    const child = fork.json.runId as string;
+    const status = await until(async () => { const s = await statusOf(base, child); return s === 'waiting-approval' || s === 'failed' ? s : undefined; });
+    assert.equal(status, 'waiting-approval', `the fork must not inherit the source's spent deadline: ${(await typesOf(base, child)).join(',')}`);
+  } finally { await host.close(); }
+});
+
 rmSync(dir, { recursive: true, force: true });
 if (failures > 0) { console.log(`${failures} test(s) failed`); process.exit(1); }
 console.log('all tests passed');
