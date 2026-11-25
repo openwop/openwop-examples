@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openwop-host-python"
+version = "2.0.0"
+description = "OpenWOP v2 host in Python: stdlib only (http.server, sqlite3, hmac), one SQLite file. Serves the core run floor."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "openwop project" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/openwop/openwop-examples"
+Repository = "https://github.com/openwop/openwop-examples"
+
+[project.scripts]
+openwop-host-python = "openwop_host.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

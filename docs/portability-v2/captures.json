@@ -1,0 +1,1344 @@
+{
+  "hosts": [
+    {
+      "name": "ts",
+      "base": "http://127.0.0.1:3842"
+    },
+    {
+      "name": "py",
+      "base": "http://127.0.0.1:3841"
+    }
+  ],
+  "captures": {
+    "conformance-noop": {
+      "ts": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "_ZlgzzQLz0R7tl0oLiPYz7HI",
+            "runId": "openwop-reference-tenant/1TzuH9f_Rc_II7YWA97Ih1yO",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-noop",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-reference-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-v2-reference:api-key",
+                  "subjectId": "default",
+                  "tenant": "openwop-reference-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.144Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "a5RQE1VoFCr_2EQU0TXEqtSx",
+            "runId": "openwop-reference-tenant/1TzuH9f_Rc_II7YWA97Ih1yO",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "noop",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.163Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "nodeId": "noop",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "0KulSCQXUzFFSLhvoSzk19O1",
+            "runId": "openwop-reference-tenant/1TzuH9f_Rc_II7YWA97Ih1yO",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "noop",
+              "outputs": {},
+              "durationMs": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.164Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "nodeId": "noop",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "AAdTg0R3vQPlSoXX6g1V-2Ou",
+            "runId": "openwop-reference-tenant/1TzuH9f_Rc_II7YWA97Ih1yO",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {},
+              "durationMs": 21
+            },
+            "timestamp": "2026-11-25T16:28:59.165Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      },
+      "py": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "INBT_-jvhEPi22mkoNkvNVmJ",
+            "runId": "openwop-python-tenant/zF2T4bkbL_V5_iHw6Rma3IKp",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-noop",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-python-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-python:api-key",
+                  "subjectId": "primary-key",
+                  "tenant": "openwop-python-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.144Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "lEIxeQN1xvD8aRiF2kVNWdnw",
+            "runId": "openwop-python-tenant/zF2T4bkbL_V5_iHw6Rma3IKp",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "noop",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.144Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "noop"
+          },
+          {
+            "eventId": "lzCWlB7hPwg1f_8vuMB27SWn",
+            "runId": "openwop-python-tenant/zF2T4bkbL_V5_iHw6Rma3IKp",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "noop",
+              "outputs": {},
+              "durationMs": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.144Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "noop"
+          },
+          {
+            "eventId": "q44H_feZQiaEvwo4ogkJQWrg",
+            "runId": "openwop-python-tenant/zF2T4bkbL_V5_iHw6Rma3IKp",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {},
+              "durationMs": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.145Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      }
+    },
+    "conformance-delay": {
+      "ts": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "avj47ANti6FzCB6QIZg-hL3T",
+            "runId": "openwop-reference-tenant/oa5R-PM9UmGpJw2CrjLRlp0P",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-delay",
+              "inputs": {
+                "delayMs": 200
+              },
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-reference-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-v2-reference:api-key",
+                  "subjectId": "default",
+                  "tenant": "openwop-reference-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.199Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "8B6L855TAdFVjt8fyKT0piGL",
+            "runId": "openwop-reference-tenant/oa5R-PM9UmGpJw2CrjLRlp0P",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "wait",
+              "typeId": "core.delay",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.200Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "nodeId": "wait",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "xTmKIouwGH96zcCLLMDoFxFm",
+            "runId": "openwop-reference-tenant/oa5R-PM9UmGpJw2CrjLRlp0P",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "wait",
+              "outputs": {
+                "sleptMs": 200
+              },
+              "durationMs": 201
+            },
+            "timestamp": "2026-11-25T16:28:59.401Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "nodeId": "wait",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "ZE7QzeInhASFjNdkk4eXYK3S",
+            "runId": "openwop-reference-tenant/oa5R-PM9UmGpJw2CrjLRlp0P",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {
+                "sleptMs": 200
+              },
+              "durationMs": 203
+            },
+            "timestamp": "2026-11-25T16:28:59.402Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      },
+      "py": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "mafLmLkOiBRmJH5LYDq_fCaR",
+            "runId": "openwop-python-tenant/E92rvaD6fOyTeKGnu2gP9Ap8",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-delay",
+              "inputs": {
+                "delayMs": 200
+              },
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-python-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-python:api-key",
+                  "subjectId": "primary-key",
+                  "tenant": "openwop-python-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.199Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "Vq30YrfkrZP-dA3Awa3Ur5fO",
+            "runId": "openwop-python-tenant/E92rvaD6fOyTeKGnu2gP9Ap8",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "wait",
+              "typeId": "core.delay",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.199Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "wait"
+          },
+          {
+            "eventId": "4QVcWq7lC-69CGWuASfwBPas",
+            "runId": "openwop-python-tenant/E92rvaD6fOyTeKGnu2gP9Ap8",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "wait",
+              "outputs": {
+                "sleptMs": 200
+              },
+              "durationMs": 204
+            },
+            "timestamp": "2026-11-25T16:28:59.403Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "wait"
+          },
+          {
+            "eventId": "u88FRQpKuBhMO4lalGnDMipU",
+            "runId": "openwop-python-tenant/E92rvaD6fOyTeKGnu2gP9Ap8",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {
+                "sleptMs": 200
+              },
+              "durationMs": 204
+            },
+            "timestamp": "2026-11-25T16:28:59.403Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      }
+    },
+    "conformance-multi-node": {
+      "ts": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "QuGzmbdyFOqUrluqRBgwcCFe",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-multi-node",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-reference-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-v2-reference:api-key",
+                  "subjectId": "default",
+                  "tenant": "openwop-reference-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.421Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "_RVpM7mWK7NnPB2tt6n8ovq2",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "a",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "nodeId": "a",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "vsBwbLuXkfrewX1xqo2EBK_h",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "a",
+              "outputs": {},
+              "durationMs": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "nodeId": "a",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "G_8WPzihz_b-GYB6Q9aCzdpu",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "b",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "nodeId": "b",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "brljyOrIZUfkR0lO2mYaId4e",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "b",
+              "outputs": {},
+              "durationMs": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 4,
+            "schemaVersion": 1,
+            "nodeId": "b",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "vmoiKORkztjhM12NYnLXnrTs",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "c",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.423Z",
+            "sequence": 5,
+            "schemaVersion": 1,
+            "nodeId": "c",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "Vhmh2x6RqnGOn7Dt7ybKSxQK",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "c",
+              "outputs": {},
+              "durationMs": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.423Z",
+            "sequence": 6,
+            "schemaVersion": 1,
+            "nodeId": "c",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "lFxHhvBOEZYC6uUxQbSjvtvl",
+            "runId": "openwop-reference-tenant/0WlfpTCvsArQNTudM4GeK6Mh",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {},
+              "durationMs": 2
+            },
+            "timestamp": "2026-11-25T16:28:59.423Z",
+            "sequence": 7,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      },
+      "py": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "8oP5fnr_dUozbmHaSvurMU9R",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-multi-node",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-python-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-python:api-key",
+                  "subjectId": "primary-key",
+                  "tenant": "openwop-python-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.421Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "CYJ0qQAgsAMR4CdO88G-UfRv",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "a",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.421Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "a"
+          },
+          {
+            "eventId": "5_EVIk4gHOD95J_Izjxi2Mez",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "a",
+              "outputs": {},
+              "durationMs": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.421Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "a"
+          },
+          {
+            "eventId": "ViM_pT8Ez2qSt4f_4-QBapSx",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "b",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.421Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "b"
+          },
+          {
+            "eventId": "2X6gcgZjWbP_p4jAGgbcb_i3",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "b",
+              "outputs": {},
+              "durationMs": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 4,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "b"
+          },
+          {
+            "eventId": "MTngUypo6V7zi98TrhFxOyir",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "c",
+              "typeId": "core.noop",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 5,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "c"
+          },
+          {
+            "eventId": "Mictk06yGooCHuO_oUf2Wg4m",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "c",
+              "outputs": {},
+              "durationMs": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 6,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "c"
+          },
+          {
+            "eventId": "5H3AE7cjowShIR6z2Z-99xvi",
+            "runId": "openwop-python-tenant/x2kQYUvtJHpQl3XR_EA8cAX2",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {},
+              "durationMs": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.422Z",
+            "sequence": 7,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      }
+    },
+    "conformance-failure": {
+      "ts": {
+        "status": "failed",
+        "events": [
+          {
+            "eventId": "43Um8m3-rksqcBY8V8uZPLV9",
+            "runId": "openwop-reference-tenant/xROpfcreaHRsXTdemSmQIi0e",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-failure",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-reference-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-v2-reference:api-key",
+                  "subjectId": "default",
+                  "tenant": "openwop-reference-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.428Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "09xxlIyBBAAUBrzEJAoZVcBu",
+            "runId": "openwop-reference-tenant/xROpfcreaHRsXTdemSmQIi0e",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "fail",
+              "typeId": "core.fail",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.428Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "nodeId": "fail",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "0XuqiiiMjAXqeNkSgxFjodd6",
+            "runId": "openwop-reference-tenant/xROpfcreaHRsXTdemSmQIi0e",
+            "type": "node.failed",
+            "payload": {
+              "nodeId": "fail",
+              "error": {
+                "code": "example.conformance_failure",
+                "message": "Intentional conformance failure"
+              },
+              "attempts": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.428Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "nodeId": "fail",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "0BmAWbSs7ZO_A1i4_q-gvucs",
+            "runId": "openwop-reference-tenant/xROpfcreaHRsXTdemSmQIi0e",
+            "type": "run.failed",
+            "payload": {
+              "error": {
+                "code": "example.conformance_failure",
+                "message": "Intentional conformance failure"
+              },
+              "failedNodeId": "fail",
+              "durationMs": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.429Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      },
+      "py": {
+        "status": "failed",
+        "events": [
+          {
+            "eventId": "BClVwDwsXe9-Z2Vy6BXljhqH",
+            "runId": "openwop-python-tenant/L8RZ6ovbTkXvdjkvCeanoWae",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-failure",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-python-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-python:api-key",
+                  "subjectId": "primary-key",
+                  "tenant": "openwop-python-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.429Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "l9CjDGLwNpqHZbtaFLl-E5Te",
+            "runId": "openwop-python-tenant/L8RZ6ovbTkXvdjkvCeanoWae",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "fail",
+              "typeId": "core.fail",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.429Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "fail"
+          },
+          {
+            "eventId": "ruApEI_GAMEAyafD1tLDD3VY",
+            "runId": "openwop-python-tenant/L8RZ6ovbTkXvdjkvCeanoWae",
+            "type": "node.failed",
+            "payload": {
+              "nodeId": "fail",
+              "error": {
+                "code": "example.conformance_failure",
+                "message": "Intentional conformance failure"
+              },
+              "attempts": 1
+            },
+            "timestamp": "2026-11-25T16:28:59.429Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "fail"
+          },
+          {
+            "eventId": "J564_MKVfEF7wMOkAMfTOc73",
+            "runId": "openwop-python-tenant/L8RZ6ovbTkXvdjkvCeanoWae",
+            "type": "run.failed",
+            "payload": {
+              "error": {
+                "code": "example.conformance_failure",
+                "message": "Intentional conformance failure"
+              },
+              "durationMs": 0,
+              "failedNodeId": "fail"
+            },
+            "timestamp": "2026-11-25T16:28:59.429Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ]
+      }
+    },
+    "conformance-approval": {
+      "ts": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "i-ox-Etw9EVOSGRCXEpL7Ggs",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-approval",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-reference-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-v2-reference:api-key",
+                  "subjectId": "default",
+                  "tenant": "openwop-reference-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.433Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "MH5UjVRRw7MSUg6LQWiHPcha",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "gate",
+              "typeId": "core.approvalGate",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.433Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "nodeId": "gate",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "6koNPN8929a5b4-8V30qBiFG",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "interrupt.requested",
+            "payload": {
+              "kind": "approval",
+              "key": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50:gate:0",
+              "data": {
+                "artifactId": "gate",
+                "artifactType": "conformance-artifact",
+                "title": "Conformance approval",
+                "actions": [
+                  "accept",
+                  "reject"
+                ],
+                "description": "Conformance suite — please accept to complete the run."
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.482Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "nodeId": "gate",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "fgLZvKVAfFFxkf64aNTJs6t-",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "node.suspended",
+            "payload": {
+              "nodeId": "gate",
+              "interruptId": "openwop-reference-tenant/yDZ-RxStVCWeN87PrY2Ma9Vl",
+              "kind": "approval",
+              "key": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50:gate:0"
+            },
+            "timestamp": "2026-11-25T16:28:59.483Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "nodeId": "gate",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "JVIZKjzrgFcynMqAqXMBOk6u",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "interrupt.resolved",
+            "payload": {
+              "nodeId": "gate",
+              "interruptId": "openwop-reference-tenant/yDZ-RxStVCWeN87PrY2Ma9Vl",
+              "kind": "approval",
+              "resumeValue": {
+                "action": "accept"
+              },
+              "resolvedBy": {
+                "issuer": "urn:openwop-host-v2-reference:api-key",
+                "subjectId": "default",
+                "tenant": "openwop-reference-tenant",
+                "lane": "api-key",
+                "kind": "user"
+              },
+              "decision": "granted",
+              "action": "accept"
+            },
+            "timestamp": "2026-11-25T16:28:59.486Z",
+            "sequence": 4,
+            "schemaVersion": 1,
+            "nodeId": "gate",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "UNUFQOygvpiHRp2vfQsas3Ba",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "node.resumed",
+            "payload": {
+              "nodeId": "gate",
+              "interruptId": "openwop-reference-tenant/yDZ-RxStVCWeN87PrY2Ma9Vl",
+              "resumeValue": {
+                "action": "accept"
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.486Z",
+            "sequence": 5,
+            "schemaVersion": 1,
+            "nodeId": "gate",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "Aa8Trp03xqjToMGtcAijDYUy",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "gate",
+              "outputs": {
+                "resumeValue": {
+                  "action": "accept"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.486Z",
+            "sequence": 6,
+            "schemaVersion": 1,
+            "nodeId": "gate",
+            "engineVersion": 1
+          },
+          {
+            "eventId": "dYLTSSpzo5STr78kRmLtT0yn",
+            "runId": "openwop-reference-tenant/UsogToBmkNI5ABmc4UBOUb50",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {
+                "resumeValue": {
+                  "action": "accept"
+                }
+              },
+              "durationMs": 53
+            },
+            "timestamp": "2026-11-25T16:28:59.486Z",
+            "sequence": 7,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ],
+        "replay": {
+          "status": "completed",
+          "events": [
+            {
+              "eventId": "DokKia2qRGjBq1DP8jEzgQ8a",
+              "runId": "openwop-reference-tenant/4MvtZ7J85FPpMwG0hhpNoOmg",
+              "type": "run.started",
+              "payload": {
+                "workflowId": "conformance-approval",
+                "inputs": {},
+                "transport": "rest",
+                "engineVersion": 1,
+                "owner": {
+                  "tenant": "openwop-reference-tenant",
+                  "subject": {
+                    "issuer": "urn:openwop-host-v2-reference:api-key",
+                    "subjectId": "default",
+                    "tenant": "openwop-reference-tenant",
+                    "lane": "api-key",
+                    "kind": "user"
+                  }
+                }
+              },
+              "timestamp": "2026-11-25T16:28:59.493Z",
+              "sequence": 0,
+              "schemaVersion": 1,
+              "engineVersion": 1
+            },
+            {
+              "eventId": "AD5wGV_S8gx4UCwRjsRdfw5E",
+              "runId": "openwop-reference-tenant/4MvtZ7J85FPpMwG0hhpNoOmg",
+              "type": "node.started",
+              "payload": {
+                "nodeId": "gate",
+                "typeId": "core.approvalGate",
+                "attempt": 0
+              },
+              "timestamp": "2026-11-25T16:28:59.493Z",
+              "sequence": 1,
+              "schemaVersion": 1,
+              "nodeId": "gate",
+              "engineVersion": 1
+            },
+            {
+              "eventId": "vqO6dHsBsvKH119pm9Uqpmrw",
+              "runId": "openwop-reference-tenant/4MvtZ7J85FPpMwG0hhpNoOmg",
+              "type": "interrupt.resolved",
+              "payload": {
+                "nodeId": "gate",
+                "interruptId": "openwop-reference-tenant/yDZ-RxStVCWeN87PrY2Ma9Vl",
+                "kind": "approval",
+                "resumeValue": {
+                  "action": "accept"
+                },
+                "resolvedBy": {
+                  "issuer": "urn:openwop-host-v2-reference:api-key",
+                  "subjectId": "default",
+                  "tenant": "openwop-reference-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                },
+                "decision": "granted",
+                "action": "accept"
+              },
+              "timestamp": "2026-11-25T16:28:59.493Z",
+              "sequence": 2,
+              "schemaVersion": 1,
+              "nodeId": "gate",
+              "engineVersion": 1
+            },
+            {
+              "eventId": "-kZqrVIErAFGSYvoV8ioXRPG",
+              "runId": "openwop-reference-tenant/4MvtZ7J85FPpMwG0hhpNoOmg",
+              "type": "node.resumed",
+              "payload": {
+                "nodeId": "gate",
+                "interruptId": "openwop-reference-tenant/yDZ-RxStVCWeN87PrY2Ma9Vl",
+                "resumeValue": {
+                  "action": "accept"
+                }
+              },
+              "timestamp": "2026-11-25T16:28:59.494Z",
+              "sequence": 3,
+              "schemaVersion": 1,
+              "nodeId": "gate",
+              "engineVersion": 1
+            },
+            {
+              "eventId": "SQSpST61nr6XCyPDrARoIZ2l",
+              "runId": "openwop-reference-tenant/4MvtZ7J85FPpMwG0hhpNoOmg",
+              "type": "node.completed",
+              "payload": {
+                "nodeId": "gate",
+                "outputs": {
+                  "resumeValue": {
+                    "action": "accept"
+                  }
+                }
+              },
+              "timestamp": "2026-11-25T16:28:59.494Z",
+              "sequence": 4,
+              "schemaVersion": 1,
+              "nodeId": "gate",
+              "engineVersion": 1
+            },
+            {
+              "eventId": "0JU_MM-9vihobDYwZlTZUpqy",
+              "runId": "openwop-reference-tenant/4MvtZ7J85FPpMwG0hhpNoOmg",
+              "type": "run.completed",
+              "payload": {
+                "outputs": {
+                  "resumeValue": {
+                    "action": "accept"
+                  }
+                },
+                "durationMs": 1
+              },
+              "timestamp": "2026-11-25T16:28:59.494Z",
+              "sequence": 5,
+              "schemaVersion": 1,
+              "engineVersion": 1
+            }
+          ]
+        }
+      },
+      "py": {
+        "status": "completed",
+        "events": [
+          {
+            "eventId": "gY2NSb-TgQJHbnDdwsaqzLOO",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "run.started",
+            "payload": {
+              "workflowId": "conformance-approval",
+              "inputs": {},
+              "transport": "rest",
+              "engineVersion": 1,
+              "owner": {
+                "tenant": "openwop-python-tenant",
+                "subject": {
+                  "issuer": "urn:openwop-host-python:api-key",
+                  "subjectId": "primary-key",
+                  "tenant": "openwop-python-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.433Z",
+            "sequence": 0,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          },
+          {
+            "eventId": "GQMN6j7IIRKJSAo1iSgjeCSL",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "node.started",
+            "payload": {
+              "nodeId": "gate",
+              "typeId": "core.approvalGate",
+              "attempt": 0
+            },
+            "timestamp": "2026-11-25T16:28:59.433Z",
+            "sequence": 1,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "gate"
+          },
+          {
+            "eventId": "hUqGeEz-PYdeMrx9r8xqsNAq",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "interrupt.requested",
+            "payload": {
+              "kind": "approval",
+              "key": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ:gate:0",
+              "data": {
+                "artifactId": "gate",
+                "artifactType": "conformance-artifact",
+                "title": "Conformance approval",
+                "actions": [
+                  "accept",
+                  "reject"
+                ],
+                "description": "Conformance suite — please accept to complete the run."
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.434Z",
+            "sequence": 2,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "gate"
+          },
+          {
+            "eventId": "9nmIZIEdA4gwRe4Npe997R7Q",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "node.suspended",
+            "payload": {
+              "nodeId": "gate",
+              "interruptId": "openwop-python-tenant/3Db2Cjdy6KgxcVjkB_flxWCq",
+              "kind": "approval",
+              "key": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ:gate:0"
+            },
+            "timestamp": "2026-11-25T16:28:59.434Z",
+            "sequence": 3,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "gate"
+          },
+          {
+            "eventId": "ReKJk4reBG19q1Uj5gY2trZO",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "interrupt.resolved",
+            "payload": {
+              "nodeId": "gate",
+              "interruptId": "openwop-python-tenant/3Db2Cjdy6KgxcVjkB_flxWCq",
+              "kind": "approval",
+              "resumeValue": {
+                "action": "accept"
+              },
+              "resolvedBy": {
+                "issuer": "urn:openwop-host-python:api-key",
+                "subjectId": "primary-key",
+                "tenant": "openwop-python-tenant",
+                "lane": "api-key",
+                "kind": "user"
+              },
+              "decision": "granted",
+              "action": "accept"
+            },
+            "timestamp": "2026-11-25T16:28:59.437Z",
+            "sequence": 4,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "gate"
+          },
+          {
+            "eventId": "sebkSy0Z-0joqHs2ZENCjktU",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "node.resumed",
+            "payload": {
+              "nodeId": "gate",
+              "resumeValue": {
+                "action": "accept"
+              },
+              "interruptId": "openwop-python-tenant/3Db2Cjdy6KgxcVjkB_flxWCq"
+            },
+            "timestamp": "2026-11-25T16:28:59.437Z",
+            "sequence": 5,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "gate"
+          },
+          {
+            "eventId": "0FLrcJyiF_HBovbZBqYk6uaO",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "node.completed",
+            "payload": {
+              "nodeId": "gate",
+              "outputs": {
+                "resumeValue": {
+                  "action": "accept"
+                }
+              }
+            },
+            "timestamp": "2026-11-25T16:28:59.437Z",
+            "sequence": 6,
+            "schemaVersion": 1,
+            "engineVersion": 1,
+            "nodeId": "gate"
+          },
+          {
+            "eventId": "P-q42doAO-3ik8P0H-FIo9fU",
+            "runId": "openwop-python-tenant/JqBSweKd3RyfYDtq7Q19ynRQ",
+            "type": "run.completed",
+            "payload": {
+              "outputs": {
+                "resumeValue": {
+                  "action": "accept"
+                }
+              },
+              "durationMs": 5
+            },
+            "timestamp": "2026-11-25T16:28:59.438Z",
+            "sequence": 7,
+            "schemaVersion": 1,
+            "engineVersion": 1
+          }
+        ],
+        "replay": {
+          "status": "completed",
+          "events": [
+            {
+              "eventId": "XKPAYH_9LinoCF2ANaKKGRuo",
+              "runId": "openwop-python-tenant/EofL0dO0X6s2sUAtUiXspV4I",
+              "type": "run.started",
+              "payload": {
+                "workflowId": "conformance-approval",
+                "inputs": {},
+                "transport": "rest",
+                "engineVersion": 1,
+                "owner": {
+                  "tenant": "openwop-python-tenant",
+                  "subject": {
+                    "issuer": "urn:openwop-host-python:api-key",
+                    "subjectId": "primary-key",
+                    "tenant": "openwop-python-tenant",
+                    "lane": "api-key",
+                    "kind": "user"
+                  }
+                }
+              },
+              "timestamp": "2026-11-25T16:28:59.446Z",
+              "sequence": 0,
+              "schemaVersion": 1,
+              "engineVersion": 1
+            },
+            {
+              "eventId": "EOLSAoLdQCP5CHsaoheZFq2c",
+              "runId": "openwop-python-tenant/EofL0dO0X6s2sUAtUiXspV4I",
+              "type": "node.started",
+              "payload": {
+                "nodeId": "gate",
+                "typeId": "core.approvalGate",
+                "attempt": 0
+              },
+              "timestamp": "2026-11-25T16:28:59.446Z",
+              "sequence": 1,
+              "schemaVersion": 1,
+              "engineVersion": 1,
+              "nodeId": "gate"
+            },
+            {
+              "eventId": "ei0teDFdohpaPX1YA3QVv-vn",
+              "runId": "openwop-python-tenant/EofL0dO0X6s2sUAtUiXspV4I",
+              "type": "interrupt.resolved",
+              "payload": {
+                "nodeId": "gate",
+                "interruptId": "openwop-python-tenant/3Db2Cjdy6KgxcVjkB_flxWCq",
+                "kind": "approval",
+                "resumeValue": {
+                  "action": "accept"
+                },
+                "resolvedBy": {
+                  "issuer": "urn:openwop-host-python:api-key",
+                  "subjectId": "primary-key",
+                  "tenant": "openwop-python-tenant",
+                  "lane": "api-key",
+                  "kind": "user"
+                },
+                "decision": "granted",
+                "action": "accept"
+              },
+              "timestamp": "2026-11-25T16:28:59.447Z",
+              "sequence": 2,
+              "schemaVersion": 1,
+              "engineVersion": 1,
+              "nodeId": "gate"
+            },
+            {
+              "eventId": "OM3IG8Q9_uHllxbdFEqTDIj4",
+              "runId": "openwop-python-tenant/EofL0dO0X6s2sUAtUiXspV4I",
+              "type": "node.resumed",
+              "payload": {
+                "nodeId": "gate",
+                "resumeValue": {
+                  "action": "accept"
+                },
+                "interruptId": "openwop-python-tenant/3Db2Cjdy6KgxcVjkB_flxWCq"
+              },
+              "timestamp": "2026-11-25T16:28:59.447Z",
+              "sequence": 3,
+              "schemaVersion": 1,
+              "engineVersion": 1,
+              "nodeId": "gate"
+            },
+            {
+              "eventId": "5lhNfnqbtQT3Xvdo1zVgqRIR",
+              "runId": "openwop-python-tenant/EofL0dO0X6s2sUAtUiXspV4I",
+              "type": "node.completed",
+              "payload": {
+                "nodeId": "gate",
+                "outputs": {
+                  "resumeValue": {
+                    "action": "accept"
+                  }
+                }
+              },
+              "timestamp": "2026-11-25T16:28:59.447Z",
+              "sequence": 4,
+              "schemaVersion": 1,
+              "engineVersion": 1,
+              "nodeId": "gate"
+            },
+            {
+              "eventId": "T4yZhv-AEY-yC3YdFhD_8rB9",
+              "runId": "openwop-python-tenant/EofL0dO0X6s2sUAtUiXspV4I",
+              "type": "run.completed",
+              "payload": {
+                "outputs": {
+                  "resumeValue": {
+                    "action": "accept"
+                  }
+                },
+                "durationMs": 1
+              },
+              "timestamp": "2026-11-25T16:28:59.447Z",
+              "sequence": 5,
+              "schemaVersion": 1,
+              "engineVersion": 1
+            }
+          ]
+        }
+      }
+    },
+    "conformance-identity": {
+      "ts": {
+        "refused": {
+          "status": 404,
+          "error": "not_found"
+        }
+      },
+      "py": {
+        "refused": {
+          "status": 404,
+          "error": "not_found"
+        }
+      }
+    }
+  }
+}
