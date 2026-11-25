@@ -52,9 +52,9 @@ Per RFC 0008 §H, a conformant host MUST:
    MUST NOT include `vendor.openwop.misbehaving-abi`. (Well-behaved
    packs that load successfully ARE included.)
 
-The conformance scenario asserts (4) end-to-end against the
-in-memory reference host, which advertises `loadedPacks[]` when at
-least one WASM pack is loaded.
+The conformance scenario asserts (4) end-to-end against any host
+that advertises `loadedPacks[]` (a host does so when at least one
+WASM pack is loaded).
 
 ## See also
 

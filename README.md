@@ -11,18 +11,16 @@ protocol repo stays a lean spec + conformance contract.
   - **`v2-reference/`** — **the v2 reference host**: implemented from `spec/v2/core/*.md` and the
     generated v2 documents, never adapted from a v1 host. Certified on the 2.x suite (see its
     `conformance.md`). Start here for a new integration — v2 is the current protocol major.
-  - `in-memory/` — minimal, dependency-free (Node stdlib) **v1** host
   - `sqlite/` — durable single-file v1 host (`better-sqlite3`)
   - `postgres/` — production-profile v1 host (`pg`; pglite for in-process tests)
-  - `python/` — v1 host in Python (stdlib)
   - `wasm-sandbox/` — RFC 0035 sandboxed-execution reference
 - `examples/` (top level) — runnable workflow samples (`tiny-workflow`, `approval-workflow`,
   `streaming-client`, `mcp-tool`, `branch-fork`, …). Samples are `fetch`-only, speak v2, and default
   to the v2 reference host; see [`examples/README.md`](examples/README.md) for what each one needs.
 
-> **v2 only.** v1 reached end of support on 2026-10-04 (RFC 0234). The four v1 hosts under
-> `hosts/` are frozen history, not reference implementations: `sqlite` and `postgres` are being
-> ported to v2, and `in-memory` and `python` (v1) will be removed. Build new hosts against
+> **v2 only.** v1 reached end of support on 2026-10-04 (RFC 0234). The two remaining v1 hosts
+> under `hosts/`, `sqlite` and `postgres`, are frozen history being ported to v2, not reference
+> implementations. The v1-only `in-memory` and `python` hosts were removed. Build new hosts against
 > `hosts/v2-reference/` and measure them with `@openwop/openwop-conformance` at `--target-major 2`.
 
 ## Quick start

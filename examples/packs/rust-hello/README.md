@@ -23,27 +23,11 @@ cargo build --target wasm32-unknown-unknown --release
 
 Output: `target/wasm32-unknown-unknown/release/rust_hello.wasm` (~5–10 KiB stripped).
 
-## Use it from the in-memory reference host
+## Load it into a host
 
-The host scans `examples/packs/*/pack.json` at startup and loads every pack whose `runtime.language === "wasm"`. After `cargo build`, restart the host:
+No host in this repo loads WASM node packs from `examples/packs/` today: the v1 in-memory host that did (`hosts/in-memory/src/wasm-loader.ts`) was removed when v1 reached end of support (RFC 0234). A v2 host that runs WASM packs advertises `nodePackRuntimes.wasm` in its discovery document ([`spec/v2/core/node-pack-runtimes.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/node-pack-runtimes.md)) and lists the pack in `loadedPacks[]` once it is loaded. Exercise the node with a workflow whose first node uses the typeId `vendor.openwop.rust-hello.greet`; the conformance fixture `conformance-wasm-pack-roundtrip` does exactly that, and a successful run's `node.completed` event carries `output.greeting: "Hello, openwop!"` for `inputs.name = "openwop"`.
 
-```bash
-cd examples/hosts/in-memory
-npm run start
-# [openwop-host-in-memory] loaded WASM pack vendor.openwop.rust-hello (ABI v1) with 1 node type(s): vendor.openwop.rust-hello.greet
-# [openwop-host-in-memory] listening on http://127.0.0.1:3737 (...)
-```
-
-Then exercise the node via a workflow whose first node uses the typeId `vendor.openwop.rust-hello.greet`. The conformance suite seeds `conformance-wasm-pack-roundtrip` for exactly this purpose:
-
-```bash
-curl -s -X POST http://127.0.0.1:3737/v1/runs \
-  -H "Authorization: Bearer openwop-inmem-dev-key" \
-  -H "Content-Type: application/json" \
-  -d '{"workflowId":"conformance-wasm-pack-roundtrip","inputs":{"name":"openwop"}}'
-```
-
-Poll the run and look for the `node.completed` event whose `data.output.greeting` is `"Hello, openwop!"`.
+For sandboxed execution of WASM modules (RFC 0035), see [`hosts/wasm-sandbox/`](../../hosts/wasm-sandbox/).
 
 ## Implementation notes
 
@@ -74,7 +58,7 @@ This pack uses no WASI imports. It declares only `openwop_log` under the `openwo
 
 `pack.json` is a v2 manifest ([`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md)): `kind: "node"`, an `engines.openwop` ceiling that admits major 2 (`>=1.1.0 <3.0.0`), and no `signing` block. The ABI version is read from the module's `openwop_abi_version()` export and the memory cap comes from the host (`nodePackRuntimes.wasm` in discovery, [`spec/v2/core/node-pack-runtimes.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/node-pack-runtimes.md)), so the manifest carries neither.
 
-When run from `examples/packs/`, the in-memory host loads the `.wasm` straight from disk and trusts the filesystem. There is no signature check.
+A host that loads the pack straight from `examples/packs/` trusts the filesystem; there is no `signing` block to check.
 
 This pack is not in the registry's v2 tree. Its v1 artifact (`registry/v1/…/vendor.openwop.rust-hello/-/1.0.0`) is yanked. The registry's `scripts/build-pack-tarball.mjs` bundles the file `runtime.entry` names (openwop-registry #78), so a WASM pack publishes once its module is built (`cargo build --target wasm32-unknown-unknown --release`). To start a new pack, use `node scripts/new-pack.mjs <name>` in [`openwop-registry`](https://github.com/openwop/openwop-registry), which scaffolds from the registry's v2 template; see the [pack author quickstart](https://github.com/openwop/openwop/blob/main/docs/PACK-AUTHOR-QUICKSTART.md).
 
@@ -82,5 +66,5 @@ This pack is not in the registry's v2 tree. Its v1 artifact (`registry/v1/…/ve
 
 - [`RFCS/0008-wasm-abi.md`](https://github.com/openwop/openwop/blob/main/RFCS/0008-wasm-abi.md) — the ABI spec this pack implements
 - [`spec/v2/core/packs.md`](https://github.com/openwop/openwop/blob/main/spec/v2/core/packs.md) — pack manifest format + distribution
-- [`examples/hosts/in-memory/src/wasm-loader.ts`](../../hosts/in-memory/src/wasm-loader.ts) — the loader that bridges this pack to the runtime
+- [`examples/hosts/wasm-sandbox/`](../../hosts/wasm-sandbox/) — the RFC 0035 sandboxed WASM executor
 - [`conformance/fixtures/conformance-wasm-pack-roundtrip.json`](https://github.com/openwop/openwop/blob/main/conformance/fixtures/conformance-wasm-pack-roundtrip.json) — fixture that exercises the pack end-to-end

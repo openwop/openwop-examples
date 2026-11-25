@@ -35,7 +35,7 @@ The server listens on `http://127.0.0.1:3838` by default. SQLite database lives 
 | Variable | Default | Purpose |
 |---|---|---|
 | `OPENWOP_HOST` | `127.0.0.1` | Bind address |
-| `OPENWOP_PORT` | `3838` | Bind port (in-memory host uses 3737; SQLite uses 3838 to avoid conflict) |
+| `OPENWOP_PORT` | `3838` | Bind port |
 | `OPENWOP_API_KEY` | `openwop-sqlite-dev-key` | Bearer token |
 | `OPENWOP_SQLITE_PATH` | `./data/openwop-host.sqlite` | SQLite file location |
 | `OPENWOP_CLAIM_TTL_MS` | `30000` | Lifetime of a run claim before another process can steal it. Tests use ≤ 2000. |
@@ -66,7 +66,7 @@ curl -s -H "Authorization: Bearer openwop-sqlite-dev-key" \
   "http://127.0.0.1:3838/v1/runs/$RUN_ID/events/poll" | jq
 ```
 
-You'll see `run.started` + `node.started` (everything written before the kill) preserved on the SQLite side. The in-memory host can't do this — its events live in process memory and die with the process.
+You'll see `run.started` + `node.started` (everything written before the kill) preserved on the SQLite side. A host that keeps events in process memory loses them with the process.
 
 ## Build Your Own Host: the walkthrough
 

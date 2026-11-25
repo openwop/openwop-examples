@@ -5,7 +5,6 @@ name: Examples CI
 # with package.json having `npm test` defined, then add a row below.
 #
 # Host targets:
-#   - in-memory  — CI starts the in-memory reference host first.
 #   - v2-reference — CI starts the v2 reference host first (port 3838).
 #   - external   — CI runs only when OPENWOP_EXTERNAL_BASE_URL and
 #                  OPENWOP_EXTERNAL_API_KEY secrets are set.
@@ -131,27 +130,6 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # In-memory host setup — only when host == in-memory
-      - name: Install in-memory host
-        if: matrix.example.host == 'in-memory'
-        working-directory: examples/hosts/in-memory
-        run: npm install
-
-      - name: Start in-memory host
-        if: matrix.example.host == 'in-memory'
-        working-directory: examples/hosts/in-memory
-        run: |
-          npm start > /tmp/openwop-host.log 2>&1 &
-          for i in {1..30}; do
-            if curl -sf http://127.0.0.1:3737/.well-known/openwop > /dev/null; then
-              echo "host ready"; exit 0
-            fi
-            sleep 1
-          done
-          echo "host failed to start" >&2
-          cat /tmp/openwop-host.log >&2
-          exit 1
-
       # v2 reference host setup — only when host == v2-reference
       - name: Install v2 reference host
         if: matrix.example.host == 'v2-reference'
@@ -186,20 +164,20 @@ jobs:
         working-directory: examples/${{ matrix.example.name }}
         env:
           # Three host modes:
-          #   - in-memory: target the local reference host started above (localhost:3737)
+          #   - v2-reference: target the local v2 reference host started above (localhost:3838)
           #   - external:  use the operator-provided secrets; when secrets are unset,
           #                leave empty so the example's `if (!BASE_URL) skip()` branch fires
           #   - dry-run:   no env vars needed (the example ignores them)
           # The previous expression collapsed `external + missing secrets` to localhost,
           # which defeated each example's skip-equivalent contract; now external-with-
           # empty-secret falls through to '' and the example exits 0 cleanly.
-          OPENWOP_BASE_URL: ${{ matrix.example.host == 'in-memory' && 'http://127.0.0.1:3737' || matrix.example.host == 'v2-reference' && 'http://127.0.0.1:3838' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_BASE_URL) || '' }}
-          OPENWOP_API_KEY: ${{ matrix.example.host == 'in-memory' && 'openwop-inmem-dev-key' || matrix.example.host == 'v2-reference' && 'openwop-v2-dev-key' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_API_KEY) || '' }}
+          OPENWOP_BASE_URL: ${{ matrix.example.host == 'v2-reference' && 'http://127.0.0.1:3838' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_BASE_URL) || '' }}
+          OPENWOP_API_KEY: ${{ matrix.example.host == 'v2-reference' && 'openwop-v2-dev-key' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_API_KEY) || '' }}
         run: npm test
         timeout-minutes: 2
 
       - name: Show host log on failure
-        if: failure() && (matrix.example.host == 'in-memory' || matrix.example.host == 'v2-reference')
+        if: failure() && matrix.example.host == 'v2-reference'
         run: cat /tmp/openwop-host.log
 
   # Single, always-run required check. Aggregates the (possibly-skipped) real
