@@ -1,39 +1,29 @@
 /**
- * Audit-log integrity profile for the Postgres reference host.
+ * The `auditLogIntegrity` family (RFC 0224; spec/v2/core/security-defaults.md
+ * §Audit-log integrity) on Postgres. The construction is the one RFC 0218 §A
+ * pinned, and the v2 reference host's `audit.ts` is the same algorithm over
+ * SQLite:
  *
- * Mirrors the SQLite host's `audit.ts` (see `examples/hosts/sqlite/src/audit.ts`)
- * with three Postgres-specific translations:
+ *   1. Append-only `audit_log`: plpgsql BEFORE UPDATE / BEFORE DELETE triggers
+ *      raise. OPENWOP_AUDIT_ALLOW_TAMPER=true skips them, so
+ *      `test/audit-tamper.test.ts` can play a privileged attacker.
+ *   2. Hash chain: each entry carries `prev_hash`, the SHA-256 of the prior
+ *      entry's JCS bytes; null for the first.
+ *   3. Checkpoints: a Merkle root over the entries since the last checkpoint,
+ *      signed with Ed25519, minted when `checkpointIntervalEntries` entries
+ *      have accrued or `checkpointIntervalSeconds` have passed.
+ *   4. `GET /audit/verify` (server.ts) re-walks the chain and every in-range
+ *      checkpoint and answers `audit-verify-result.schema.json`.
  *
- *   1. Async everywhere — the Querier interface is async-only, so every
- *      function that touches the DB becomes async.
- *   2. Atomic seq allocation via a sentinel row, not via single-process
- *      transactional read-then-insert. Postgres can serve multiple
- *      connections concurrently (pg.Pool, multi-process deployers), so
- *      the SQLite "better-sqlite3 in-process serialization" guarantee
- *      doesn't transfer. We use the same UPDATE…RETURNING pattern as
- *      `runs.next_event_seq` in server.ts: a single `audit_seq` row
- *      whose update locks the row for the duration of the writer's
- *      transaction, giving each writer a distinct seq.
- *   3. Append-only triggers expressed in plpgsql, not SQLite's
- *      `RAISE(FAIL, ...)` syntax. Functionally identical: BEFORE UPDATE
- *      and BEFORE DELETE handlers raise an exception. Bypass via
- *      OPENWOP_AUDIT_ALLOW_TAMPER=true (same env var as SQLite) skips
- *      trigger creation so the tamper-detection test can simulate a
- *      privileged attacker.
+ * What is Postgres-specific is concurrency. Several host processes may write
+ * one log, so the sequence is allocated by `UPDATE audit_seq … RETURNING`
+ * inside the writer's transaction: the row lock it takes serializes writers
+ * across connections and processes, and the prev-hash read after it is the
+ * real tip. A checkpoint takes the same row lock, so two processes cannot
+ * anchor the same range twice.
  *
- * Wire surface identical to the SQLite host:
- *   - capabilities.auth.profiles: ['openwop-audit-log-integrity']
- *   - capabilities.auth.auditLogIntegrity.{hashChain, checkpointSignatureAlgorithm,
- *     checkpointPublicKey, checkpointIntervalEntries, checkpointIntervalSeconds}
- *   - GET /v1/audit/verify?fromSeq=&toSeq= returns {chainValid, checkpointsValid,
- *     checkpoints, anomalies}
- *
- * The conformance suite (audit-log-integrity.test.ts) doesn't know it's
- * talking to Postgres vs SQLite — both hosts pass the same scenarios.
- *
- * @see spec/v1/auth-profiles.md §"Audit-log integrity"
- * @see conformance/src/scenarios/audit-log-integrity.test.ts
- * @see examples/hosts/sqlite/src/audit.ts — the reference this mirrors
+ * A database the v1 host wrote keeps its chain: the tables are the same, and
+ * the v2 host appends to them.
  */
 
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, randomUUID, type KeyObject } from 'node:crypto';
@@ -137,7 +127,7 @@ function canonicalize(value: unknown): string {
   // hashes one way at insert time (canonical form includes the key) but
   // hashes differently at verify time after a JSONB round-trip (which
   // drops undefined keys per JSON spec), producing a false hash-mismatch.
-  // See spec/v1/auth-profiles.md §"Audit-log integrity".
+  // See spec/v2/core/security-defaults.md §Audit-log integrity.
   //
   // Strict RFC 8785 JCS doesn't define `undefined` semantics at all —
   // `undefined` isn't a JSON value. A strict-JCS verifier in another
@@ -207,7 +197,7 @@ function merkleRoot(leafHashes: string[]): string {
  *   - audit_log_no_update / audit_log_no_delete:
  *       plpgsql functions that raise an exception on any UPDATE / DELETE
  *       of audit_log rows. Storage-layer enforcement of the append-only
- *       invariant from auth-profiles.md §"Audit-log integrity" §1.
+ *       invariant (security-defaults.md §Audit-log integrity).
  *
  * Idempotent — safe to call on every host boot.
  */
@@ -252,8 +242,8 @@ export async function setupAuditSchema(q: Querier): Promise<void> {
     `INSERT INTO audit_seq (id, next_seq) VALUES (1, 1) ON CONFLICT (id) DO NOTHING`,
   );
 
-  // Storage-layer append-only enforcement (auth-profiles.md §"Audit-log
-  // integrity" §1). Bypass for the host-internal tamper-detection test
+  // Storage-layer append-only enforcement (security-defaults.md §Audit-log
+  // integrity). Bypass for the host-internal tamper-detection test
   // via OPENWOP_AUDIT_ALLOW_TAMPER=true.
   //
   // Idempotency: Postgres doesn't have CREATE TRIGGER IF NOT EXISTS in
@@ -264,7 +254,7 @@ export async function setupAuditSchema(q: Querier): Promise<void> {
       CREATE OR REPLACE FUNCTION audit_log_reject_modification()
       RETURNS TRIGGER AS $$
       BEGIN
-        RAISE EXCEPTION 'audit_log is append-only (auth-profiles.md "Audit-log integrity")';
+        RAISE EXCEPTION 'audit_log is append-only (security-defaults.md, Audit-log integrity)';
       END;
       $$ LANGUAGE plpgsql;
     `);
@@ -339,8 +329,8 @@ export async function logAudit(
   input: AuditEntryInput,
 ): Promise<{ seq: number; entryHash: string }> {
   const occurredAt = new Date().toISOString();
-  return withTransaction(q, async () => {
-    const seqRes = await q.query<{ seq: number }>(
+  return withTransaction(q, async (tx) => {
+    const seqRes = await tx.query<{ seq: number }>(
       `UPDATE audit_seq SET next_seq = next_seq + 1
        WHERE id = 1
        RETURNING next_seq - 1 AS seq`,
@@ -350,7 +340,7 @@ export async function logAudit(
     }
     const seq = Number(seqRes.rows[0]!.seq);
 
-    const priorRes = await q.query<{ entry_hash: string }>(
+    const priorRes = await tx.query<{ entry_hash: string }>(
       'SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1',
     );
     const prevHash = priorRes.rows[0]?.entry_hash ?? null;
@@ -365,7 +355,7 @@ export async function logAudit(
       prevHash,
     });
 
-    await q.query(
+    await tx.query(
       `INSERT INTO audit_log (seq, occurred_at, actor, action, target, details_json, prev_hash, entry_hash)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
@@ -392,39 +382,44 @@ export async function createCheckpoint(
   q: Querier,
   signingKey: SigningKey,
 ): Promise<CheckpointRow | null> {
-  const lastRes = await q.query<{ at_sequence: number }>(
-    'SELECT at_sequence FROM audit_checkpoints ORDER BY at_sequence DESC LIMIT 1',
-  );
-  const fromSeq = (lastRes.rows[0]?.at_sequence ?? 0) + 1;
+  return withTransaction(q, async (tx) => {
+    // The writers' row lock: no entry lands, and no other checkpoint is minted,
+    // between reading the range and anchoring it.
+    await tx.query('SELECT next_seq FROM audit_seq WHERE id = 1 FOR UPDATE');
+    const lastRes = await tx.query<{ at_sequence: number }>(
+      'SELECT at_sequence FROM audit_checkpoints ORDER BY at_sequence DESC LIMIT 1',
+    );
+    const fromSeq = (lastRes.rows[0]?.at_sequence ?? 0) + 1;
 
-  const tipRes = await q.query<{ max: number | null }>('SELECT MAX(seq) as max FROM audit_log');
-  const toSeq = tipRes.rows[0]?.max ?? 0;
-  if (toSeq < fromSeq) return null;
+    const tipRes = await tx.query<{ max: number | null }>('SELECT MAX(seq) as max FROM audit_log');
+    const toSeq = tipRes.rows[0]?.max ?? 0;
+    if (toSeq < fromSeq) return null;
 
-  const entriesRes = await q.query<{ entry_hash: string }>(
-    'SELECT entry_hash FROM audit_log WHERE seq BETWEEN $1 AND $2 ORDER BY seq ASC',
-    [fromSeq, toSeq],
-  );
-  const root = merkleRoot(entriesRes.rows.map((e) => e.entry_hash));
+    const entriesRes = await tx.query<{ entry_hash: string }>(
+      'SELECT entry_hash FROM audit_log WHERE seq BETWEEN $1 AND $2 ORDER BY seq ASC',
+      [fromSeq, toSeq],
+    );
+    const root = merkleRoot(entriesRes.rows.map((e) => e.entry_hash));
 
-  const signature = sign(null, Buffer.from(root, 'hex'), signingKey.privateKey).toString('base64');
-  const checkpointId = `cp-${randomUUID()}`;
-  const signedAt = new Date().toISOString();
+    const signature = sign(null, Buffer.from(root, 'hex'), signingKey.privateKey).toString('base64');
+    const checkpointId = `cp-${randomUUID()}`;
+    const signedAt = new Date().toISOString();
 
-  await q.query(
-    `INSERT INTO audit_checkpoints (checkpoint_id, at_sequence, merkle_root, signature, signed_at, signing_key_id)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [checkpointId, toSeq, root, signature, signedAt, signingKey.keyId],
-  );
+    await tx.query(
+      `INSERT INTO audit_checkpoints (checkpoint_id, at_sequence, merkle_root, signature, signed_at, signing_key_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [checkpointId, toSeq, root, signature, signedAt, signingKey.keyId],
+    );
 
-  return {
-    checkpoint_id: checkpointId,
-    at_sequence: toSeq,
-    merkle_root: root,
-    signature,
-    signed_at: signedAt,
-    signing_key_id: signingKey.keyId,
-  };
+    return {
+      checkpoint_id: checkpointId,
+      at_sequence: toSeq,
+      merkle_root: root,
+      signature,
+      signed_at: signedAt,
+      signing_key_id: signingKey.keyId,
+    };
+  });
 }
 
 /**
@@ -594,7 +589,8 @@ export async function verifyAuditChain(
         prevHash: r.prev_hash,
       }),
     );
-    const recomputedRoot = merkleRoot(anchoredHashes);
+    // RFC 0218 §A.5: the leaf count is held to atSequence − P, so a deleted entry cannot re-root silently.
+    const recomputedRoot = anchoredHashes.length === cp.at_sequence - priorCheckpointSeq ? merkleRoot(anchoredHashes) : null;
 
     let merkleOk = true;
     let signatureOk: boolean | null = null;
@@ -604,7 +600,9 @@ export async function verifyAuditChain(
         atSeq: cp.at_sequence,
         kind: 'merkle-mismatch',
         checkpoint: cp.checkpoint_id,
-        detail: `recomputed merkle root ${recomputedRoot} != stored ${cp.merkle_root}`,
+        detail: recomputedRoot === null
+          ? `${anchoredHashes.length} entries anchored, ${cp.at_sequence - priorCheckpointSeq} expected`
+          : `recomputed merkle root ${recomputedRoot} != stored ${cp.merkle_root}`,
       });
       merkleOk = false;
       checkpointsValid = false;

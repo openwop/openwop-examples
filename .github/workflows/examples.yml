@@ -204,6 +204,70 @@ jobs:
         run: npm test
         timeout-minutes: 3
 
+  # The Postgres v2 host's own checks. A Postgres service lets the durability
+  # test run its multi-process cases (two host processes on one database, one
+  # SIGKILLed mid-run, the other takes the run over through the released
+  # advisory lock); without OPENWOP_PG_DSN those cases skip and the rest run on
+  # PGlite. The audit export and pack-consumer tests read files from the spec
+  # and registry repos, so those are sparse-checked-out beside this one.
+  host-postgres:
+    name: host (postgres)
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: openwop
+          POSTGRES_DB: openwop
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check out the out-of-band audit verifier (openwop)
+        uses: actions/checkout@v6
+        with:
+          repository: openwop/openwop
+          path: ext/openwop
+          sparse-checkout: scripts/verify-audit-checkpoints.mjs
+          sparse-checkout-cone-mode: false
+      - name: Check out the signed example pack (openwop-registry)
+        uses: actions/checkout@v6
+        with:
+          repository: openwop/openwop-registry
+          path: ext/openwop-registry
+          sparse-checkout: |
+            registry/keys
+            registry/v1/packs/core.openwop.examples
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install
+        working-directory: examples/hosts/postgres
+        run: npm install --legacy-peer-deps
+      - name: Typecheck
+        working-directory: examples/hosts/postgres
+        run: npm run typecheck
+      - name: Test
+        working-directory: examples/hosts/postgres
+        env:
+          OPENWOP_PG_DSN: postgres://postgres:openwop@127.0.0.1:5432/openwop
+        run: npm test
+        timeout-minutes: 4
+      - name: Test (audit export, pack consumer)
+        working-directory: examples/hosts/postgres
+        env:
+          OPENWOP_SPEC_REPO: ${{ github.workspace }}/ext/openwop
+          OPENWOP_REGISTRY_REPO: ${{ github.workspace }}/ext/openwop-registry
+        run: npm run test:siblings
+        timeout-minutes: 2
+
   # The Python v2 host's own checks: stdlib only, so no install step. The
   # contract test compares its copied error rows and event types with the
   # corpus, so fetch @openwop/spec-artifacts first; the durability test
@@ -244,7 +308,7 @@ jobs:
   # examples are added or removed.
   gate:
     name: Examples gate
-    needs: [changes, validate-workflow-defs, examples, host-sqlite, host-python]
+    needs: [changes, validate-workflow-defs, examples, host-sqlite, host-postgres, host-python]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -253,11 +317,12 @@ jobs:
           VALIDATE_RESULT: ${{ needs.validate-workflow-defs.result }}
           EXAMPLES_RESULT: ${{ needs.examples.result }}
           HOST_SQLITE_RESULT: ${{ needs.host-sqlite.result }}
+          HOST_POSTGRES_RESULT: ${{ needs.host-postgres.result }}
           HOST_PYTHON_RESULT: ${{ needs.host-python.result }}
         run: |
-          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT  host-sqlite=$HOST_SQLITE_RESULT  host-python=$HOST_PYTHON_RESULT"
+          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT  host-sqlite=$HOST_SQLITE_RESULT  host-postgres=$HOST_POSTGRES_RESULT  host-python=$HOST_PYTHON_RESULT"
           # 'success' and 'skipped' are OK; 'failure'/'cancelled' fail the gate.
-          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT" "$HOST_SQLITE_RESULT" "$HOST_PYTHON_RESULT"; do
+          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT" "$HOST_SQLITE_RESULT" "$HOST_POSTGRES_RESULT" "$HOST_PYTHON_RESULT"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required examples job did not succeed ($r)."
               exit 1
