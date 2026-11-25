@@ -770,6 +770,8 @@ export async function startHost(overrides: Partial<HostOptions> = {}): Promise<R
     } else if (run.status === 'pending') {
       update(run.run_id, { status: 'running' });
     }
+    // A fork's copied prefix carries its source's `run.started`; the child's own clock starts when it was created.
+    if (run.fork_mode !== null && run.created_at !== null && (startedAt === null || run.created_at > startedAt)) startedAt = run.created_at;
     const deadline = Date.parse(startedAt ?? nowIso()) + runDeadlineMs(run);
     const limit = recursionLimit(run);
     const nodes = order(def);
