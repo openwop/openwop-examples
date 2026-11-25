@@ -20,10 +20,10 @@ protocol repo stays a lean spec + conformance contract.
   `streaming-client`, `mcp-tool`, `branch-fork`, …). Samples are `fetch`-only, speak v2, and default
   to the v2 reference host; see [`examples/README.md`](examples/README.md) for what each one needs.
 
-> **v1 and v2.** v1 hosts are not retired: through the overlap a host advertises both majors and
-> keeps `preferredVersion` on `1.x` by MUST (`spec/v2/core/versioning.md` §1.1), so the v1 hosts
-> here remain correct reference implementations of the v1 track until v1 end-of-support. The
-> `@openwop/openwop-conformance` 2.x suite measures either major (`--target-major`).
+> **v2 only.** v1 reached end of support on 2026-10-04 (RFC 0234). The four v1 hosts under
+> `hosts/` are frozen history, not reference implementations: `sqlite` and `postgres` are being
+> ported to v2, and `in-memory` and `python` (v1) will be removed. Build new hosts against
+> `hosts/v2-reference/` and measure them with `@openwop/openwop-conformance` at `--target-major 2`.
 
 ## Quick start
 

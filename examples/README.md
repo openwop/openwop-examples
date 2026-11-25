@@ -48,7 +48,7 @@ OPENWOP_API_KEY=$YOUR_KEY \
   npm start --prefix examples/approval-workflow
 ```
 
-The v1 hosts (`hosts/in-memory`, `hosts/sqlite`, `hosts/postgres`, `hosts/python`) stay v1 through the overlap; the samples no longer target them.
+The v1 hosts (`hosts/in-memory`, `hosts/sqlite`, `hosts/postgres`, `hosts/python`) are frozen: v1 reached end of support on 2026-10-04 (RFC 0234). `sqlite` and `postgres` are being ported to v2; `in-memory` and `python` (v1) will be removed. No sample targets them.
 
 ## CI behavior
 
@@ -97,6 +97,6 @@ See [`docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/P
 ## See also
 
 - [`hosts/v2-reference/`](./hosts/v2-reference/) — the v2 reference host every sample defaults to.
-- [`hosts/in-memory/`](./hosts/in-memory/), [`hosts/sqlite/`](./hosts/sqlite/) — v1 reference hosts ("build your own host" walkthrough), v1 through the overlap.
+- [`hosts/in-memory/`](./hosts/in-memory/), [`hosts/sqlite/`](./hosts/sqlite/) — frozen v1 hosts (v1 ended 2026-10-04); for "build your own host", start from `hosts/v2-reference/`.
 - [`spec/v2/core/`](https://github.com/openwop/openwop/tree/main/spec/v2/core) — the v2 prose the samples are written against.
 - [`docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/PACK-CATALOG.md) — the published packs grouped by domain.
