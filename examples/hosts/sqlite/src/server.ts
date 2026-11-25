@@ -391,9 +391,12 @@ export async function startHost(overrides: Partial<HostOptions> = {}): Promise<R
 
   const authenticate = (req: IncomingMessage): Subject => {
     const h = req.headers['authorization'];
-    const m = typeof h === 'string' ? /^Bearer\s+(.+)$/i.exec(h.trim()) : null;
-    if (!m) throw err('unauthenticated', 'a Bearer credential is required', undefined, { 'WWW-Authenticate': 'Bearer' });
-    const presented = Buffer.from((m[1] as string).trim());
+    // A prefix check and a slice, not `/^Bearer\s+(.+)$/i`: that pattern backtracks
+    // polynomially on a long run of spaces after the scheme (CodeQL js/polynomial-redos).
+    const value = typeof h === 'string' ? h.trim() : '';
+    const credential = value.slice(0, 7).toLowerCase() === 'bearer ' ? value.slice(7).trim() : '';
+    if (!credential) throw err('unauthenticated', 'a Bearer credential is required', undefined, { 'WWW-Authenticate': 'Bearer' });
+    const presented = Buffer.from(credential);
     for (const [key, subject] of keys) {
       const k = Buffer.from(key);
       if (k.length === presented.length && timingSafeEqual(k, presented)) return subject;
