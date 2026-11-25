@@ -1,19 +1,21 @@
 {
   "name": "@openwop/openwop-host-sqlite",
-  "version": "1.1.7",
+  "version": "2.0.0",
   "private": true,
-  "description": "Reference SQLite-backed OpenWOP host for conformance demos and build-your-own-host walkthroughs. Demonstrates event-log persistence and claim acquisition.",
+  "description": "SQLite-backed OpenWOP v2 host: durable runs in one file, claim-based dispatch, and a v1-to-v2 porting walkthrough. Reuses the v2 reference host's contract modules.",
   "type": "module",
   "scripts": {
     "start": "tsx src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx test/audit-tamper.test.ts && tsx test/cost-attribution.test.ts && tsx test/model-capability-insufficient.test.ts && tsx test/webhook-tenant-gate.test.ts"
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "test": "tsx test/durability.test.ts",
+    "conformance": "openwop-conformance --target-major 2"
   },
   "dependencies": {
+    "@openwop/spec-artifacts": "2.49.14",
     "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
+    "@openwop/openwop-conformance": "2.49.14",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "tsx": "^4.0.0",

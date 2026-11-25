@@ -1,571 +1,180 @@
 /**
- * OpenWOP SQLite reference host.
+ * OpenWOP SQLite host — protocol v2.
  *
- * A single-process, SQLite-backed implementation of the OpenWOP v1 wire
- * contract. Demonstrates DURABLE execution: runs and events persist
- * across process restarts, claim acquisition prevents double-execution
- * across restart cycles.
+ * A single-process, single-file, SQLite-backed host for the OpenWOP v2 wire:
+ * unversioned paths, `OpenWOP-Version: 2`, the closed v2 discovery root, v2
+ * event names, tenant-bound ids and the flat `{ error, message, details? }`
+ * envelope. What it is for:
  *
- * Built to:
+ *   1. DURABILITY you can watch. Runs, events, interrupts and idempotency
+ *      records are rows in one SQLite file. Kill the process mid-run, start it
+ *      again, and the run picks up from its event log.
+ *   2. CLAIM-BASED DISPATCH. A process executes a run only while it holds the
+ *      run's claim (`claim_holder_id` + `claim_expires_at`, renewed by a
+ *      heartbeat). A crashed process's claims lapse and the next process to
+ *      boot resumes those runs, without double-executing.
+ *   3. A PORTING WALKTHROUGH. This host was a v1 host. Its database keeps the
+ *      v1 tables, and runs written by the v1 host still read on the v2 wire:
+ *      their event logs are era 2 and are translated through
+ *      `spec/v2/event-codemap.json` at the storage boundary
+ *      (persistence.md §The reader rule). README.md walks through it.
  *
- *   1. Be the second reference host on INTEROP-MATRIX.md.
- *   2. Anchor the "build your own host" walkthrough (README.md).
- *   3. Show how event-log persistence + claim-based dispatch work
- *      against a real SQL store, vs the in-memory host's process-local
- *      state.
+ * Read top to bottom; the `// ─── … ───` markers match the README sections.
  *
- * Design choices:
- *
- *   - `better-sqlite3` for synchronous SQLite access. Single dep beyond
- *     Node stdlib + types. Mature, fast, no async ceremony for our needs.
- *   - Schema: 3 tables (runs, events, idempotency). Migrations by
- *     statement-on-startup; production hosts would use a real migrator.
- *   - Claim acquisition via `BEGIN IMMEDIATE` + check-and-set on the
- *     `runs.claim_holder_id` column. Stale claims (heartbeat lapsed)
- *     can be re-acquired by another process — demonstrates
- *     `secret-leakage-staleClaim`-class scenarios.
- *   - Event-log durability: every event is committed before the
- *     executor returns. Process restart = read events from log, not
- *     re-execute side effects (this host's nodes are pure, but the
- *     pattern is the same).
- *   - Profile claim: openwop-core + openwop-stream-poll + openwop-stream-sse +
- *     debug-bundle. Same as the in-memory host.
- *
- * Reference-only limitations:
- *   - Multi-tenancy (single hardcoded tenant).
- *   - Real auth (Bearer presence only).
- *   - BYOK / redaction harness (advertises passthrough).
- *   - Provider policy / node packs / interrupts (out of profile).
- *   - Horizontal scaling — SQLite is single-writer; a real production
- *     host would use Postgres + connection pooling.
- *
- * The README beside this file is the "build your own host" walkthrough.
- * Read it before diving into this code.
+ * What it reuses. The contract-level modules of the v2 reference host
+ * (`../../v2-reference/src/`): the spec-artifacts loader (`artifacts.ts`), the
+ * error registry (`errors.ts`), the id grammars and the `~` projection
+ * (`ids.ts`) and the codemap reader and writer rules (`codemap.ts`). Those are
+ * pure functions of `@openwop/spec-artifacts`. Everything with state (the
+ * store, the executor, the front door) is this file's own.
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import Database from 'better-sqlite3';
-import {
-  setupAuditSchema,
-  loadOrCreateSigningKey,
-  logAudit,
-  triggerCheckpointIfDue,
-  createCheckpoint,
-  verifyAuditChain,
-  toWireVerifyResult,
-  defaultAuditOptions,
-  type SigningKey,
-  type AuditOptions,
-} from './audit.js';
-import {
-  setupInterruptSchema,
-  createInterrupt,
-  getInterrupt,
-  getInterruptByToken,
-  getActiveInterrupt,
-  resolveApproval,
-  resolveClarification,
-  resolveExternalEvent,
-  invalidateInterrupts,
-  type ApprovalConfig,
-  type ClarificationConfig,
-  type ExternalEventConfig,
-} from './interrupts.js';
-import {
-  setupWebhookSchema,
-  registerWebhook,
-  unregisterWebhook,
-  fanOutEvent,
-  WebhookUrlRejected,
-  DEFAULT_TENANT_ID,
-} from './webhooks.js';
-import {
-  observabilityEnabled,
-  startRunSpan,
-  endRunSpan,
-  startNodeSpan,
-  endNodeSpan,
-  addNodeSpanAttributes,
-  recordRunDuration,
-  startMetricLoop,
-  stopMetricLoop,
-  parseTraceparent,
-  recordInboundTraceContext,
-} from './observability.js';
-import { sanitizeCostAttrs, applyCostRollup, snapshotCostRollup } from './cost.js';
-import {
-  evaluateModelCapabilityGate,
-  buildInsufficientPayload,
-  aggregateAdvertisedCapabilities,
-  FIXTURE_NODE_MODEL_CAPABILITIES,
-  ACTIVE_PROVIDER,
-  ACTIVE_MODEL,
-  SUPPORTED_PROVIDERS,
-  SUBSTITUTION_SUPPORTED,
-} from './modelCapability.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOST = process.env.OPENWOP_HOST ?? '127.0.0.1';
-const PORT = Number(process.env.OPENWOP_PORT ?? 3838);
-const API_KEY = process.env.OPENWOP_API_KEY ?? 'openwop-sqlite-dev-key';
-// The startup log names where the key came from, never the key itself.
-const API_KEY_SOURCE =
-  process.env.OPENWOP_API_KEY !== undefined ? 'from OPENWOP_API_KEY' : 'built-in dev default';
-// auth-profiles.md §"openwop-auth-api-key-rotation". When a secondary
-// key is configured, both keys authenticate within the overlap window;
-// canonical use is rotation: new primary in env, old secondary still
-// honored until operators have rotated all clients.
-const SECONDARY_API_KEY = process.env.OPENWOP_SECONDARY_API_KEY ?? null;
-// RFC 0011 §A — same-endpoint auth-scoped discovery. When advertised
-// AND a tenant2 key is configured, requests authenticated as tenant2
-// receive a narrowed capability view (strict subset of primary's view
-// per spec annex §"Scoped capability views" line 69 — no authorization
-// oracle). Operators wire a real tenant model in production hosts; the
-// reference host's tenant2 is just a second valid bearer for testing
-// the §"Scoped capability views" conformance scenarios.
-const TENANT2_API_KEY = process.env.OPENWOP_TENANT2_API_KEY ?? null;
-const DB_PATH = process.env.OPENWOP_SQLITE_PATH ?? join(__dirname, '..', 'data', 'openwop-host.sqlite');
-const PROCESS_ID = `host-${randomUUID().slice(0, 8)}`;
+import { loadArtifacts } from '../../v2-reference/src/artifacts.js';
+import { HostError, err } from '../../v2-reference/src/errors.js';
+import { IDEMPOTENCY_KEY, NODE_ID, WORKFLOW_ID, checkTenantBound, nowIso, opaque, projectBoundId, tenantBound, unprojectBoundId } from '../../v2-reference/src/ids.js';
+import { rowToDoc, toStorageVocabulary, type RunEventDoc } from '../../v2-reference/src/codemap.js';
+import type { EventRow as ContractEventRow, RunRow as ContractRunRow } from '../../v2-reference/src/store.js';
 
-// Configurable timing — defaults match production-shaped values; tests
-// pass shorter values to keep the staleClaim scenario fast.
-const CLAIM_TTL_MS = Number(process.env.OPENWOP_CLAIM_TTL_MS ?? 30_000);
-const HEARTBEAT_INTERVAL_MS = Number(process.env.OPENWOP_HEARTBEAT_INTERVAL_MS ?? 10_000);
+// ─── Contract ────────────────────────────────────────────────────────────────
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PKG_ROOT = resolve(HERE, '..');
+const pkgRequire = createRequire(join(PKG_ROOT, 'package.json'));
+
+// The contract this host implements is `@openwop/spec-artifacts`, installed
+// beside it. `artifacts.ts` resolves the package from its own directory unless
+// told otherwise, so point it at this package's copy before the first load.
+if (!process.env['OPENWOP_SPEC_ARTIFACTS_DIR']) {
+  try {
+    process.env['OPENWOP_SPEC_ARTIFACTS_DIR'] = dirname(pkgRequire.resolve('@openwop/spec-artifacts/package.json'));
+  } catch {
+    /* loadArtifacts() names the missing package */
+  }
+}
+const contract = loadArtifacts();
+
+const PROTOCOL_VERSION = '2.0';
+const ENGINE_VERSION = 1;
+/** persistence.md §The era key — a v2 host stamps 3 on every run it creates. */
+const ERA = 3;
+const EVENT_SCHEMA_VERSION = 1;
+const SINCE = '2.0';
+const EXPERIMENTAL_UNTIL = '2.1';
+const HOST_NAME = 'openwop-host-sqlite';
+const HOST_VERSION = (JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')) as { version: string }).version;
+const API_KEY_ISSUER = `urn:${HOST_NAME}:api-key`;
+const LEGACY_ISSUER = 'urn:openwop:legacy';
+const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+const WAITING = new Set(['waiting-approval', 'waiting-input', 'waiting-external']);
+
+// ─── Configuration ───────────────────────────────────────────────────────────
+
+export interface HostOptions {
+  host: string;
+  port: number;
+  dbPath: string;
+  apiKey: string;
+  tenant: string;
+  tenantBKey: string | null;
+  tenantB: string;
+  claimTtlMs: number;
+  heartbeatMs: number;
+  maxRunDurationMs: number;
+  fixturesDir: string | null;
+  logResumeTokens: boolean;
+}
+
+function envInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export function optionsFromEnv(): HostOptions {
+  return {
+    host: process.env['OPENWOP_HOST'] ?? '127.0.0.1',
+    port: envInt('OPENWOP_PORT', 3839),
+    dbPath: process.env['OPENWOP_SQLITE_PATH'] ?? join(PKG_ROOT, 'data', 'openwop-host.sqlite'),
+    apiKey: process.env['OPENWOP_API_KEY'] ?? 'openwop-sqlite-dev-key',
+    tenant: 'openwop-sqlite-tenant',
+    tenantBKey: process.env['OPENWOP_TENANT2_API_KEY'] ?? null,
+    tenantB: 'openwop-sqlite-tenant-b',
+    claimTtlMs: envInt('OPENWOP_CLAIM_TTL_MS', 30_000),
+    heartbeatMs: envInt('OPENWOP_HEARTBEAT_INTERVAL_MS', 10_000),
+    maxRunDurationMs: envInt('OPENWOP_MAX_RUN_DURATION_MS', 600_000),
+    fixturesDir: process.env['OPENWOP_FIXTURES_DIR'] ?? null,
+    logResumeTokens: process.env['OPENWOP_LOG_RESUME_TOKENS'] === 'true',
+  };
+}
+
+const MAX_NODE_EXECUTIONS = 1000;
+const MAX_REQUEST_BODY_BYTES = 4_194_304;
+const RUN_LIST_MAX_PAGE = 100;
+const TOKEN_KID = 'sqlite-1';
+const TOKEN_DEFAULT_TTL_MS = 30 * 60_000;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type RunStatus =
-  | 'pending'
-  | 'running'
-  | 'cancelling'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'waiting-approval'
-  | 'waiting-input'
-  | 'waiting-external';
+interface Subject {
+  issuer: string;
+  subjectId: string;
+  tenant: string;
+  lane: 'api-key';
+  kind: 'user';
+}
 
-interface FixtureWorkflow {
+interface Owner {
+  tenant: string;
+  subject: Record<string, unknown>;
+}
+
+interface WorkflowNode {
   id: string;
-  name: string;
-  version: string;
-  nodes: ReadonlyArray<{
-    id: string;
-    typeId: string;
-    name: string;
-    config?: Record<string, unknown>;
-    inputs: Record<string, unknown>;
-  }>;
-  variables?: ReadonlyArray<{ name: string; type: string; required: boolean; defaultValue?: unknown }>;
-  configurableSchema?: Record<string, unknown>;
+  typeId: string;
+  config?: Record<string, unknown>;
+  inputs?: Record<string, unknown>;
 }
 
-interface RunEvent {
-  readonly seq: number;
-  readonly runId: string;
-  readonly type: string;
-  readonly nodeId: string | null;
-  readonly data: unknown;
-  readonly timestamp: string;
-  // run-event.schema.json §causationId. Optional reference to the
-  // eventId of the event that caused this one. Required by RFC 0007 §E
-  // on core.dispatch's emitted events. Stored on the row; surfaced on
-  // GET /v1/runs/{runId}/events{,/poll}.
-  readonly causationId?: string;
+interface Workflow {
+  id: string;
+  name?: string;
+  nodes: WorkflowNode[];
+  edges?: Array<Record<string, unknown>>;
+  variables?: Array<{ name: string; required?: boolean; defaultValue?: unknown }>;
 }
-
-// ─── Database setup ──────────────────────────────────────────────────────────
-
-mkdirSync(dirname(DB_PATH), { recursive: true });
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
-db.pragma('foreign_keys = ON');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS runs (
-    run_id TEXT PRIMARY KEY,
-    workflow_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    inputs_json TEXT NOT NULL,
-    started_at TEXT NOT NULL,
-    ended_at TEXT,
-    error_json TEXT,
-    claim_holder_id TEXT,
-    claim_expires_at INTEGER,
-    next_node_index INTEGER NOT NULL DEFAULT 0,
-    parent_run_id TEXT,
-    parent_node_id TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS events (
-    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    seq INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    node_id TEXT,
-    data_json TEXT,
-    timestamp TEXT NOT NULL,
-    PRIMARY KEY (run_id, seq)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_events_run_seq ON events(run_id, seq);
-
-  CREATE TABLE IF NOT EXISTS idempotency (
-    cache_key TEXT PRIMARY KEY,
-    status INTEGER NOT NULL,
-    body TEXT NOT NULL,
-    body_hash TEXT NOT NULL,
-    stored_at INTEGER NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_idem_stored_at ON idempotency(stored_at);
-
-  -- RFC 0056 run feedback/annotations. A per-run side-store, NOT part of the
-  -- replayable event log — so a fork (new run_id) starts with zero annotations
-  -- without any copy logic (§D), and the list is inherently run-scoped (§E CTI-1).
-  CREATE TABLE IF NOT EXISTS annotations (
-    annotation_id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    data_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_annotations_run ON annotations(run_id, created_at);
-
-  -- RFC 0057 minimal memory write-store. Write-side only: the host writes a
-  -- content-free run-summary here on completion and attributes it via the
-  -- memory.written event. The RFC 0004 read-side (list/get/TTL) is NOT
-  -- implemented, so discovery advertises memory.supported false +
-  -- memory.attribution only (mirroring the workflow-engine sample).
-  --
-  -- NO tenant_id column: there is no read path, and memory_id is globally
-  -- unique (mem-<runId>-summary), so cross-tenant exposure (CTI-1) is not
-  -- reachable today. A FUTURE read-side (list/get) MUST first add tenant_id
-  -- + filter every query by it to uphold CTI-1 (see the Postgres host, whose
-  -- PK is (tenant_id, memory_ref, memory_id)). Rows accumulate one-per-run
-  -- with no sweeper — acceptable for an ephemeral reference host (matches the
-  -- annotations table above).
-  CREATE TABLE IF NOT EXISTS memory_entries (
-    memory_ref TEXT NOT NULL,
-    memory_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    tags_json TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (memory_ref, memory_id)
-  );
-`);
-
-/**
- * The two run-document version axes (`spec/v1/version-negotiation.md` §Stamping).
- *
- * *"Every persisted run document MUST carry an `engineVersion: number` field set
- * to the writer engine's `CURRENT_ENGINE_VERSION` constant at write time"* and
- * *"Every persisted run document MUST carry an `eventLogSchemaVersion: number`
- * field. The current v1 value is `2`."*
- *
- * This host stamped NEITHER, on any run it ever served, and the Conformance Soak
- * was red on every push from 2026-09-04 to 2026-09-12 saying so. Nothing else
- * could see it: `run-snapshot.schema.json` requires only `runId`, `workflowId`
- * and `status`, so an unstamped snapshot validates cleanly, and before
- * `era-key-stamped-v1` landed the sole occurrence of the identifier
- * `eventLogSchemaVersion` across 444 v1 scenario files was a docstring
- * describing a check that did not exist.
- *
- * Stamped at WRITE time into the row, not synthesised in the response. A host
- * that computed these on read would pass the scenario while persisting nothing
- * — a green step that never asked the thing it reported on, inside the fix for
- * one. `engineVersion` is `number` per `run-snapshot.schema.json` (type
- * corrected 2026-09-04; the `string` in §"The engineVersion axis is split" is
- * stale prose) and `eventLogSchemaVersion` is `integer, minimum 0` — `0` is
- * deliberate, because §Legacy detection defines a legacy run as one whose value
- * is "undefined or < 2".
- */
-const CURRENT_ENGINE_VERSION = 1;
-const CURRENT_EVENT_LOG_SCHEMA_VERSION = 2;
-
-// Idempotent migration: older DBs may lack newer columns on `runs`.
-const runColumns = db
-  .prepare("PRAGMA table_info('runs')")
-  .all() as Array<{ name: string }>;
-const runColNames = new Set(runColumns.map((c) => c.name));
-if (!runColNames.has('next_node_index')) {
-  db.exec("ALTER TABLE runs ADD COLUMN next_node_index INTEGER NOT NULL DEFAULT 0");
-}
-if (!runColNames.has('parent_run_id')) {
-  db.exec("ALTER TABLE runs ADD COLUMN parent_run_id TEXT");
-}
-if (!runColNames.has('parent_node_id')) {
-  db.exec("ALTER TABLE runs ADD COLUMN parent_node_id TEXT");
-}
-if (!runColNames.has('engine_version')) {
-  // Deliberately nullable with no back-fill: a row written before this column
-  // existed IS a legacy run, and §Stamping's "Servers MAY omit this field on
-  // legacy runs that predate the contract" is exactly that case. Back-filling
-  // today's constant onto runs an older engine wrote would be a lie that reads
-  // as compliance.
-  db.exec('ALTER TABLE runs ADD COLUMN engine_version INTEGER');
-}
-if (!runColNames.has('event_log_schema_version')) {
-  // Same: absent (or < 2) is how §Legacy detection identifies a legacy run, so
-  // pre-existing rows stay NULL and are projected as absent.
-  db.exec('ALTER TABLE runs ADD COLUMN event_log_schema_version INTEGER');
-}
-// §Stamping: *"Host implementations SHOULD define a single
-// `CURRENT_ENGINE_VERSION` constant and stamp every write through the run
-// persistence layer."* A trigger IS the persistence layer, and it is why this
-// is not three edits at three `INSERT INTO runs` sites: a stamp applied at the
-// call sites someone enumerated has the same shape as a guard that covers the
-// paths where a bug was found rather than every path that writes. The next
-// INSERT anyone adds is stamped without knowing this rule exists.
-//
-// `WHERE ... IS NULL` so an explicit value always wins, and the trigger never
-// touches a row it did not just create — pre-existing rows stay NULL and stay
-// legacy.
-db.exec(`
-  DROP TRIGGER IF EXISTS runs_stamp_versions;
-  CREATE TRIGGER runs_stamp_versions AFTER INSERT ON runs
-  BEGIN
-    UPDATE runs
-       SET engine_version = COALESCE(NEW.engine_version, ${CURRENT_ENGINE_VERSION}),
-           event_log_schema_version = COALESCE(NEW.event_log_schema_version, ${CURRENT_EVENT_LOG_SCHEMA_VERSION})
-     WHERE run_id = NEW.run_id
-       AND (engine_version IS NULL OR event_log_schema_version IS NULL);
-  END;
-`);
-
-if (!runColNames.has('configurable_json')) {
-  // run-options.md §"configurable" overlay. Persisting it lets the
-  // executor honor caps like `recursionLimit` (cap-breach scenario)
-  // and lets GET /v1/runs/{id} surface the overlay for debugging.
-  db.exec("ALTER TABLE runs ADD COLUMN configurable_json TEXT");
-}
-if (!runColNames.has('variables_json')) {
-  // channels-and-reducers.md §"Channel TTL" + run-snapshot.schema.json
-  // §variables. Per-run workflow-variable state (channel writes, etc.).
-  // Initialized to {} on create; mutated by core.channelWrite and
-  // surfaced on GET /v1/runs/{id}.
-  db.exec("ALTER TABLE runs ADD COLUMN variables_json TEXT");
-}
-
-// Idempotent migration: events table gains causation_id column for
-// run-event.schema.json §causationId + RFC 0007 §E (core.dispatch
-// emitted events MUST set causationId to the consumed decision's
-// eventId) + RFC 0002 / RFC 0005 conditional MUSTs.
-const eventColumns = db
-  .prepare("PRAGMA table_info('events')")
-  .all() as Array<{ name: string }>;
-const eventColNames = new Set(eventColumns.map((c) => c.name));
-if (!eventColNames.has('causation_id')) {
-  db.exec("ALTER TABLE events ADD COLUMN causation_id TEXT");
-}
-db.exec("CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_run_id)");
-
-// HITL interrupts (interrupt.md + interrupt-profiles.md).
-setupInterruptSchema(db);
-
-// Webhook subscriptions (webhooks.md).
-setupWebhookSchema(db);
-
-// Audit-log integrity profile (openwop-audit-log-integrity).
-// See spec/v1/auth-profiles.md §"Audit-log integrity" and src/audit.ts.
-setupAuditSchema(db);
-const AUDIT_KEY_DIR = dirname(DB_PATH);
-const auditSigningKey: SigningKey = loadOrCreateSigningKey(
-  join(AUDIT_KEY_DIR, 'audit-signing-key.pem'),
-  join(AUDIT_KEY_DIR, 'audit-signing-key.pub'),
-);
-const AUDIT_OPTS: AuditOptions = defaultAuditOptions();
-
-// Prepared statements — `better-sqlite3` performs much better when
-// statements are reused.
-const stmts = {
-  insertRun: db.prepare(
-    'INSERT INTO runs (run_id, workflow_id, status, inputs_json, started_at, configurable_json, variables_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ),
-  getRun: db.prepare('SELECT * FROM runs WHERE run_id = ?'),
-  updateRunStatus: db.prepare(
-    'UPDATE runs SET status = ?, ended_at = ?, error_json = ? WHERE run_id = ?',
-  ),
-  setCancelRequested: db.prepare(
-    "UPDATE runs SET status = CASE WHEN status IN ('completed','failed','cancelled') THEN status ELSE 'cancelling' END WHERE run_id = ?",
-  ),
-  insertEvent: db.prepare(
-    'INSERT INTO events (run_id, seq, type, node_id, data_json, timestamp, causation_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ),
-  getEventsAfter: db.prepare('SELECT * FROM events WHERE run_id = ? AND seq > ? ORDER BY seq ASC'),
-  countEvents: db.prepare('SELECT COUNT(*) AS n FROM events WHERE run_id = ?'),
-  getIdempotency: db.prepare('SELECT * FROM idempotency WHERE cache_key = ?'),
-  insertIdempotency: db.prepare(
-    'INSERT INTO idempotency (cache_key, status, body, body_hash, stored_at) VALUES (?, ?, ?, ?, ?)',
-  ),
-  pruneIdempotency: db.prepare('DELETE FROM idempotency WHERE stored_at < ?'),
-  // Claim acquisition: atomically set claim_holder_id if unclaimed or
-  // claim has expired. Returns 1 row affected on success, 0 on contended.
-  acquireClaim: db.prepare(`
-    UPDATE runs SET claim_holder_id = ?, claim_expires_at = ?
-    WHERE run_id = ?
-      AND (claim_holder_id IS NULL OR claim_expires_at < ?)
-      AND status NOT IN ('completed', 'failed', 'cancelled')
-  `),
-  releaseClaim: db.prepare(
-    'UPDATE runs SET claim_holder_id = NULL, claim_expires_at = NULL WHERE run_id = ? AND claim_holder_id = ?',
-  ),
-};
-
-const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
-
-// ─── In-memory state ─────────────────────────────────────────────────────────
-
-const workflows = new Map<string, FixtureWorkflow>();
-const eventBus = new EventEmitter();
-eventBus.setMaxListeners(1000);
-
-// In-flight aborters for claimed runs. Used so a cancel POST can stop
-// a delay node executing in this process. Cancellations against runs
-// claimed by ANOTHER process get picked up via the status flip plus
-// claim-stealing on heartbeat lapse.
-const runningAborters = new Map<string, AbortController>();
-
-// Active heartbeat handles keyed by runId. Each holds the setInterval
-// timer that renews `claim_expires_at` while this process executes the
-// run. Cleared on terminal status.
-const runningHeartbeats = new Map<string, NodeJS.Timeout>();
-
-// ─── Fixture loading ─────────────────────────────────────────────────────────
-
-function loadFixturesFromDir(dir: string): boolean {
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return false;
-  }
-  let loaded = 0;
-  for (const file of entries) {
-    if (!file.endsWith('.json')) continue;
-    const raw = readFileSync(join(dir, file), 'utf8');
-    const parsed = JSON.parse(raw) as FixtureWorkflow;
-    workflows.set(parsed.id, parsed);
-    loaded++;
-  }
-  if (loaded > 0) {
-    console.log(`[openwop-host-sqlite] fixtures: loaded ${loaded} from ${dir}`);
-    return true;
-  }
-  return false;
-}
-
-function loadFixtures(): void {
-  // Resolution order (degraded loading MUST be visible, never silent):
-  //   1. OPENWOP_FIXTURES_DIR — explicit operator override.
-  //   2. Upward probe for `conformance/fixtures/` (examples repo nested
-  //      inside the spec repo, or a co-located conformance checkout).
-  //   3. Sibling-checkout probe: `<ancestor>/openwop/conformance/fixtures`
-  //      (the spec repo checked out next to this examples repo).
-  const explicit = process.env.OPENWOP_FIXTURES_DIR;
-  if (explicit) {
-    if (loadFixturesFromDir(explicit)) return;
-    console.warn(
-      `[openwop-host-sqlite] fixtures: OPENWOP_FIXTURES_DIR=${explicit} yielded no fixtures; falling back to probes`,
-    );
-  }
-  let probe = __dirname;
-  for (let i = 0; i < 10; i++) {
-    if (loadFixturesFromDir(join(probe, 'conformance', 'fixtures'))) return;
-    const up = dirname(probe);
-    if (up === probe) break;
-    probe = up;
-  }
-  probe = __dirname;
-  for (let i = 0; i < 10; i++) {
-    if (loadFixturesFromDir(join(probe, 'openwop', 'conformance', 'fixtures'))) return;
-    const up = dirname(probe);
-    if (up === probe) break;
-    probe = up;
-  }
-  console.warn(
-    '[openwop-host-sqlite] fixtures: no conformance/fixtures directory found — ' +
-      'serving the synthetic noop fixture ONLY. Set OPENWOP_FIXTURES_DIR to the ' +
-      "spec repo's conformance/fixtures for the full catalog.",
-  );
-  workflows.set('conformance-noop', {
-    id: 'conformance-noop',
-    name: 'Synthetic Noop',
-    version: '1.0',
-    nodes: [{ id: 'noop', typeId: 'core.noop', name: 'Noop', inputs: {} }],
-  });
-}
-
-// ─── Run helpers ─────────────────────────────────────────────────────────────
 
 interface RunRow {
   run_id: string;
+  tenant: string;
   workflow_id: string;
-  status: RunStatus;
+  status: string;
   inputs_json: string;
+  options_json: string | null;
+  owner_json: string | null;
+  created_at: string | null;
   started_at: string;
   ended_at: string | null;
   error_json: string | null;
+  current_node_id: string | null;
   claim_holder_id: string | null;
   claim_expires_at: number | null;
-  next_node_index: number;
+  cancel_requested: number;
+  cancel_reason: string | null;
+  pause_requested: string | null;
   parent_run_id: string | null;
-  parent_node_id: string | null;
-  configurable_json: string | null;
-  variables_json: string | null;
+  fork_mode: string | null;
+  from_seq: number | null;
+  scope_id: string | null;
   engine_version: number | null;
   event_log_schema_version: number | null;
-}
-
-/**
- * Load + parse the run's workflow-variable map. Returns `{}` when the
- * column is null (legacy rows or runs that haven't written any
- * variables yet). Variables persist channel state per
- * channels-and-reducers.md §append + §TTL.
- */
-function loadRunVariables(runId: string): Record<string, unknown> {
-  const row = loadRun(runId);
-  if (!row?.variables_json) return {};
-  try {
-    const parsed = JSON.parse(row.variables_json) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveRunVariables(runId: string, variables: Record<string, unknown>): void {
-  db.prepare("UPDATE runs SET variables_json = ? WHERE run_id = ?").run(
-    JSON.stringify(variables),
-    runId,
-  );
-}
-
-/**
- * Resolve a host-provisioned canary secret by id. Returns the raw
- * secret value (caller is responsible for hashing/redacting before
- * surfacing it on any observable channel) or `null` if the secret is
- * not provisioned on this host. Production hosts back this with KMS
- * / Vault / cloud secret managers; the reference host ships a tiny
- * canary map so conformance scenarios can exercise BYOK roundtrip
- * end-to-end without an external secret store.
- *
- * Operator override: `OPENWOP_CANARY_SECRET_VALUE` env populates the
- * default canary at startup, otherwise a built-in deterministic
- * canary is used. The canary is BYOK-grade — every observable surface
- * (events, variables, debug bundle, logs) emits only the SHA-256 hash
- * + length per SR-1.
- */
-function resolveCanarySecret(secretId: string): string | null {
-  if (secretId === 'openwop-conformance-canary-secret') {
-    return process.env.OPENWOP_CANARY_SECRET_VALUE
-      ?? 'openwop-canary-secret-value-not-a-real-credential';
-  }
-  return null;
 }
 
 interface EventRow {
@@ -576,3308 +185,1401 @@ interface EventRow {
   data_json: string | null;
   timestamp: string;
   causation_id: string | null;
+  event_id: string | null;
+  schema_version: number | null;
+  engine_version: number | null;
 }
 
-function loadRun(runId: string): RunRow | null {
-  return (stmts.getRun.get(runId) as RunRow | undefined) ?? null;
+interface InterruptRow {
+  interrupt_id: string;
+  run_id: string;
+  node_id: string;
+  ikey: string;
+  payload_json: string;
+  state: 'open' | 'resolved' | 'invalidated';
+  expires_at: number;
 }
 
-// RFC 0057 — memory ref the host writes its session-end run-summary into.
-const RUN_SUMMARY_MEMORY_REF = 'run-summaries';
-
-// RFC 0057 minimal write-side. Persists a memory entry (write-only — no
-// protocol read-side; see the `memory.supported: false` advertisement).
-// SR-1: callers MUST pass content with secret material already substituted
-// to `[REDACTED:<id>]`; the host's session-end summary is host-generated and
-// carries no credential material, so no resolver runs here.
-// Scope: the only caller is the session-end run-summary write, which passes a
-// short fixed string — so this minimal helper intentionally omits the
-// `MAX_ENTRY_SIZE_BYTES` cap the Postgres host enforces. A future caller that
-// persists caller-supplied content MUST add that size cap here.
-function writeMemoryEntry(memoryRef: string, memoryId: string, content: string, tags: readonly string[]): void {
-  db.prepare(
-    `INSERT INTO memory_entries (memory_ref, memory_id, content, tags_json, created_at)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (memory_ref, memory_id) DO UPDATE SET
-       content = excluded.content, tags_json = excluded.tags_json`,
-  ).run(memoryRef, memoryId, content, JSON.stringify(tags), new Date().toISOString());
+interface InterruptPayload {
+  kind: string;
+  key: string;
+  data: Record<string, unknown>;
+  resumeSchema?: Record<string, unknown>;
+  timeoutMs?: number;
 }
 
-
-// S34 (openwop 1.136.0, 2026-08-17): `run-event-payloads.schema.json` §nodeFailed /
-// §runFailed require `error: { code, message }` — an OBJECT (`_errorObject`), and
-// REQUIRED. This host emitted `data: { code }` / a bare RunError at the top level
-// for years and nothing on the wire checked until `node-failed-payload-shape.test.ts`.
-// Normalize at the single append point so every emit site conforms; the original
-// fields are kept alongside (`additionalProperties: true`).
-function normalizeFailurePayload(data: unknown, nodeId?: string | null): Record<string, unknown> {
-  const d: Record<string, unknown> =
-    data !== null && typeof data === 'object' && !Array.isArray(data) ? { ...(data as Record<string, unknown>) } : {};
-  // §nodeFailed requires `nodeId` IN the payload (the event-level nodeId is a projection convenience).
-  if (typeof nodeId === 'string' && nodeId.length > 0 && typeof d.nodeId !== 'string') d.nodeId = nodeId;
-  const e = d.error;
-  const eo = e !== null && typeof e === 'object' && !Array.isArray(e) ? (e as Record<string, unknown>) : undefined;
-  if (eo && typeof eo.code === 'string' && eo.code.length > 0 && typeof eo.message === 'string' && eo.message.length > 0) return d;
-  const code =
-    typeof eo?.code === 'string' && eo.code.length > 0 ? eo.code
-    : typeof d.code === 'string' && d.code.length > 0 ? d.code
-    : typeof e === 'string' && e.length > 0 ? e
-    : 'node_failed';
-  const message =
-    typeof eo?.message === 'string' && eo.message.length > 0 ? eo.message
-    : typeof d.message === 'string' && d.message.length > 0 ? d.message
-    : typeof e === 'string' && e.length > 0 ? e
-    : `failed (${code})`;
-  d.error = { ...(eo ?? {}), code, message };
-  return d;
+class NodeFailure extends Error {
+  constructor(readonly code: string, message: string) { super(message); }
 }
 
-function appendEvent(
-  runId: string,
-  type: string,
-  opts: { nodeId?: string; data?: unknown; causationId?: string } = {},
-): RunEvent {
-  const seq = (stmts.countEvents.get(runId) as { n: number }).n;
-  const data = type === 'node.failed' || type === 'run.failed' ? normalizeFailurePayload(opts.data, opts.nodeId) : opts.data;
-  const event: RunEvent = {
-    seq,
-    runId,
-    type,
-    nodeId: opts.nodeId ?? null,
-    data: data ?? null,
-    timestamp: new Date().toISOString(),
-    ...(opts.causationId !== undefined ? { causationId: opts.causationId } : {}),
+/** Thrown into a running loop when the process shuts down: the loop stops without recording anything. */
+class HostClosing extends Error {}
+
+type NodeResult = { outputs: Record<string, unknown> } | { suspend: InterruptPayload } | 'cancelled' | 'paused' | 'timeout';
+
+// ─── Host ────────────────────────────────────────────────────────────────────
+
+export interface RunningHost {
+  readonly port: number;
+  readonly server: Server;
+  readonly processId: string;
+  close(): Promise<void>;
+}
+
+export async function startHost(overrides: Partial<HostOptions> = {}): Promise<RunningHost> {
+  const opts: HostOptions = { ...optionsFromEnv(), ...overrides };
+  const processId = `host-${opaque().slice(0, 12)}`;
+  const bus = new EventEmitter();
+  bus.setMaxListeners(0);
+
+  // ─── 1. Schema ─────────────────────────────────────────────────────────────
+  //
+  // The v1 host's tables are kept and grown additively; nothing a v1 host wrote
+  // is rewritten. persistence.md §Per-store disposition, one row per store:
+  //
+  //   runs            legacy-stamped — `tenant` and `owner_json` filled at first v2 read;
+  //                                    `event_log_schema_version` NULL or 2 = era 2
+  //   events          translated     — era-2 rows read through the codemap, never rewritten
+  //   interrupts_v2   new            — v2 interrupts (key K, ow2 tokens)
+  //   idempotency_v2  new            — Layer-1 records keyed (tenant, endpoint, key)
+  //   host_secrets    new            — token and cursor MAC keys, durable across restarts
+  //   interrupts, idempotency, webhook_*, audit_*, annotations, memory_entries
+  //                   never-upgraded — v1 rows, not read by this host
+
+  mkdirSync(dirname(opts.dbPath), { recursive: true });
+  const db = new Database(opts.dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runs (
+      run_id TEXT PRIMARY KEY,
+      workflow_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      inputs_json TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      error_json TEXT,
+      claim_holder_id TEXT,
+      claim_expires_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS events (
+      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      node_id TEXT,
+      data_json TEXT,
+      timestamp TEXT NOT NULL,
+      PRIMARY KEY (run_id, seq)
+    );
+  `);
+  const addColumns = (table: string, cols: Record<string, string>): void => {
+    const have = new Set((db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>).map((c) => c.name));
+    for (const [name, ddl] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
   };
-  stmts.insertEvent.run(
-    runId,
-    seq,
-    type,
-    event.nodeId,
-    event.data === null ? null : JSON.stringify(event.data),
-    event.timestamp,
-    opts.causationId ?? null,
-  );
-  eventBus.emit(`events:${runId}`, event);
-  // Best-effort webhook delivery (webhooks.md). Fire-and-forget.
-  fanOutEvent(db, { ...event });
-  return event;
-}
-
-/** Compose the canonical eventId for an emitted RunEventDoc. The host
- *  serializes eventId as `evt-${runId}-${seq}` per the events/poll
- *  response shape; this helper is the inverse map used at emit time so
- *  causationId references resolve to that same surface.
- */
-function makeEventId(runId: string, seq: number): string {
-  return `evt-${runId}-${seq}`;
-}
-
-function setRunTerminal(
-  runId: string,
-  status: 'completed' | 'failed' | 'cancelled',
-  error: { code: string; message: string } | null,
-): void {
-  const endedAt = new Date().toISOString();
-  // Compute duration BEFORE the UPDATE so we can read started_at from
-  // the current row (the UPDATE overwrites nothing relevant).
-  const row = loadRun(runId);
-  stmts.updateRunStatus.run(status, endedAt, error ? JSON.stringify(error) : null, runId);
-  stmts.releaseClaim.run(runId, PROCESS_ID);
-  // OTel span close + run-duration histogram observation.
-  endRunSpan(runId, status);
-  if (row) {
-    const seconds = (new Date(endedAt).getTime() - new Date(row.started_at).getTime()) / 1000;
-    recordRunDuration(seconds);
-  }
-}
-
-// RFC 0058 — host wall-clock ceiling advertised as
-// `capabilities.limits.maxRunDurationMs`. A caller's `runTimeoutMs` resolves to
-// `min(runTimeoutMs, MAX_RUN_DURATION_MS)`; the ceiling always applies even
-// when the caller omits `runTimeoutMs`. Default 1h.
-const MAX_RUN_DURATION_MS = Number(process.env.OPENWOP_MAX_RUN_DURATION_MS ?? 3_600_000);
-
-// RFC 0058 — finalize a run that breached its wall-clock deadline. Per
-// `run-options.md` §"Reserved keys" (`runTimeoutMs`) + `capabilities.md`
-// §"Engine-enforced limits": emit `cap.breached { kind: 'run-duration' }` so
-// the breach is distinguishable on the wire from an application failure, then
-// transition to `failed` with `error.code = 'run_timeout'`. `observed` is the
-// measured elapsed wall-clock (> `limit`, the resolved deadline).
-function failRunDuration(runId: string, limitMs: number, elapsedMs: number): void {
-  // The deadline timer firing proves the run genuinely exceeded `limitMs`, so
-  // `observed` MUST be strictly greater than `limitMs` (run-event-payloads
-  // §capBreached). Integer-millisecond measurement (`Date.now() - runStartMs`)
-  // occasionally reads exactly `limitMs` at the boundary even though real
-  // elapsed is fractionally past it; floor to `limitMs + 1` to honor the
-  // strict-exceedance invariant without misreporting (true elapsed > limit).
-  const observed = Math.max(elapsedMs, limitMs + 1);
-  appendEvent(runId, 'cap.breached', {
-    data: { kind: 'run-duration', limit: limitMs, observed },
+  addColumns('runs', {
+    tenant: 'TEXT', owner_json: 'TEXT', options_json: 'TEXT', created_at: 'TEXT', current_node_id: 'TEXT',
+    cancel_requested: 'INTEGER NOT NULL DEFAULT 0', cancel_reason: 'TEXT', pause_requested: 'TEXT',
+    parent_run_id: 'TEXT', fork_mode: 'TEXT', from_seq: 'INTEGER', scope_id: 'TEXT',
+    engine_version: 'INTEGER', event_log_schema_version: 'INTEGER',
   });
-  const error = {
-    code: 'run_timeout',
-    message: `Run exceeded its wall-clock deadline (RFC 0058 runTimeoutMs): observed ${observed}ms vs limit ${limitMs}ms.`,
+  addColumns('events', { causation_id: 'TEXT', event_id: 'TEXT', schema_version: 'INTEGER', engine_version: 'INTEGER' });
+  // The era is stamped by the persistence layer, not by call sites: every row
+  // inserted from now on is era 3 unless it says otherwise. The v1 host's
+  // trigger stamped 2; replacing it is the cut. Rows it already stamped keep 2.
+  db.exec(`
+    DROP TRIGGER IF EXISTS runs_stamp_versions;
+    CREATE TRIGGER runs_stamp_versions AFTER INSERT ON runs
+    BEGIN
+      UPDATE runs SET engine_version = COALESCE(NEW.engine_version, ${ENGINE_VERSION}),
+                      event_log_schema_version = COALESCE(NEW.event_log_schema_version, ${ERA})
+       WHERE run_id = NEW.run_id AND (engine_version IS NULL OR event_log_schema_version IS NULL);
+    END;
+    CREATE INDEX IF NOT EXISTS idx_runs_tenant_created ON runs(tenant, created_at);
+    CREATE TABLE IF NOT EXISTS interrupts_v2 (
+      interrupt_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+      node_id TEXT NOT NULL,
+      ikey TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      state TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (run_id, ikey)
+    );
+    CREATE TABLE IF NOT EXISTS idempotency_v2 (
+      tenant TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      idem_key TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      status INTEGER,
+      headers_json TEXT,
+      body TEXT,
+      stored_at INTEGER NOT NULL,
+      PRIMARY KEY (tenant, endpoint, idem_key)
+    );
+    CREATE TABLE IF NOT EXISTS host_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `);
+  // identity.md §1.2 — a run a v1 host wrote has no tenant; it belongs to the
+  // default tenant. Stamped once, the first time a v2 host opens the file.
+  db.prepare('UPDATE runs SET tenant = ? WHERE tenant IS NULL').run(opts.tenant);
+
+  const secret = (name: string): string => {
+    const row = db.prepare('SELECT value FROM host_secrets WHERE name = ?').get(name) as { value: string } | undefined;
+    if (row) return row.value;
+    const value = randomBytes(32).toString('hex');
+    db.prepare('INSERT OR IGNORE INTO host_secrets (name, value) VALUES (?, ?)').run(name, value);
+    return (db.prepare('SELECT value FROM host_secrets WHERE name = ?').get(name) as { value: string }).value;
   };
-  appendEvent(runId, 'run.failed', { data: error });
-  setRunTerminal(runId, 'failed', error);
-}
+  const tokenSecret = secret('interrupt-token-hs256');
+  const cursorSecret = secret('run-list-cursor');
 
-/**
- * Cancel a run from inside the host (cascade from parent, etc.). For a
- * suspended run we drive directly to terminal `cancelled` (no executor
- * running to observe a `cancelling` flip); for an executing run we set
- * `cancelling` and abort the in-flight node.
- */
-function cancelRunInternal(runId: string, reason: string): void {
-  const row = loadRun(runId);
-  if (!row) return;
-  if (row.status === 'completed' || row.status === 'failed' || row.status === 'cancelled') return;
-  const isSuspended =
-    row.status === 'waiting-approval' ||
-    row.status === 'waiting-input' ||
-    row.status === 'waiting-external';
-  if (isSuspended) {
-    invalidateInterrupts(db, runId, reason);
-    appendEvent(runId, 'run.cancelled', { data: { reason } });
-    setRunTerminal(runId, 'cancelled', null);
-    return;
-  }
-  // Note: we DON'T emit a `run.cancelling` event here — that type is not
-  // in the canonical RunEventType enum, and the executor's poll loop
-  // observes the status flip on its next loadRun() call. The terminal
-  // `run.cancelled` event lands when the executor reaches setRunTerminal.
-  stmts.setCancelRequested.run(runId);
-  runningAborters.get(runId)?.abort();
-}
+  const q = {
+    insertRun: db.prepare(`INSERT INTO runs (run_id, tenant, workflow_id, status, inputs_json, options_json, owner_json, created_at, started_at,
+                            parent_run_id, fork_mode, from_seq, scope_id, engine_version, event_log_schema_version)
+                           VALUES (@run_id, @tenant, @workflow_id, @status, @inputs_json, @options_json, @owner_json, @created_at, @started_at,
+                            @parent_run_id, @fork_mode, @from_seq, @scope_id, ${ENGINE_VERSION}, ${ERA})`),
+    getRun: db.prepare('SELECT * FROM runs WHERE run_id = ?'),
+    getLegacyRun: db.prepare('SELECT * FROM runs WHERE run_id = ? AND tenant = ?'),
+    insertEvent: db.prepare(`INSERT INTO events (run_id, seq, type, node_id, data_json, timestamp, causation_id, event_id, schema_version, engine_version)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    lastSeq: db.prepare('SELECT MAX(seq) AS s FROM events WHERE run_id = ?'),
+    eventsAfter: db.prepare('SELECT * FROM events WHERE run_id = ? AND seq > ? ORDER BY seq ASC'),
+    claim: db.prepare(`UPDATE runs SET claim_holder_id = ?, claim_expires_at = ?
+                       WHERE run_id = ? AND status NOT IN ('completed','failed','cancelled')
+                         AND (claim_holder_id IS NULL OR claim_holder_id = ? OR claim_expires_at < ?)`),
+    renew: db.prepare('UPDATE runs SET claim_expires_at = ? WHERE run_id = ? AND claim_holder_id = ?'),
+    release: db.prepare('UPDATE runs SET claim_holder_id = NULL, claim_expires_at = NULL WHERE run_id = ? AND claim_holder_id = ?'),
+    orphans: db.prepare(`SELECT run_id FROM runs WHERE status IN ('pending','running','cancelling')
+                           AND (claim_holder_id IS NULL OR claim_expires_at < ?)`),
+    activeForScope: db.prepare(`SELECT run_id FROM runs WHERE tenant = ? AND scope_id = ? AND status NOT IN ('completed','failed','cancelled') LIMIT 1`),
+    insertInterrupt: db.prepare(`INSERT INTO interrupts_v2 (interrupt_id, run_id, node_id, ikey, payload_json, state, expires_at, created_at)
+                                 VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`),
+    openInterrupt: db.prepare(`SELECT * FROM interrupts_v2 WHERE run_id = ? AND node_id = ? AND state = 'open'`),
+    anyInterrupt: db.prepare('SELECT * FROM interrupts_v2 WHERE run_id = ? AND node_id = ? LIMIT 1'),
+    interruptById: db.prepare('SELECT * FROM interrupts_v2 WHERE interrupt_id = ?'),
+    claimInterrupt: db.prepare(`UPDATE interrupts_v2 SET state = 'resolved' WHERE interrupt_id = ? AND state = 'open'`),
+    invalidateInterrupts: db.prepare(`UPDATE interrupts_v2 SET state = 'invalidated' WHERE run_id = ? AND state = 'open'`),
+    getIdem: db.prepare('SELECT * FROM idempotency_v2 WHERE tenant = ? AND endpoint = ? AND idem_key = ?'),
+    claimIdem: db.prepare('INSERT OR IGNORE INTO idempotency_v2 (tenant, endpoint, idem_key, digest, status, stored_at) VALUES (?, ?, ?, ?, NULL, ?)'),
+    completeIdem: db.prepare('UPDATE idempotency_v2 SET status = ?, headers_json = ?, body = ? WHERE tenant = ? AND endpoint = ? AND idem_key = ?'),
+    releaseIdem: db.prepare('DELETE FROM idempotency_v2 WHERE tenant = ? AND endpoint = ? AND idem_key = ?'),
+    pruneIdem: db.prepare('DELETE FROM idempotency_v2 WHERE stored_at < ?'),
+  };
 
-// ─── Claim + execution ───────────────────────────────────────────────────────
+  const loadRunRow = (runId: string): RunRow | null => (q.getRun.get(runId) as RunRow | undefined) ?? null;
+  const update = (runId: string, patch: Partial<RunRow>): void => {
+    const keys = Object.keys(patch);
+    if (keys.length === 0) return;
+    db.prepare(`UPDATE runs SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE run_id = @run_id`).run({ ...patch, run_id: runId });
+  };
+  const eraOf = (run: RunRow): number => run.event_log_schema_version ?? 2;
+  /** The run's id on the wire: a v1-minted id gains its tenant segment (identity.md §5). */
+  const wireId = (run: RunRow): string => (run.run_id.includes('/') ? run.run_id : `${run.tenant}/${run.run_id}`);
 
-function tryClaim(runId: string): boolean {
-  const result = stmts.acquireClaim.run(PROCESS_ID, Date.now() + CLAIM_TTL_MS, runId, Date.now());
-  return result.changes === 1;
-}
+  // ─── 2. Identity ───────────────────────────────────────────────────────────
+  //
+  // One lane: `api-key`. Each configured key is bound to one tenant and resolves
+  // to one Subject (identity.md §1.1). The key realm is the issuer.
 
-/**
- * Start renewing this process's claim on `runId` every
- * HEARTBEAT_INTERVAL_MS. Called when a run begins execution; cleared
- * by `stopHeartbeat()` on terminal status.
- *
- * Renewal uses the same `acquireClaim` UPDATE statement; the WHERE
- * clause `(claim_holder_id IS NULL OR claim_expires_at < now)` permits
- * us to extend our OWN claim because it doesn't fail when the existing
- * holder is the same process.
- *
- * Wait — actually the WHERE clause as written rejects same-holder
- * renewal once expires_at is set in the future. We use a separate
- * statement that explicitly matches the holder ID for renewal.
- */
-const renewClaimStmt = db.prepare(
-  'UPDATE runs SET claim_expires_at = ? WHERE run_id = ? AND claim_holder_id = ?',
-);
+  const keys = new Map<string, Subject>();
+  const subjectFor = (tenant: string, subjectId: string): Subject => ({ issuer: API_KEY_ISSUER, subjectId, tenant, lane: 'api-key', kind: 'user' });
+  keys.set(opts.apiKey, subjectFor(opts.tenant, 'primary-key'));
+  if (opts.tenantBKey !== null) keys.set(opts.tenantBKey, subjectFor(opts.tenantB, 'tenant-b-key'));
 
-function startHeartbeat(runId: string): void {
-  // Defensive: don't double-start.
-  const existing = runningHeartbeats.get(runId);
-  if (existing) clearInterval(existing);
-  const handle = setInterval(() => {
-    renewClaimStmt.run(Date.now() + CLAIM_TTL_MS, runId, PROCESS_ID);
-  }, HEARTBEAT_INTERVAL_MS);
-  // Don't keep the event loop alive solely on the heartbeat — let the
-  // HTTP server be the keepalive.
-  if (typeof handle.unref === 'function') handle.unref();
-  runningHeartbeats.set(runId, handle);
-}
-
-function stopHeartbeat(runId: string): void {
-  const handle = runningHeartbeats.get(runId);
-  if (handle) clearInterval(handle);
-  runningHeartbeats.delete(runId);
-}
-
-// A `core.delay` duration comes from run inputs / variables, i.e. from the
-// client. Bound it before it reaches `setTimeout`: a non-finite or negative
-// value waits 0 ms (what `setTimeout` already did with it), and anything past
-// the run ceiling is cut to the ceiling, since the RFC 0058 deadline would
-// abort a longer wait anyway.
-function boundedDelayMs(ms: number): number {
-  if (!Number.isFinite(ms) || ms < 0) return 0;
-  return ms > MAX_RUN_DURATION_MS ? MAX_RUN_DURATION_MS : ms;
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  const waitMs = boundedDelayMs(ms);
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(new Error('aborted'));
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, waitMs);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(new Error('aborted'));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function resolveInputAsNumber(
-  declared: unknown,
-  variables: Record<string, unknown>,
-  fallback: number,
-): number {
-  if (
-    declared !== null &&
-    typeof declared === 'object' &&
-    'type' in declared &&
-    (declared as { type: unknown }).type === 'variable'
-  ) {
-    const variableName = (declared as { variableName?: string }).variableName;
-    if (variableName !== undefined && typeof variables[variableName] === 'number') {
-      return variables[variableName] as number;
+  const authenticate = (req: IncomingMessage): Subject => {
+    const h = req.headers['authorization'];
+    // A prefix check and a slice, not `/^Bearer\s+(.+)$/i`: that pattern backtracks
+    // polynomially on a long run of spaces after the scheme (CodeQL js/polynomial-redos).
+    const value = typeof h === 'string' ? h.trim() : '';
+    const credential = value.slice(0, 7).toLowerCase() === 'bearer ' ? value.slice(7).trim() : '';
+    if (!credential) throw err('unauthenticated', 'a Bearer credential is required', undefined, { 'WWW-Authenticate': 'Bearer' });
+    const presented = Buffer.from(credential);
+    for (const [key, subject] of keys) {
+      const k = Buffer.from(key);
+      if (k.length === presented.length && timingSafeEqual(k, presented)) return subject;
     }
-  }
-  if (typeof declared === 'number') return declared;
-  return fallback;
-}
+    throw err('unauthenticated', 'the credential is not valid', undefined, { 'WWW-Authenticate': 'Bearer error="invalid_token"' });
+  };
 
-type NodeOutcome = 'completed' | 'cancelled' | 'failed' | 'suspended' | 'loopback';
+  /**
+   * Resolve a tenant-bound run id for the caller. The bare (v1) form is refused
+   * 400 — this host advertises no 1.x member (identity.md §5). A run the v1 host
+   * minted is stored under its bare id and found as `<tenant>/<v1 id>`.
+   */
+  const runFor = (subject: Subject, id: string): RunRow => {
+    if (!id.includes('/')) throw err('validation_error', 'a bare run id is the v1 spelling; this host serves v2 only, so use <tenantId>/<id> (identity.md §5)', { runId: id });
+    const { opaque: tail } = checkTenantBound(id, subject.tenant, 'run');
+    const run = loadRunRow(id) ?? ((q.getLegacyRun.get(tail, subject.tenant) as RunRow | undefined) ?? null);
+    if (!run || run.tenant !== subject.tenant) throw err('not_found', 'run not found');
+    return run;
+  };
 
-// Carrier for the next-iteration target when a node returns 'loopback'.
-// RFC 0007 §D `next-worker`: dispatch routes control back to the upstream
-// orchestrator. The fixture topology is a 2-node loop (orchestrator →
-// dispatch → orchestrator); the simplest correct interpretation for the
-// linear executor is "jump to the orchestrator-supervisor node by typeId."
-// runWorkflow reads + clears this on every loopback outcome.
-const loopbackTargets = new Map<string, number>();
+  /** identity.md §1.2 — the owner block, legacy-stamped on first read for a run the v1 host wrote. */
+  const ownerOf = (run: RunRow): Owner => {
+    if (run.owner_json !== null) return JSON.parse(run.owner_json) as Owner;
+    const owner: Owner = { tenant: run.tenant, subject: { issuer: LEGACY_ISSUER, subjectId: 'legacy', tenant: run.tenant, lane: 'api-key', kind: 'user' } };
+    update(run.run_id, { owner_json: JSON.stringify(owner) });
+    run.owner_json = JSON.stringify(owner);
+    return owner;
+  };
 
-// Carrier for specific run-level error envelopes when a node returns
-// 'failed'. Without this, runWorkflow's catch-all overwrites every
-// terminal error to `unsupported_node_type` — masking spec-defined codes
-// like `capability_not_provided` (capabilities.md §Runtime capabilities),
-// `no_pending_decision` (RFC 0007 §C), and `unsupported_decision_kind`
-// (RFC 0007 §D). executeNode writes here BEFORE returning 'failed';
-// runWorkflow reads + clears.
-const runFailureErrors = new Map<string, { code: string; message: string }>();
+  // ─── 3. The event log ──────────────────────────────────────────────────────
+  //
+  // Append-only, `sequence` from 0. Every reader (poll, SSE, snapshot, fork,
+  // the executor's own fold) goes through `readEvents`, the storage boundary:
+  // an era-2 row is translated there by the reference `rowToDoc`, and nowhere
+  // else. Every writer goes through `appendEvent`, which stores the name the
+  // run's era requires (persistence.md §The writer rule).
 
-// Static fixture-node `requires` registry. Conformance fixture nodes
-// declare their required runtime capabilities here so the host can
-// refuse dispatch (capabilities.md §"Runtime capabilities") before
-// emitting node.started. Production hosts wire this from each node
-// pack's manifest; the reference host hard-codes the conformance set.
-const FIXTURE_NODE_REQUIRES: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  'conformance.requiresMissing': ['conformance.never-provided'],
-});
+  const lastSequence = (runId: string): number => {
+    const r = q.lastSeq.get(runId) as { s: number | null };
+    return r.s ?? -1;
+  };
 
-// capabilities.md §"Unsupported capability — refusal contract" + §"Capability-gated
-// typeId map (normative)". This is the single source of truth the host
-// uses both for advertising what it implements AND for refusing
-// workflows that reference unsupported typeIds. Each entry maps a
-// reserved typeId → the capability key (and human-readable label) that
-// gates it. A check at workflow registration / run-create time iterates
-// the workflow's nodes; for each typeId in this map, the host consults
-// HOST_ADVERTISED_GATED_CAPABILITIES below and refuses with
-// `capability_required` if the gating capability isn't claimed.
-const GATED_TYPEID_MAP: Readonly<Record<string, { capability: string; advertisementPath: string }>> = Object.freeze({
-  'core.conversationGate': {
-    capability: 'conversationPrimitive',
-    advertisementPath: 'capabilities.conversationPrimitive',
-  },
-  'core.orchestrator.supervisor': {
-    capability: 'orchestrator.supported',
-    advertisementPath: 'capabilities.orchestrator.supported',
-  },
-  'core.dispatch': {
-    capability: 'dispatch.supported',
-    advertisementPath: 'capabilities.dispatch.supported',
-  },
-});
+  const appendEvent = (run: RunRow, type: string, payload: Record<string, unknown>, nodeId?: string): RunEventDoc => {
+    if (!contract.v2EventTypes.has(type)) throw new Error(`producer refused: ${type} is not a registered v2 event type`);
+    const sequence = lastSequence(run.run_id) + 1;
+    const doc: RunEventDoc = { eventId: opaque(), runId: wireId(run), type, payload, timestamp: nowIso(), sequence, schemaVersion: EVENT_SCHEMA_VERSION, engineVersion: ENGINE_VERSION };
+    if (nodeId !== undefined) doc.nodeId = nodeId;
+    q.insertEvent.run(run.run_id, sequence, toStorageVocabulary(type, eraOf(run)), nodeId ?? null, JSON.stringify(payload), doc.timestamp, null, doc.eventId, EVENT_SCHEMA_VERSION, ENGINE_VERSION);
+    bus.emit(`run:${run.run_id}`, doc);
+    return doc;
+  };
 
-// Capabilities this host advertises in `/.well-known/openwop`.
-// Single source of truth for both the discovery payload and the
-// refusal check; if a new capability is implemented, add it here AND
-// in handleDiscovery so the two stay aligned.
-const HOST_ADVERTISED_GATED_CAPABILITIES: ReadonlySet<string> = new Set([
-  'orchestrator.supported',
-  'dispatch.supported',
-  // conversationPrimitive is NOT advertised — the host doesn't implement
-  // core.conversationGate. Workflows referencing it are refused.
-]);
-
-async function executeNode(
-  runId: string,
-  node: FixtureWorkflow['nodes'][number],
-  inputs: Record<string, unknown>,
-  signal: AbortSignal,
-): Promise<NodeOutcome> {
-  const refreshed = loadRun(runId);
-  if (refreshed?.status === 'cancelling') {
-    appendEvent(runId, 'node.cancelled', { nodeId: node.id });
-    return 'cancelled';
-  }
-
-  // capabilities.md §"Runtime capabilities": a NodeModule that declares
-  // `requires: [<capId>]` MUST cause the run to fail with
-  // `capability_not_provided` if the host does not advertise the
-  // capability. Refusal happens BEFORE node.started so the offending
-  // node MUST NOT execute. The reference fixture-node registry is the
-  // source of truth for typeId → required capability ids; the host's
-  // own `/.well-known/openwop` advertisement is the authoritative
-  // capability set.
-  const requires = FIXTURE_NODE_REQUIRES[node.typeId];
-  if (requires && requires.length > 0) {
-    const advertised = new Set<string>(); // SQLite host advertises no `runtimeCapabilities` — the array is empty.
-    const missing = requires.find((cap) => !advertised.has(cap));
-    if (missing !== undefined) {
-      runFailureErrors.set(runId, {
-        code: 'capability_not_provided',
-        message: `Node "${node.id}" (typeId "${node.typeId}") requires capability "${missing}" which the host does not advertise.`,
-      });
-      return 'failed';
-    }
-  }
-
-  // RFC 0031 §B — model-capability gate. A node declaring
-  // `requiredModelCapabilities` the active model doesn't advertise is
-  // refused at dispatch with `model.capability.insufficient` (emitted
-  // BEFORE node.failed per §D) + `capability_not_provided`. Runs before
-  // node.started so the node never executes. substitutionSupported is
-  // false, so a declared fallbackModel does not trigger substitution.
-  const requiredModelCaps = FIXTURE_NODE_MODEL_CAPABILITIES[node.typeId];
-  if (requiredModelCaps && requiredModelCaps.length > 0) {
-    const outcome = evaluateModelCapabilityGate({
-      module: { requiredModelCapabilities: requiredModelCaps },
-      activeProvider: ACTIVE_PROVIDER,
-      activeModel: ACTIVE_MODEL,
-      substitutionSupported: SUBSTITUTION_SUPPORTED,
-      supportedProviders: SUPPORTED_PROVIDERS,
+  const readEvents = (run: RunRow, afterSequence = -1): RunEventDoc[] => {
+    const owner = eraOf(run) < 3 ? (ownerOf(run) as unknown as Record<string, unknown>) : null;
+    const contractRun = { era: eraOf(run) } as unknown as ContractRunRow;
+    return (q.eventsAfter.all(run.run_id, afterSequence) as EventRow[]).map((row) => {
+      const contractRow: ContractEventRow = {
+        run_id: wireId(run),
+        sequence: row.seq,
+        // A v1 row carries no eventId; derive a stable one from its key.
+        event_id: row.event_id ?? `v1.${createHash('sha256').update(`${row.run_id}:${row.seq}`).digest('hex').slice(0, 24)}`,
+        type: row.type,
+        payload_json: row.data_json ?? '{}',
+        timestamp: row.timestamp,
+        node_id: row.node_id,
+        causation_id: row.causation_id,
+        schema_version: row.schema_version ?? EVENT_SCHEMA_VERSION,
+        engine_version: row.engine_version,
+      };
+      return rowToDoc(contractRow, contractRun, owner);
     });
-    if (outcome.route === 'refuse') {
-      appendEvent(runId, 'model.capability.insufficient', {
-        nodeId: node.id,
-        data: buildInsufficientPayload(outcome, node.id, ACTIVE_PROVIDER, ACTIVE_MODEL),
-      });
-      appendEvent(runId, 'node.failed', {
-        nodeId: node.id,
-        data: { code: 'capability_not_provided' },
-      });
-      runFailureErrors.set(runId, {
-        code: 'capability_not_provided',
-        message: `Node "${node.id}" model capabilities not satisfied: missing ${outcome.missingCapabilities.join(', ')}.`,
-      });
-      return 'failed';
-    }
-  }
+  };
 
-  appendEvent(runId, 'node.started', { nodeId: node.id });
-  startNodeSpan(runId, node.id, node.typeId);
+  // ─── 4. Fixtures ───────────────────────────────────────────────────────────
+  //
+  // The workflows this host can run are the conformance fixtures whose
+  // semantics it honours end to end, read from OPENWOP_FIXTURES_DIR or the
+  // installed @openwop/openwop-conformance package.
 
-  switch (node.typeId) {
-    case 'core.noop':
-      break;
-
-    case 'core.identity':
-      // fixtures.md §conformance-identity. Pure passthrough: the node's
-      // declared `inputs` are resolved from the run's variable map and
-      // echoed back to the same variable names on completion. Variables
-      // are seeded from inputs at run-create, so this is a no-op at the
-      // state level — the test asserts the round-trip identity.
-      break;
-
-    case 'conformance.secret.echo': {
-      // openwop-smoke-byok-roundtrip fixture. Resolve a host-provisioned
-      // secret by id, then emit `{ secretSha256, secretLength }` into
-      // the run's variables. The raw value NEVER leaves the resolver —
-      // observability.md §"Redaction" + threat-model-secret-leakage.md
-      // §SR-1 require that only the hash + length appear on any
-      // observable surface (variables, events, debug bundle, logs).
-      const cfg = (node.config ?? {}) as { secretId?: string };
-      const secretId = typeof cfg.secretId === 'string' ? cfg.secretId : null;
-      if (!secretId) {
-        const err = { code: 'validation_error', message: `conformance.secret.echo (node "${node.id}") MUST declare config.secretId.` };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-      const resolved = resolveCanarySecret(secretId);
-      if (resolved === null) {
-        const err = { code: 'credential_unavailable', message: `Secret "${secretId}" is not provisioned on this host.` };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-      const hash = createHash('sha256').update(resolved, 'utf8').digest('hex');
-      const variables = loadRunVariables(runId);
-      variables['resolve-secret'] = { secretSha256: hash, secretLength: resolved.length };
-      saveRunVariables(runId, variables);
-      // Event payload carries only the hash + length, never the raw secret.
-      break;
-    }
-
-    case 'core.delay': {
-      // Accept either config.ms (channel-ttl fixture convention) or
-      // inputs.delayMs (interrupt/cancellation fixture convention).
-      // Config wins when both present.
-      const cfgDelay = node.config?.ms ?? node.config?.delayMs;
-      const cfgMs = typeof cfgDelay === 'number' ? cfgDelay : null;
-      // RFC 0058 — resolve the delayMs variable ref against variable defaults
-      // overlaid with run inputs (inputs override the `defaultValue` seed). The
-      // run-duration-breach fixture relies on the seeded default (30000) so the
-      // run outlives a small runTimeoutMs; streamReconnect passes inputs.delayMs.
-      const delayMs =
-        cfgMs ?? resolveInputAsNumber(node.inputs.delayMs, { ...loadRunVariables(runId), ...inputs }, 100);
+  const HONOURED = new Set(['conformance-noop', 'conformance-delay', 'conformance-cancellable', 'conformance-multi-node', 'conformance-failure', 'conformance-approval', 'conformance-clarification', 'conformance-interrupt-external-event', 'conformance-idempotent']);
+  const EXECUTABLE = new Set(['core.noop', 'core.identity', 'core.delay', 'core.fail', 'core.approvalGate', 'core.clarificationGate', 'core.interrupt']);
+  const workflows = new Map<string, Workflow>();
+  const fixtureDirs: string[] = [];
+  if (opts.fixturesDir) fixtureDirs.push(opts.fixturesDir);
+  try { fixtureDirs.push(join(dirname(pkgRequire.resolve('@openwop/openwop-conformance/package.json')), 'fixtures')); } catch { /* optional dev dependency */ }
+  for (const dir of fixtureDirs) {
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.json'))) {
       try {
-        await sleep(delayMs, signal);
-      } catch {
-        appendEvent(runId, 'node.cancelled', { nodeId: node.id });
-        return 'cancelled';
-      }
-      break;
+        const def = JSON.parse(readFileSync(join(dir, file), 'utf8')) as Workflow;
+        if (!HONOURED.has(def.id) || workflows.has(def.id) || !def.nodes.every((n) => EXECUTABLE.has(n.typeId))) continue;
+        workflows.set(def.id, def);
+      } catch { /* skip an unreadable file */ }
     }
-
-    case 'core.approvalGate': {
-      // Suspend: persist interrupt, emit node.suspended, return 'suspended'.
-      const config = (node.config ?? {}) as Partial<ApprovalConfig>;
-      const approvalConfig: ApprovalConfig = {
-        actions: Array.isArray(config.actions) ? config.actions : ['accept', 'reject'],
-        ...(config.requiredApprovals !== undefined ? { requiredApprovals: config.requiredApprovals } : {}),
-        ...(config.rejectionPolicy !== undefined ? { rejectionPolicy: config.rejectionPolicy } : {}),
-        ...(config.approversList !== undefined ? { approversList: config.approversList } : {}),
-        ...(config.title !== undefined ? { title: config.title } : {}),
-        ...(config.description !== undefined ? { description: config.description } : {}),
-      };
-      const payload = {
-        kind: 'approval',
-        nodeId: node.id,
-        config: approvalConfig,
-      };
-      createInterrupt(db, runId, node.id, 'approval', approvalConfig, payload);
-      appendEvent(runId, 'node.suspended', { nodeId: node.id, data: payload });
-      // Close the OTel node span on suspend so the trace exporter ships
-      // a complete span (start + end) for the node-execution slice; on
-      // resume the executor re-enters this node and startNodeSpan will
-      // open a fresh span for the resumed slice.
-      endNodeSpan(runId, node.id, 'suspended');
-      return 'suspended';
-    }
-
-    case 'core.clarificationGate': {
-      const config = (node.config ?? {}) as Partial<ClarificationConfig>;
-      const clarConfig: ClarificationConfig = {
-        questions: Array.isArray(config.questions) ? config.questions : [],
-      };
-      const payload = {
-        kind: 'clarification',
-        nodeId: node.id,
-        config: clarConfig,
-      };
-      createInterrupt(db, runId, node.id, 'clarification', clarConfig, payload);
-      appendEvent(runId, 'node.suspended', { nodeId: node.id, data: payload });
-      // Close the OTel node span on suspend so the trace exporter ships
-      // a complete span (start + end) for the node-execution slice; on
-      // resume the executor re-enters this node and startNodeSpan will
-      // open a fresh span for the resumed slice.
-      endNodeSpan(runId, node.id, 'suspended');
-      return 'suspended';
-    }
-
-    case 'core.subWorkflow': {
-      // node-packs.md §"core.subWorkflow contract". Dispatch a child
-      // run, mirror its status onto the parent while it waits, and
-      // resolve when the child terminates. Output shape on node.completed
-      // is {outputs: {childRunId, childStatus}} per the spec; optional
-      // outputMapping propagates child variables to parent.
-      const config = (node.config ?? {}) as {
-        workflowId?: string;
-        propagateCancellation?: boolean;
-        inputMapping?: Record<string, string>;
-        outputMapping?: Record<string, string>;
-        onChildFailure?: 'fail-parent' | 'absorb';
-      };
-      const childWorkflowId = config.workflowId;
-      if (typeof childWorkflowId !== 'string' || !workflows.has(childWorkflowId)) {
-        const err = { code: 'unknown_child_workflow', message: `core.subWorkflow (node "${node.id}") references unknown workflowId "${childWorkflowId}".` };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-
-      // Idempotent: reuse an existing in-flight child (resume after parent restart).
-      const existing = db
-        .prepare('SELECT run_id FROM runs WHERE parent_run_id = ? AND parent_node_id = ?')
-        .get(runId, node.id) as { run_id: string } | undefined;
-      let childRunId = existing?.run_id;
-      if (!childRunId) {
-        childRunId = `run-${randomUUID()}`;
-        const startedAt = new Date().toISOString();
-        // Seed child variables in two passes (node-packs.md
-        // §"core.subWorkflow contract" — Variable seeding + RFC 0022 §B):
-        //   1. variables[].defaultValue declarations on the child.
-        //   2. inputMapping projections from parent variables, which
-        //      override matching defaultValue keys. This is a one-shot
-        //      fold at dispatch time — later parent mutations MUST NOT
-        //      propagate into the seeded child. Unset parent variables
-        //      surface as `undefined` on the child variable (NOT `null`).
-        const childWorkflow = workflows.get(childWorkflowId)!;
-        const childVars: Record<string, unknown> = {};
-        for (const v of childWorkflow.variables ?? []) {
-          if (v.defaultValue !== undefined) childVars[v.name] = v.defaultValue;
-        }
-        if (config.inputMapping && typeof config.inputMapping === 'object') {
-          const parentVars = loadRunVariables(runId);
-          for (const [childKey, parentKey] of Object.entries(config.inputMapping)) {
-            if (typeof parentKey !== 'string') continue;
-            childVars[childKey] = parentVars[parentKey];
-          }
-        }
-        db.prepare(
-          `INSERT INTO runs (run_id, workflow_id, status, inputs_json, started_at, parent_run_id, parent_node_id, variables_json)
-           VALUES (?, ?, 'pending', '{}', ?, ?, ?, ?)`,
-        ).run(childRunId, childWorkflowId, startedAt, runId, node.id, JSON.stringify(childVars));
-        appendEvent(runId, 'node.dispatched', {
-          nodeId: node.id,
-          data: { childRunId, childWorkflowId },
-        });
-        if (tryClaim(childRunId)) {
-          void runWorkflow(childRunId).catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            appendEvent(childRunId!, 'run.failed', { data: { code: 'internal', message } });
-            setRunTerminal(childRunId!, 'failed', { code: 'internal', message });
-          });
-        }
-      }
-
-      // Mirror the child's status onto the parent. Loop with short
-      // sleeps until child reaches terminal or parent is cancelled.
-      while (true) {
-        const refreshed = loadRun(runId);
-        if (refreshed?.status === 'cancelling') {
-          // Cascade: cancel the child if it's not already terminal.
-          if (config.propagateCancellation !== false) {
-            cancelRunInternal(childRunId, 'parent-cancelled');
-          }
-          appendEvent(runId, 'node.cancelled', { nodeId: node.id });
-          return 'cancelled';
-        }
-        const child = loadRun(childRunId);
-        if (!child) {
-          appendEvent(runId, 'node.failed', {
-            nodeId: node.id,
-            data: { code: 'child_missing', childRunId },
-          });
-          return 'failed';
-        }
-        if (child.status === 'completed') {
-          // outputMapping: copy mapped child variables → parent variables.
-          // node-packs.md §"core.subWorkflow contract".
-          if (config.outputMapping && typeof config.outputMapping === 'object') {
-            const childVars = child.variables_json ? (JSON.parse(child.variables_json) as Record<string, unknown>) : {};
-            const parentVars = loadRunVariables(runId);
-            for (const [parentKey, childKey] of Object.entries(config.outputMapping)) {
-              if (typeof childKey === 'string' && childVars[childKey] !== undefined) {
-                parentVars[parentKey] = childVars[childKey];
-              }
-            }
-            saveRunVariables(runId, parentVars);
-          }
-          appendEvent(runId, 'node.completed', {
-            nodeId: node.id,
-            data: { outputs: { childRunId, childStatus: 'completed' } },
-          });
-          // Reset parent to running before next iteration.
-          db.prepare("UPDATE runs SET status = 'running' WHERE run_id = ?").run(runId);
-          return 'completed';
-        }
-        if (child.status === 'failed') {
-          if (config.onChildFailure === 'absorb') {
-            appendEvent(runId, 'node.completed', {
-              nodeId: node.id,
-              data: { outputs: { childRunId, childStatus: 'failed' } },
-            });
-            db.prepare("UPDATE runs SET status = 'running' WHERE run_id = ?").run(runId);
-            return 'completed';
-          }
-          const err = { code: 'child_failed', message: `core.subWorkflow child run "${childRunId}" terminated 'failed'.` };
-          appendEvent(runId, 'node.failed', {
-            nodeId: node.id,
-            data: { ...err, outputs: { childRunId, childStatus: 'failed' } },
-          });
-          runFailureErrors.set(runId, err);
-          return 'failed';
-        }
-        if (child.status === 'cancelled') {
-          appendEvent(runId, 'node.cancelled', { nodeId: node.id, data: { childRunId } });
-          return 'cancelled';
-        }
-        // Mirror suspend state from child onto parent.
-        const childWaiting =
-          child.status === 'waiting-approval' ||
-          child.status === 'waiting-input' ||
-          child.status === 'waiting-external';
-        if (childWaiting && refreshed?.status !== child.status) {
-          db.prepare('UPDATE runs SET status = ? WHERE run_id = ?').run(child.status, runId);
-        } else if (!childWaiting && refreshed?.status !== 'running') {
-          db.prepare("UPDATE runs SET status = 'running' WHERE run_id = ?").run(runId);
-        }
-        try {
-          await sleep(50, signal);
-        } catch {
-          // signal aborted (cancel path). Loop top will see cancelling.
-        }
-      }
-    }
-
-    case 'core.channelWrite': {
-      // channels-and-reducers.md §append + §"Channel TTL". Writes a value
-      // to a named channel via the typed reducer. v1 supports the
-      // `append` reducer; with `ttlMs` set, MUST prune entries whose
-      // `_ts < (now - ttlMs)` at write time per the normative timing
-      // rule. Entries on TTL-enabled channels are wrapped as
-      // `{value, _ts}` per the normative entry shape.
-      const cfg = (node.config ?? {}) as {
-        channelName?: string;
-        reducer?: string;
-        ttlMs?: number;
-        maxSize?: number;
-        value?: unknown;
-      };
-      const channelName = typeof cfg.channelName === 'string' ? cfg.channelName : null;
-      const reducer = typeof cfg.reducer === 'string' ? cfg.reducer : null;
-      if (!channelName || !reducer) {
-        const err = {
-          code: 'validation_error',
-          message: `core.channelWrite (node "${node.id}") MUST declare config.channelName and config.reducer.`,
-        };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-      if (reducer !== 'append') {
-        // v1 reference host implements only the `append` reducer per
-        // node-packs.md §"Reserved Core openwop typeIds" → core.channelWrite.
-        const err = {
-          code: 'unsupported_reducer',
-          message: `core.channelWrite reducer "${reducer}" is not implemented; v1 reference host supports "append" only.`,
-        };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-      const ttlMs = typeof cfg.ttlMs === 'number' && cfg.ttlMs > 0 ? cfg.ttlMs : null;
-      const maxSize = typeof cfg.maxSize === 'number' && cfg.maxSize > 0 ? cfg.maxSize : null;
-      const variables = loadRunVariables(runId);
-      const existing = Array.isArray(variables[channelName])
-        ? (variables[channelName] as Array<{ value: unknown; _ts?: number } | unknown>)
-        : [];
-      const now = Date.now();
-      // TTL pruning at write time — normative per channels-and-reducers.md §"Channel TTL".
-      const kept = ttlMs === null
-        ? existing
-        : existing.filter((entry) => {
-            if (entry && typeof entry === 'object' && '_ts' in entry) {
-              const ts = (entry as { _ts: unknown })._ts;
-              return typeof ts === 'number' && ts >= now - ttlMs;
-            }
-            // Non-wrapped legacy entries (no _ts) — keep as-is when no
-            // TTL info is available; the next write under a TTL channel
-            // re-wraps the new entry.
-            return true;
-          });
-      const newEntry = ttlMs === null ? cfg.value : { value: cfg.value, _ts: now };
-      const next = [...kept, newEntry];
-      // Apply maxSize after TTL pruning per the normative ordering rule.
-      const bounded = maxSize !== null && next.length > maxSize
-        ? next.slice(next.length - maxSize)
-        : next;
-      variables[channelName] = bounded;
-      saveRunVariables(runId, variables);
-      appendEvent(runId, 'channel.written', {
-        nodeId: node.id,
-        data: {
-          channelName,
-          reducer,
-          ...(ttlMs !== null ? { ttlMs } : {}),
-          ...(maxSize !== null ? { maxSize } : {}),
-          entry: newEntry,
-        },
-      });
-      break;
-    }
-
-    case 'core.orchestrator.supervisor': {
-      // RFC 0006 §C — orchestrator emits one OrchestratorDecision per
-      // tick. For the conformance-dispatch-loop fixture (2-node loop),
-      // the supervisor's behavior is deterministic: first tick →
-      // `next-worker`, subsequent ticks → `terminate`. Production
-      // orchestrators delegate to an LLM; this reference impl uses the
-      // event-log decision count as state so replay is trivially
-      // deterministic (RFC 0006 §F replay-cache rule degenerates to a
-      // pure function of prior decisions).
-      const prior = (
-        stmts.getEventsAfter.all(runId, -1) as EventRow[]
-      ).filter((e) => e.type === 'runOrchestrator.decided').length;
-      const agentId = (node.config?.agentId as string | undefined) ?? 'core.reference-supervisor';
-      // Two modes:
-      //
-      // 1. `mockDispatchPlan` (RFC 0022 §"Unresolved questions" #6): when
-      //    `node.config.mockDispatchPlan` is a non-empty array of
-      //    `OrchestratorDecision` shapes, the supervisor emits them in
-      //    order — first tick uses plan[0], second tick plan[1], etc.
-      //    Once the plan is exhausted, falls back to `terminate`. Lets
-      //    conformance fixtures drive multi-worker dispatch sequences
-      //    without an LLM. This mode is conformance-only (the supervisor
-      //    block is non-normative reference code).
-      //
-      // 2. Default (legacy): first tick → `next-worker:
-      //    ['conformance-noop']`, subsequent ticks → `terminate`.
-      //    Preserves the original `conformance-dispatch-loop` fixture.
-      const mockPlan = Array.isArray(node.config?.mockDispatchPlan)
-        ? (node.config!.mockDispatchPlan as Array<{
-            kind?: string;
-            nextWorkerIds?: string[];
-            reason?: string;
-            prompt?: string;
-          }>)
-        : null;
-      let decision:
-        | { kind: 'next-worker'; nextWorkerIds: string[] }
-        | { kind: 'terminate'; reason?: string };
-      if (mockPlan && mockPlan.length > 0 && prior < mockPlan.length) {
-        const entry = mockPlan[prior]!;
-        if (entry.kind === 'next-worker' && Array.isArray(entry.nextWorkerIds)) {
-          decision = { kind: 'next-worker', nextWorkerIds: entry.nextWorkerIds };
-        } else if (entry.kind === 'terminate') {
-          decision = { kind: 'terminate', ...(entry.reason !== undefined ? { reason: entry.reason } : {}) };
-        } else {
-          decision = { kind: 'terminate', reason: 'mockPlan-malformed' };
-        }
-      } else if (mockPlan && mockPlan.length > 0) {
-        decision = { kind: 'terminate', reason: 'mockPlan-exhausted' };
-      } else {
-        decision = prior === 0
-          ? { kind: 'next-worker', nextWorkerIds: ['conformance-noop'] }
-          : { kind: 'terminate', reason: 'goal-reached' };
-      }
-      appendEvent(runId, 'runOrchestrator.decided', {
-        nodeId: node.id,
-        data: { agentId, decision },
-      });
-      break;
-    }
-
-    case 'core.dispatch': {
-      // RFC 0007 §C — read the latest `runOrchestrator.decided` event
-      // and translate its decision into a runtime action.
-      const events = stmts.getEventsAfter.all(runId, -1) as EventRow[];
-      const latestDecisionEvent = [...events]
-        .reverse()
-        .find((e) => e.type === 'runOrchestrator.decided');
-      if (!latestDecisionEvent) {
-        const err = { code: 'no_pending_decision', message: `core.dispatch (node "${node.id}") found no upstream runOrchestrator.decided event.` };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-      // RFC 0007 §E — emitted events MUST carry causationId pointing at
-      // the consumed decision event. The eventId format matches the
-      // events/poll response shape: `evt-${runId}-${seq}`.
-      const decisionEventId = makeEventId(runId, latestDecisionEvent.seq);
-      const payload = latestDecisionEvent.data_json
-        ? (JSON.parse(latestDecisionEvent.data_json) as {
-            agentId?: string;
-            decision?: { kind?: string; nextWorkerIds?: string[]; reason?: string; prompt?: string };
-          })
-        : null;
-      const kind = payload?.decision?.kind;
-
-      if (kind === 'terminate') {
-        // RFC 0007 §D `terminate`: dispatch's output is the run's
-        // terminal outcome. Emit node.completed (causationId-linked)
-        // and let the outer for-loop's natural run.completed emission
-        // carry through. Reason is informational — captured on the
-        // node.completed payload for audit/debug.
-        const reason = payload?.decision?.reason;
-        appendEvent(runId, 'node.completed', {
-          nodeId: node.id,
-          causationId: decisionEventId,
-          data: { decision: 'terminate', ...(reason !== undefined ? { reason } : {}) },
-        });
-        endNodeSpan(runId, node.id, 'completed');
-        return 'completed';
-      }
-
-      if (kind === 'next-worker') {
-        // RFC 0007 §D `next-worker`: each `nextWorkerIds[i]` resolves to
-        // a workflow id; dispatch creates a child run via the canonical
-        // `core.subWorkflow` machinery (`workerDispatchModel: child-run`,
-        // v1's only model). Workers are dispatched sequentially (RFC 0007
-        // §D `fanOutPolicy: 'sequential'`); the host advertises
-        // `dispatch.fanOutSupported: false` (no PARALLEL fan-out). After
-        // all children terminate, dispatch emits node.completed with the
-        // last child's `outputs.{childRunId, childStatus}` (per §D step 3)
-        // and returns 'loopback' so the DAG cycles back to the
-        // orchestrator-supervisor.
-        //
-        // RFC 0022 §A — when the dispatch node's config carries
-        // inputMapping / outputMapping / perWorker{Input,Output}Mappings,
-        // the host MUST (1) project parent variables into child inputs
-        // before invocation, and (2) harvest child variables back into
-        // parent variables on terminal `completed`. The shared parent
-        // variable bag is the handoff channel between sibling children
-        // under sequential fan-out (RFC 0022 §D).
-        const nextWorkerIds = Array.isArray(payload?.decision?.nextWorkerIds)
-          ? (payload!.decision!.nextWorkerIds as string[])
-          : [];
-        if (nextWorkerIds.length === 0) {
-          const err = { code: 'no_pending_decision', message: `core.dispatch (node "${node.id}") next-worker decision MUST carry at least one nextWorkerIds[].` };
-          appendEvent(runId, 'node.failed', { nodeId: node.id, causationId: decisionEventId, data: err });
-          runFailureErrors.set(runId, err);
-          return 'failed';
-        }
-        // RFC 0022 §A — read mapping fields off the dispatch node's
-        // config. All four are optional; absent ones default to {}.
-        const dispatchConfig = (node.config ?? {}) as {
-          inputMapping?: Record<string, string>;
-          outputMapping?: Record<string, string>;
-          perWorkerInputMappings?: Record<string, Record<string, string>>;
-          perWorkerOutputMappings?: Record<string, Record<string, string>>;
-        };
-        let lastChildRunId: string | null = null;
-        let lastChildStatus: 'completed' | 'failed' | 'cancelled' | null = null;
-        for (let workerIdx = 0; workerIdx < nextWorkerIds.length; workerIdx++) {
-          const childWorkflowId = nextWorkerIds[workerIdx]!;
-          if (!workflows.has(childWorkflowId)) {
-            const err = {
-              code: 'unknown_child_workflow',
-              message: `core.dispatch (node "${node.id}") next-worker references unknown workflowId "${childWorkflowId}".`,
-            };
-            appendEvent(runId, 'node.failed', { nodeId: node.id, causationId: decisionEventId, data: err });
-            runFailureErrors.set(runId, err);
-            return 'failed';
-          }
-          // RFC 0022 §A — compute the effective input mapping. perWorker
-          // overrides take precedence over the dispatch-level default.
-          const effectiveInputMapping =
-            dispatchConfig.perWorkerInputMappings?.[childWorkflowId] ??
-            dispatchConfig.inputMapping ??
-            {};
-          // Project parent variables → child inputs. Unset parent vars
-          // surface as `undefined` on the child input per RFC 0022 §A
-          // (not omitted via a present-key fallback, not `null`).
-          const parentVars = loadRunVariables(runId);
-          const childInputs: Record<string, unknown> = {};
-          for (const [childKey, parentKey] of Object.entries(effectiveInputMapping)) {
-            if (typeof parentKey !== 'string') continue;
-            childInputs[childKey] = parentVars[parentKey];
-          }
-          // Idempotent child reuse + create. For multi-worker fan-out,
-          // each child gets a distinct (parent_run, parent_node, workerIdx)
-          // tuple so the per-node lookup matches only the first child and
-          // subsequent siblings always create fresh.
-          //
-          // Known limitation (parity with the Postgres reference): the
-          // worker-0 key is `node.id`, so if the SAME dispatch node were
-          // re-entered via loopback on a SEPARATE later `next-worker`
-          // decision, worker-0's lookup would reuse this tick's child
-          // instead of dispatching the new worker. No conformance fixture
-          // exercises this — the §D cross-worker fixture emits a single
-          // `next-worker` decision carrying all workers, and every other
-          // fixture's second decision is `terminate`. A production host
-          // that drives multi-tick worker sequences would key on the
-          // decision/tick index too.
-          const childParentNodeId = workerIdx === 0 ? node.id : `${node.id}#${workerIdx}`;
-          const existingChild = db
-            .prepare('SELECT run_id FROM runs WHERE parent_run_id = ? AND parent_node_id = ?')
-            .get(runId, childParentNodeId) as { run_id: string } | undefined;
-          let childRunId = existingChild?.run_id;
-          if (!childRunId) {
-            childRunId = `run-${randomUUID()}`;
-            const startedAt = new Date().toISOString();
-            const childWorkflow = workflows.get(childWorkflowId)!;
-            const childVars: Record<string, unknown> = {};
-            for (const v of childWorkflow.variables ?? []) {
-              if (v.defaultValue !== undefined) childVars[v.name] = v.defaultValue;
-            }
-            db.prepare(
-              `INSERT INTO runs (run_id, workflow_id, status, inputs_json, started_at, parent_run_id, parent_node_id, variables_json)
-               VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`,
-            ).run(childRunId, childWorkflowId, JSON.stringify(childInputs), startedAt, runId, childParentNodeId, JSON.stringify(childVars));
-            appendEvent(runId, 'node.dispatched', {
-              nodeId: node.id,
-              causationId: decisionEventId,
-              data: { childRunId, childWorkflowId },
-            });
-            if (tryClaim(childRunId)) {
-              const innerChildRunId = childRunId;
-              void runWorkflow(innerChildRunId).catch((err: unknown) => {
-                const message = err instanceof Error ? err.message : String(err);
-                appendEvent(innerChildRunId, 'run.failed', { data: { code: 'internal', message } });
-                setRunTerminal(innerChildRunId, 'failed', { code: 'internal', message });
-              });
-            }
-          }
-          // Poll for THIS child's terminal status before advancing to the
-          // next sibling (sequential fan-out per RFC 0007 §D). Cancellation
-          // cascade follows the same convention as `core.subWorkflow`.
-          let childTerminal: 'completed' | 'failed' | 'cancelled' | null = null;
-          while (true) {
-            const refreshedParent = loadRun(runId);
-            if (refreshedParent?.status === 'cancelling') {
-              cancelRunInternal(childRunId, 'parent-cancelled');
-              appendEvent(runId, 'node.cancelled', { nodeId: node.id, causationId: decisionEventId });
-              return 'cancelled';
-            }
-            const child = loadRun(childRunId);
-            if (!child) {
-              const err = { code: 'child_missing', message: `core.dispatch child run "${childRunId}" disappeared.` };
-              appendEvent(runId, 'node.failed', { nodeId: node.id, causationId: decisionEventId, data: err });
-              runFailureErrors.set(runId, err);
-              return 'failed';
-            }
-            if (child.status === 'completed' || child.status === 'failed' || child.status === 'cancelled') {
-              childTerminal = child.status as 'completed' | 'failed' | 'cancelled';
-              break;
-            }
-            try {
-              await sleep(50, signal);
-            } catch {
-              // signal aborted (cancel path). Loop top will see cancelling.
-            }
-          }
-          lastChildRunId = childRunId;
-          lastChildStatus = childTerminal;
-          if (childTerminal !== 'completed') {
-            // RFC 0022 §A — failed / cancelled children MUST skip
-            // outputMapping; parent variables stay at pre-dispatch state.
-            const err = {
-              code: 'child_failed',
-              message: `core.dispatch child run "${childRunId}" terminated '${childTerminal}'.`,
-            };
-            appendEvent(runId, 'node.failed', {
-              nodeId: node.id,
-              causationId: decisionEventId,
-              data: { ...err, outputs: { childRunId, childStatus: childTerminal } },
-            });
-            runFailureErrors.set(runId, err);
-            return 'failed';
-          }
-          // RFC 0022 §A — harvest child variables into parent variables
-          // via the effective output mapping. Visible to the next
-          // sibling's inputMapping (RFC 0022 §D — sequential fan-out
-          // shares the parent variable bag).
-          const effectiveOutputMapping =
-            dispatchConfig.perWorkerOutputMappings?.[childWorkflowId] ??
-            dispatchConfig.outputMapping ??
-            {};
-          if (Object.keys(effectiveOutputMapping).length > 0) {
-            const childVars = loadRunVariables(childRunId);
-            const parentVarsRow = loadRunVariables(runId);
-            for (const [parentKey, childKey] of Object.entries(effectiveOutputMapping)) {
-              if (typeof childKey !== 'string') continue;
-              parentVarsRow[parentKey] = childVars[childKey];
-            }
-            saveRunVariables(runId, parentVarsRow);
-          }
-        }
-        // All workers completed. RFC 0007 §D — emit node.completed with
-        // the LAST child's (childRunId, childStatus).
-        appendEvent(runId, 'node.completed', {
-          nodeId: node.id,
-          causationId: decisionEventId,
-          data: { outputs: { childRunId: lastChildRunId, childStatus: lastChildStatus } },
-        });
-        endNodeSpan(runId, node.id, 'completed');
-        // DAG cycle: route control back to the orchestrator-supervisor so
-        // the next decision tick can fire.
-        const wfRow = loadRun(runId);
-        const workflow = wfRow ? workflows.get(wfRow.workflow_id) : null;
-        const supervisorIdx = workflow
-          ? workflow.nodes.findIndex((n) => n.typeId === 'core.orchestrator.supervisor')
-          : -1;
-        if (supervisorIdx >= 0) {
-          loopbackTargets.set(runId, supervisorIdx);
-          return 'loopback';
-        }
-        // No upstream supervisor: dispatch is a leaf; advance linearly.
-        db.prepare("UPDATE runs SET status = 'running' WHERE run_id = ?").run(runId);
-        return 'completed';
-      }
-
-      if (kind === 'ask-user') {
-        // RFC 0007 §D `ask-user` — minimal clarification routing.
-        // Conversation routing (RFC 0005) is handled by the
-        // conversation gate elsewhere; the reference path here uses a
-        // clarification interrupt so the dispatch surface has
-        // end-to-end coverage without depending on Phase-4 conversation
-        // support being wired.
-        const prompt = payload?.decision?.prompt ?? '';
-        const clarConfig: ClarificationConfig = { questions: [{ id: 'q1', question: prompt }] };
-        const interruptPayload = { kind: 'clarification', nodeId: node.id, config: clarConfig };
-        createInterrupt(db, runId, node.id, 'clarification', clarConfig, interruptPayload);
-        appendEvent(runId, 'node.suspended', { nodeId: node.id, causationId: decisionEventId, data: interruptPayload });
-        endNodeSpan(runId, node.id, 'suspended');
-        return 'suspended';
-      }
-
-      {
-        const err = {
-          code: 'unsupported_decision_kind',
-          message: `core.dispatch (node "${node.id}") received decision.kind="${kind ?? '<missing>'}", which the host does not implement.`,
-        };
-        appendEvent(runId, 'node.failed', { nodeId: node.id, causationId: decisionEventId, data: err });
-        runFailureErrors.set(runId, err);
-        return 'failed';
-      }
-    }
-
-    case 'core.interrupt': {
-      // Generic interrupt — currently supports kind='external-event'.
-      const config = (node.config ?? {}) as { kind?: string; data?: ExternalEventConfig; timeoutMs?: number };
-      if (config.kind === 'external-event') {
-        const extConfig: ExternalEventConfig = {
-          ...(config.data?.eventType !== undefined ? { eventType: config.data.eventType } : {}),
-          ...(config.data?.correlation !== undefined ? { correlation: config.data.correlation } : {}),
-          ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-        };
-        const token = createInterrupt(db, runId, node.id, 'external-event', extConfig, {
-          kind: 'external-event',
-          nodeId: node.id,
-          config: extConfig,
-        });
-        const payload = {
-          kind: 'external-event',
-          nodeId: node.id,
-          config: extConfig,
-          interruptToken: token,
-          callbackUrl: `/v1/interrupts/${token}`,
-        };
-        appendEvent(runId, 'node.suspended', { nodeId: node.id, data: payload });
-        return 'suspended';
-      }
-      appendEvent(runId, 'node.failed', {
-        nodeId: node.id,
-        data: { code: 'unsupported_interrupt_kind', kind: config.kind ?? '<missing>' },
-      });
-      return 'failed';
-    }
-
-    case 'conformance.cost.emit': {
-      // RFC 0026 — fixture producer. Sanitize the declared cost attrs
-      // (allowlist drops non-`openwop.cost.*` keys + the credential-shaped
-      // canary), write them onto the node span (for an OTel scrape), and
-      // fold the snapshot subset into the per-run rollup so
-      // `metrics.openwopCost` surfaces on the run snapshot.
-      const cfg = (node.config ?? {}) as { attrs?: unknown };
-      const attrs = cfg.attrs && typeof cfg.attrs === 'object' && !Array.isArray(cfg.attrs)
-        ? (cfg.attrs as Record<string, unknown>)
-        : {};
-      const sanitized = sanitizeCostAttrs(attrs);
-      addNodeSpanAttributes(runId, node.id, sanitized);
-      applyCostRollup(runId, sanitized);
-      break;
-    }
-
-    default:
-      appendEvent(runId, 'node.failed', {
-        nodeId: node.id,
-        data: { code: 'unsupported_node_type', typeId: node.typeId },
-      });
-      return 'failed';
+  }
+  if (!workflows.has('conformance-noop')) workflows.set('conformance-noop', { id: 'conformance-noop', nodes: [{ id: 'noop', typeId: 'core.noop' }] });
+  const approval = workflows.get('conformance-approval');
+  if (approval) {
+    // approver enforcement: the same gate, eligible only to a principal the caller is not.
+    const gate = approval.nodes[0] as WorkflowNode;
+    workflows.set('conformance-approval-approvers', { ...approval, id: 'conformance-approval-approvers', nodes: [{ ...gate, config: { ...(gate.config ?? {}), approversList: ['urn:conformance:listed-approver'] } }] });
   }
 
-  appendEvent(runId, 'node.completed', { nodeId: node.id });
-  endNodeSpan(runId, node.id, 'completed');
-  return 'completed';
-}
+  // ─── 5. Claims ─────────────────────────────────────────────────────────────
+  //
+  // A process executes a run only while it holds the run's claim. The claim is
+  // a lease: `claim_expires_at` is renewed every heartbeat, and a claim that is
+  // not renewed lapses, so the next process to look can take the run over.
 
-async function runWorkflow(runId: string): Promise<void> {
-  const row = loadRun(runId);
-  if (!row) return;
+  const active = new Map<string, Promise<void>>();
+  let closing = false;
+  const heartbeats = new Map<string, NodeJS.Timeout>();
+  const tryClaim = (runId: string): boolean => q.claim.run(processId, Date.now() + opts.claimTtlMs, runId, processId, Date.now()).changes === 1;
+  const startHeartbeat = (runId: string): void => {
+    const h = setInterval(() => { q.renew.run(Date.now() + opts.claimTtlMs, runId, processId); }, opts.heartbeatMs);
+    h.unref();
+    heartbeats.set(runId, h);
+  };
+  const releaseClaim = (runId: string): void => {
+    const h = heartbeats.get(runId);
+    if (h) clearInterval(h);
+    heartbeats.delete(runId);
+    q.release.run(runId, processId);
+  };
+  /** Whether another live process holds the run's claim. */
+  const claimedElsewhere = (run: RunRow): boolean => run.claim_holder_id !== null && run.claim_holder_id !== processId && (run.claim_expires_at ?? 0) >= Date.now();
 
-  const workflow = workflows.get(row.workflow_id);
-  if (!workflow) {
-    const error = { code: 'workflow_not_found', message: 'Unknown workflowId.' };
-    appendEvent(runId, 'run.failed', { data: error });
-    setRunTerminal(runId, 'failed', error);
-    return;
+  // ─── 6. Executor ───────────────────────────────────────────────────────────
+  //
+  // The log is the executor's only state: every step re-folds the run's events,
+  // so a restart, a resumed interrupt and a fork all continue from what is
+  // recorded. Nodes run in topological order; any node failure ends the run.
+
+  interface Folded {
+    started: boolean;
+    startedAt: string | null;
+    completed: Set<string>;
+    outputs: Map<string, Record<string, unknown>>;
+    attempts: Map<string, number>;
+    starts: number;
+    requested: Map<string, string>;
+    resolved: Map<string, Record<string, unknown>>;
+    resumed: Map<string, unknown>;
+    resolvedCount: Map<string, number>;
   }
 
-  const inputs = JSON.parse(row.inputs_json) as Record<string, unknown>;
-  const aborter = new AbortController();
-  runningAborters.set(runId, aborter);
-  startHeartbeat(runId);
-
-  // RFC 0058 — arm the wall-clock deadline. Resolved bound is
-  // `min(runTimeoutMs, MAX_RUN_DURATION_MS)`; the host ceiling always applies
-  // even when the caller omits `runTimeoutMs`. When the timer fires we set
-  // `timedOut` and abort the shared run signal — that interrupts a sleeping
-  // node (e.g. core.delay), surfacing as a `cancelled` node outcome which the
-  // loop re-attributes to the run-duration breach (the `timedOut` guards
-  // after executeNode + in catch). Declared out here so catch/finally see them.
-  const rtParsed = row.configurable_json
-    ? (JSON.parse(row.configurable_json) as { runTimeoutMs?: unknown })
-    : {};
-  const rt = rtParsed.runTimeoutMs;
-  const resolvedTimeoutMs =
-    typeof rt === 'number' && Number.isInteger(rt) && rt > 0 && rt < MAX_RUN_DURATION_MS
-      ? rt
-      : MAX_RUN_DURATION_MS;
-  const runStartMs = Date.now();
-  let timedOut = false;
-  const timeoutTimer = setTimeout(() => {
-    timedOut = true;
-    aborter.abort();
-  }, resolvedTimeoutMs);
-
-  try {
-    // `run.started` is emitted only on FIRST execution. If we're
-    // resuming an orphaned run, the prior process already wrote
-    // `run.started`; emit a `run.resumed` event so observers can see
-    // the handover.
-    const startEvents = stmts.getEventsAfter.all(runId, -1) as EventRow[];
-    const alreadyStarted = startEvents.some((e) => e.type === 'run.started');
-    stmts.updateRunStatus.run('running', null, null, runId);
-    if (!alreadyStarted) {
-      appendEvent(runId, 'run.started');
-      startRunSpan(runId, row.workflow_id);
-    } else {
-      appendEvent(runId, 'run.resumed', { data: { resumedBy: PROCESS_ID } });
+  const fold = (events: RunEventDoc[]): Folded => {
+    const st: Folded = { started: false, startedAt: null, completed: new Set(), outputs: new Map(), attempts: new Map(), starts: 0, requested: new Map(), resolved: new Map(), resumed: new Map(), resolvedCount: new Map() };
+    for (const e of events) {
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      const n = e.nodeId ?? (typeof p['nodeId'] === 'string' ? p['nodeId'] : undefined);
+      if (e.type === 'run.started') { st.started = true; st.startedAt = e.timestamp; }
+      if (n === undefined) continue;
+      switch (e.type) {
+        case 'node.started': st.starts++; st.attempts.set(n, (st.attempts.get(n) ?? 0) + 1); st.requested.delete(n); st.resolved.delete(n); st.resumed.delete(n); break;
+        case 'interrupt.requested': if (typeof p['key'] === 'string') st.requested.set(n, p['key']); break;
+        case 'interrupt.resolved': st.requested.delete(n); st.resolved.set(n, p); st.resolvedCount.set(n, (st.resolvedCount.get(n) ?? 0) + 1); break;
+        case 'node.resumed': st.resolved.delete(n); st.resumed.set(n, p['resumeValue']); break;
+        case 'node.completed': st.completed.add(n); st.outputs.set(n, (p['outputs'] ?? {}) as Record<string, unknown>); st.resumed.delete(n); st.resolved.delete(n); st.requested.delete(n); break;
+        default: break;
+      }
     }
+    return st;
+  };
 
-    // recursionLimit per run-options.md §"recursionLimit": cap on
-    // total node executions in the run. When the next node would
-    // exceed the limit, emit `cap.breached` BEFORE the node fires,
-    // then `run.failed` with `error.code = 'recursion_limit_exceeded'`.
-    const configurableParsed = row.configurable_json
-      ? (JSON.parse(row.configurable_json) as { recursionLimit?: unknown })
-      : {};
-    const recursionLimit =
-      typeof configurableParsed.recursionLimit === 'number' &&
-      Number.isInteger(configurableParsed.recursionLimit) &&
-      configurableParsed.recursionLimit > 0
-        ? configurableParsed.recursionLimit
-        : null;
-    let breachEmitted = false;
+  const edgesOf = (def: Workflow): Array<{ from: string; to: string }> => (def.edges ?? []).map((e) => ({
+    from: String(e['sourceNodeId'] ?? e['source'] ?? e['from'] ?? ''),
+    to: String(e['targetNodeId'] ?? e['target'] ?? e['to'] ?? ''),
+  }));
+  const order = (def: Workflow): WorkflowNode[] => {
+    const indeg = new Map(def.nodes.map((n) => [n.id, 0] as [string, number]));
+    const next = new Map<string, string[]>();
+    for (const { from, to } of edgesOf(def)) {
+      if (!indeg.has(from) || !indeg.has(to)) continue;
+      next.set(from, [...(next.get(from) ?? []), to]);
+      indeg.set(to, (indeg.get(to) ?? 0) + 1);
+    }
+    const ready = def.nodes.filter((n) => indeg.get(n.id) === 0).map((n) => n.id);
+    const out: WorkflowNode[] = [];
+    while (ready.length > 0) {
+      const id = ready.shift() as string;
+      out.push(def.nodes.find((n) => n.id === id) as WorkflowNode);
+      for (const t of next.get(id) ?? []) { indeg.set(t, (indeg.get(t) ?? 1) - 1); if (indeg.get(t) === 0) ready.push(t); }
+    }
+    return out;
+  };
 
-    const startIndex = row.next_node_index ?? 0;
-    for (let i = startIndex; i < workflow.nodes.length; i++) {
-      const node = workflow.nodes[i]!;
+  const optionsOf = (run: RunRow): { configurable?: { run?: { recursionLimit?: number; runTimeoutMs?: number } }; tags?: string[]; metadata?: Record<string, unknown> } =>
+    JSON.parse(run.options_json ?? '{}') as ReturnType<typeof optionsOf>;
+  const recursionLimit = (run: RunRow): number => {
+    const asked = optionsOf(run).configurable?.run?.recursionLimit;
+    return typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? Math.min(asked, MAX_NODE_EXECUTIONS) : MAX_NODE_EXECUTIONS;
+  };
+  const runDeadlineMs = (run: RunRow): number => Math.min(optionsOf(run).configurable?.run?.runTimeoutMs ?? opts.maxRunDurationMs, opts.maxRunDurationMs);
 
-      // recursionLimit gate: i is 0-indexed; the (i+1)th node would
-      // overflow when i+1 > limit. The conformance test expects
-      // `cap.breached` BEFORE the over-limit node's `node.started`,
-      // so `node.started` MUST NOT appear for the breaching node.
-      if (recursionLimit !== null && i + 1 > recursionLimit && !breachEmitted) {
-        breachEmitted = true;
-        appendEvent(runId, 'cap.breached', {
-          nodeId: node.id,
-          data: {
-            kind: 'node-executions',
-            limit: recursionLimit,
-            observed: i + 1,
-            nodeId: node.id,
-          },
-        });
-        const error = {
-          code: 'recursion_limit_exceeded',
-          message: `Per-run node-execution cap (recursionLimit=${recursionLimit}) breached at node "${node.id}" (would be execution #${i + 1}).`,
-        };
-        appendEvent(runId, 'run.failed', { data: error });
-        setRunTerminal(runId, 'failed', error);
+  const inputOf = (run: RunRow, def: Workflow, node: WorkflowNode, name: string): unknown => {
+    const inputs = JSON.parse(run.inputs_json) as Record<string, unknown>;
+    const binding = node.inputs?.[name] as { type?: string; variableName?: string; value?: unknown } | undefined;
+    if (binding && binding.type === 'variable' && binding.variableName) {
+      return inputs[binding.variableName] ?? def.variables?.find((v) => v.name === binding.variableName)?.defaultValue;
+    }
+    if (binding && 'value' in binding) return binding.value;
+    return inputs[name] ?? node.config?.[name];
+  };
+
+  /**
+   * A replay fork keys its interrupts on its source (replay.md §Suppression), so
+   * K is the source chain's root run; every other run keys on itself.
+   */
+  const keyRunId = (run: RunRow): string => {
+    let r = run;
+    while (r.fork_mode === 'replay' && r.parent_run_id !== null) {
+      const src = loadRunRow(r.parent_run_id);
+      if (!src) break;
+      r = src;
+    }
+    return wireId(r);
+  };
+
+  /** interrupt.md §Re-entry — K derives from the run, the node and the node's visit index. */
+  const interruptFor = (run: RunRow, node: WorkflowNode, visit: number): InterruptPayload => {
+    const key = `${keyRunId(run)}:${node.id}:${visit}`;
+    const c = node.config ?? {};
+    if (node.typeId === 'core.approvalGate') {
+      const data: Record<string, unknown> = { artifactId: node.id, artifactType: 'conformance-artifact', title: String(c['title'] ?? `Approve ${node.id}`), actions: Array.isArray(c['actions']) ? c['actions'] : ['accept', 'reject'] };
+      if (typeof c['description'] === 'string') data['description'] = c['description'];
+      if (Array.isArray(c['approversList'])) data['approversList'] = c['approversList'];
+      return { kind: 'approval', key, data };
+    }
+    if (node.typeId === 'core.clarificationGate') {
+      const questions = Array.isArray(c['questions']) ? c['questions'] : [{ id: 'q1', question: String(c['question'] ?? 'Please clarify') }];
+      return { kind: 'clarification', key, data: { questions } };
+    }
+    const payload: InterruptPayload = { kind: String(c['kind'] ?? 'custom'), key, data: (c['data'] as Record<string, unknown> | undefined) ?? { customKind: node.id } };
+    if (typeof c['timeoutMs'] === 'number') payload.timeoutMs = c['timeoutMs'];
+    if (c['resumeSchema'] !== null && typeof c['resumeSchema'] === 'object') payload.resumeSchema = c['resumeSchema'] as Record<string, unknown>;
+    return payload;
+  };
+
+  /** Sleep, checking the durable flags — a cancel or an immediate pause may come from any process. */
+  const sleepChecked = async (run: RunRow, ms: number, deadline: number): Promise<'done' | 'cancelled' | 'paused' | 'timeout'> => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (closing) throw new HostClosing();
+      const fresh = loadRunRow(run.run_id);
+      if (!fresh || fresh.cancel_requested === 1 || TERMINAL.has(fresh.status)) return 'cancelled';
+      if (fresh.status === 'paused') return 'paused';
+      if (Date.now() > deadline) return 'timeout';
+      await new Promise((r) => setTimeout(r, Math.max(1, Math.min(50, until - Date.now()))));
+    }
+    return 'done';
+  };
+
+  const executeNode = async (run: RunRow, def: Workflow, node: WorkflowNode, visit: number, deadline: number): Promise<NodeResult> => {
+    switch (node.typeId) {
+      case 'core.noop': return { outputs: {} };
+      case 'core.identity': return { outputs: Object.fromEntries(Object.keys(node.inputs ?? {}).map((k) => [k, inputOf(run, def, node, k)])) };
+      case 'core.delay': {
+        const ms = Math.max(0, Math.min(60_000, Number(inputOf(run, def, node, 'delayMs') ?? 1000) || 0));
+        const r = await sleepChecked(run, ms, deadline);
+        return r === 'done' ? { outputs: { sleptMs: ms } } : r;
+      }
+      // fixtures.md §core.fail: a vendor code under the reserved `example` org.
+      case 'core.fail': throw new NodeFailure('example.conformance_failure', String(node.config?.['message'] ?? 'Intentional conformance failure'));
+      case 'core.approvalGate':
+      case 'core.clarificationGate':
+      case 'core.interrupt': return { suspend: interruptFor(run, node, visit) };
+      default: throw new NodeFailure('capability_required', `node type ${node.typeId} is not executed by this host`);
+    }
+  };
+
+  const durationSince = (startedAt: string | null): number => (startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : 0);
+
+  const finish = (run: RunRow, status: 'completed' | 'failed' | 'cancelled', error: Record<string, unknown> | null): void => {
+    q.invalidateInterrupts.run(run.run_id);
+    update(run.run_id, { status, ended_at: nowIso(), error_json: error ? JSON.stringify(error) : null, current_node_id: null, cancel_requested: 0, pause_requested: null });
+    run.status = status;
+  };
+  const failRun = (run: RunRow, error: Record<string, unknown>, startedAt: string | null, failedNodeId?: string): void => {
+    const payload: Record<string, unknown> = { error, durationMs: durationSince(startedAt) };
+    if (failedNodeId !== undefined) payload['failedNodeId'] = failedNodeId;
+    appendEvent(run, 'run.failed', payload);
+    finish(run, 'failed', error);
+  };
+  const cancelNow = (run: RunRow, reason: string, startedAt: string | null): void => {
+    appendEvent(run, 'run.cancelled', { reason, cancelledBy: 'caller', durationMs: durationSince(startedAt) });
+    finish(run, 'cancelled', null);
+  };
+
+  /** Look up the recorded resolution of K in the run's log, then each replay source's. */
+  const recordedResolution = (run: RunRow, key: string): Record<string, unknown> | null => {
+    for (let r: RunRow | null = run; r !== null; r = r.fork_mode === 'replay' && r.parent_run_id !== null ? loadRunRow(r.parent_run_id) : null) {
+      const events = readEvents(r);
+      const suspended = events.find((e) => e.type === 'node.suspended' && (e.payload as { key?: unknown }).key === key);
+      if (!suspended) continue;
+      const interruptId = (suspended.payload as { interruptId?: unknown }).interruptId;
+      const resolved = events.find((e) => e.type === 'interrupt.resolved' && (e.payload as { interruptId?: unknown }).interruptId === interruptId);
+      if (resolved) return resolved.payload as Record<string, unknown>;
+    }
+    return null;
+  };
+
+  /** What a recorded `interrupt.resolved` does to its node: resume and complete, or fail the run on a rejection. */
+  const applyResolution = (run: RunRow, nodeId: string, resolved: Record<string, unknown>, startedAt: string | null): 'resumed' | 'failed' => {
+    if (resolved['decision'] === 'rejected') {
+      const error = { code: 'approval_rejected', message: 'the approval was rejected', retryable: false };
+      appendEvent(run, 'node.failed', { nodeId, error, attempts: 1 }, nodeId);
+      failRun(run, error, startedAt, nodeId);
+      return 'failed';
+    }
+    const resumeValue = resolved['resumeValue'];
+    const resumed: Record<string, unknown> = { nodeId, resumeValue };
+    if (typeof resolved['interruptId'] === 'string') resumed['interruptId'] = resolved['interruptId'];
+    appendEvent(run, 'node.resumed', resumed, nodeId);
+    appendEvent(run, 'node.completed', { nodeId, outputs: { resumeValue } }, nodeId);
+    return 'resumed';
+  };
+
+  const waitingStatus = (kind: string): string => (kind === 'external-event' ? 'waiting-external' : kind === 'clarification' ? 'waiting-input' : 'waiting-approval');
+
+  const mintToken = (interruptId: string, runId: string, expiresAt: number): string => {
+    const payload = Buffer.from(JSON.stringify({ i: interruptId, r: runId, e: expiresAt, t: 'resolve' })).toString('base64url');
+    const mac = createHmac('sha256', tokenSecret).update(`hs256.${TOKEN_KID}.${payload}`).digest('hex');
+    return `ow2.hs256.${TOKEN_KID}.${payload}.${mac}`;
+  };
+
+  const suspend = (run: RunRow, node: WorkflowNode, payload: InterruptPayload): void => {
+    const interruptId = tenantBound(run.tenant);
+    const ttl = payload.timeoutMs !== undefined && payload.timeoutMs > 0 ? Math.min(payload.timeoutMs, TOKEN_DEFAULT_TTL_MS) : TOKEN_DEFAULT_TTL_MS;
+    const expiresAt = Date.now() + ttl;
+    q.insertInterrupt.run(interruptId, run.run_id, node.id, payload.key, JSON.stringify(payload), expiresAt, nowIso());
+    appendEvent(run, 'interrupt.requested', payload as unknown as Record<string, unknown>, node.id);
+    appendEvent(run, 'node.suspended', { nodeId: node.id, interruptId, kind: payload.kind, key: payload.key }, node.id);
+    update(run.run_id, { status: waitingStatus(payload.kind), current_node_id: node.id });
+    if (opts.logResumeTokens) console.log(`[${HOST_NAME}] ${interruptId} awaits resolution; resume token ${mintToken(interruptId, wireId(run), expiresAt)}`);
+  };
+
+  /** Enter (or re-enter) the loop for a run, if this process can claim it. One loop per run per process. */
+  const rewake = new Set<string>();
+  const scheduleRun = (runId: string): void => {
+    if (closing) return;
+    // A loop that is still unwinding (a pause, say, that a resume overtook) re-enters once it exits.
+    if (active.has(runId)) { rewake.add(runId); return; }
+    if (!tryClaim(runId)) return;
+    startHeartbeat(runId);
+    const loop = new Promise<void>((ok) => setImmediate(ok))
+      .then(() => continueRun(runId))
+      .catch((e: unknown) => { if (!(e instanceof HostClosing)) console.error(`[${HOST_NAME}] executor ${runId}:`, e); })
+      .finally(() => {
+        active.delete(runId);
+        releaseClaim(runId);
+        if (rewake.delete(runId)) scheduleRun(runId);
+      });
+    active.set(runId, loop);
+  };
+
+  const continueRun = async (runId: string): Promise<void> => {
+    let run = loadRunRow(runId);
+    if (!run || TERMINAL.has(run.status) || run.status === 'paused' || WAITING.has(run.status)) return;
+    const def = workflows.get(run.workflow_id);
+    let st = fold(readEvents(run));
+    if (!def) { failRun(run, { code: 'not_found', message: `workflow ${run.workflow_id} is not registered on this host` }, st.startedAt); return; }
+    let startedAt = st.startedAt;
+    if (!st.started) {
+      const options = optionsOf(run);
+      const payload: Record<string, unknown> = { workflowId: run.workflow_id, inputs: JSON.parse(run.inputs_json), transport: 'rest', engineVersion: ENGINE_VERSION, owner: ownerOf(run) };
+      if (options.tags) payload['tags'] = options.tags;
+      if (options.metadata) payload['metadata'] = options.metadata;
+      startedAt = appendEvent(run, 'run.started', payload).timestamp;
+      update(run.run_id, { status: 'running', started_at: startedAt });
+    } else if (run.status === 'pending') {
+      update(run.run_id, { status: 'running' });
+    }
+    const deadline = Date.parse(startedAt ?? nowIso()) + runDeadlineMs(run);
+    const limit = recursionLimit(run);
+    const nodes = order(def);
+    for (;;) {
+      if (closing) throw new HostClosing();
+      run = loadRunRow(runId) as RunRow;
+      if (TERMINAL.has(run.status) || run.status === 'paused') return;
+      st = fold(readEvents(run));
+      if (run.cancel_requested === 1) { cancelNow(run, run.cancel_reason ?? 'caller-requested', startedAt); return; }
+      if (run.pause_requested !== null) {
+        appendEvent(run, 'run.paused', { reason: 'operator', drainPolicy: run.pause_requested });
+        update(run.run_id, { status: 'paused', pause_requested: null });
         return;
       }
-
-      const refreshed = loadRun(runId);
-      if (refreshed?.status === 'cancelling') {
-        appendEvent(runId, 'run.cancelled');
-        setRunTerminal(runId, 'cancelled', null);
+      const node = nodes.find((n) => !st.completed.has(n.id));
+      if (!node) break;
+      // A fork cut between `node.resumed` and `node.completed` finishes the node from the log.
+      if (st.resumed.has(node.id)) { appendEvent(run, 'node.completed', { nodeId: node.id, outputs: { resumeValue: st.resumed.get(node.id) } }, node.id); continue; }
+      let recorded = st.resolved.get(node.id);
+      const requestedKey = st.requested.get(node.id);
+      if (recorded === undefined && requestedKey !== undefined && run.fork_mode === 'replay') {
+        const replayed = recordedResolution(run, requestedKey);
+        if (replayed) { appendEvent(run, 'interrupt.resolved', replayed, node.id); recorded = replayed; }
+      }
+      if (recorded !== undefined) { if (applyResolution(run, node.id, recorded, startedAt) === 'failed') return; continue; }
+      if (st.starts >= limit) {
+        appendEvent(run, 'cap.breached', { kind: 'node-executions', limit, observed: st.starts + 1 });
+        failRun(run, { code: 'recursion_limit_exceeded', message: `starting ${node.id} would exceed recursionLimit ${limit}` }, startedAt);
         return;
       }
-
-      const outcome = await executeNode(runId, node, inputs, aborter.signal);
-      // RFC 0058 — the wall-clock deadline fired mid-node (the abort surfaced
-      // as a `cancelled`/`failed` node outcome). Re-attribute to the
-      // run-duration breach rather than a caller cancel.
-      if (timedOut) {
-        failRunDuration(runId, resolvedTimeoutMs, Date.now() - runStartMs);
+      if (Date.now() > deadline) {
+        const observed = Math.max(durationSince(startedAt), runDeadlineMs(run) + 1);
+        appendEvent(run, 'cap.breached', { kind: 'run-duration', limit: runDeadlineMs(run), observed });
+        failRun(run, { code: 'run_timeout', message: `the run exceeded its ${runDeadlineMs(run)} ms deadline` }, startedAt);
         return;
       }
-      if (outcome === 'loopback') {
-        // RFC 0007 §D `next-worker` — dispatch routes control back to
-        // the upstream orchestrator-supervisor. The dispatch handler
-        // already emitted node.completed for itself; advance i to
-        // (target - 1) so the i++ on loop iteration lands at the
-        // supervisor. Persist next_node_index for restart safety.
-        const target = loopbackTargets.get(runId);
-        loopbackTargets.delete(runId);
-        if (typeof target === 'number' && target >= 0) {
-          db.prepare("UPDATE runs SET next_node_index = ? WHERE run_id = ?").run(target, runId);
-          i = target - 1;
+      const attempt = st.attempts.get(node.id) ?? 0;
+      const nodeStart = Date.now();
+      appendEvent(run, 'node.started', { nodeId: node.id, typeId: node.typeId, attempt }, node.id);
+      let result: NodeResult;
+      try {
+        result = await executeNode(run, def, node, st.resolvedCount.get(node.id) ?? 0, deadline);
+      } catch (e) {
+        const error = e instanceof NodeFailure ? { code: e.code, message: e.message } : { code: 'internal_error', message: 'the node failed unexpectedly' };
+        run = loadRunRow(runId) as RunRow;
+        appendEvent(run, 'node.failed', { nodeId: node.id, error, attempts: attempt + 1 }, node.id);
+        failRun(run, error, startedAt, node.id);
+        return;
+      }
+      run = loadRunRow(runId) as RunRow;
+      // An immediate pause was recorded by the request (section 11) and cut this attempt: record nothing more.
+      if (TERMINAL.has(run.status) || run.status === 'paused') return;
+      if (result === 'cancelled') { appendEvent(run, 'node.cancelled', { nodeId: node.id, reason: 'run-cancelled' }, node.id); cancelNow(run, run.cancel_reason ?? 'caller-requested', startedAt); return; }
+      if (result === 'paused') return;
+      if (result === 'timeout') continue; // the deadline check above records the breach
+      if ('suspend' in result) {
+        const replayed = run.fork_mode === 'replay' ? recordedResolution(run, result.suspend.key) : null;
+        if (replayed) {
+          appendEvent(run, 'interrupt.resolved', replayed, node.id);
+          if (applyResolution(run, node.id, replayed, startedAt) === 'failed') return;
           continue;
         }
-        // Defensive: a missing target is a host bug, not a workflow error.
-        const error = { code: 'internal', message: 'loopback outcome without target index' };
-        appendEvent(runId, 'run.failed', { data: error });
-        setRunTerminal(runId, 'failed', error);
+        suspend(run, node, result.suspend);
         return;
       }
-      if (outcome === 'failed') {
-        // Prefer a specific error envelope written by the node handler
-        // (capability_not_provided, no_pending_decision, etc.). Fall
-        // back to the legacy unsupported_node_type for typeIds the host
-        // doesn't recognize at all (the `default:` arm in executeNode).
-        const carried = runFailureErrors.get(runId);
-        runFailureErrors.delete(runId);
-        const error = carried ?? {
-          code: 'unsupported_node_type',
-          message: `SQLite host does not implement node type "${node.typeId}".`,
-        };
-        appendEvent(runId, 'run.failed', { data: error });
-        setRunTerminal(runId, 'failed', error);
-        return;
-      }
-      if (outcome === 'cancelled') {
-        appendEvent(runId, 'run.cancelled');
-        setRunTerminal(runId, 'cancelled', null);
-        return;
-      }
-      if (outcome === 'suspended') {
-        // The executor stops here; the resolve route will resume by
-        // setting status back to 'running' and re-invoking runWorkflow.
-        // next_node_index is left at i so resume re-enters the suspended
-        // node — the resolve handler bumps it past on success.
-        // Release the claim so the resolve handler (potentially in a
-        // different process) can re-acquire and continue.
-        const suspendStatus =
-          node.typeId === 'core.clarificationGate'
-            ? 'waiting-input'
-            : node.typeId === 'core.interrupt'
-              ? 'waiting-external'
-              : 'waiting-approval';
-        db.prepare("UPDATE runs SET status = ?, next_node_index = ? WHERE run_id = ?").run(
-          suspendStatus,
-          i,
-          runId,
-        );
-        stmts.releaseClaim.run(runId, PROCESS_ID);
-        return;
-      }
-      // Successful completion: advance the cursor durably so a process
-      // restart resumes after this node, not at it.
-      db.prepare("UPDATE runs SET next_node_index = ? WHERE run_id = ?").run(i + 1, runId);
+      appendEvent(run, 'node.completed', { nodeId: node.id, outputs: result.outputs, durationMs: Date.now() - nodeStart }, node.id);
     }
-
-    const final = loadRun(runId);
-    if (final?.status === 'cancelling') {
-      appendEvent(runId, 'run.cancelled');
-      setRunTerminal(runId, 'cancelled', null);
-    } else {
-      // RFC 0057 §A/§B — attribute a content-free, session-end memory write.
-      // The host writes a run-summary to its memory store on completion and
-      // records it on the event log via `memory.written` (identifiers +
-      // non-secret tags only; no content, no nodeId per §B — a host write, not
-      // a node write). The memoryId is deterministic on runId so the recorded
-      // fact stays replay-stable (§D). Emitted BEFORE `run.completed` so the
-      // terminal event remains LAST in the stream (eventOrdering invariant).
-      // Best-effort — a memory write MUST NOT fail the run.
-      try {
-        const memoryId = `mem-${runId}-summary`;
-        const tags = ['run-summary', `run-id:${runId}`, `workflow:${row.workflow_id}`];
-        writeMemoryEntry(
-          RUN_SUMMARY_MEMORY_REF,
-          memoryId,
-          `Run ${runId} of "${row.workflow_id}" completed.`,
-          tags,
-        );
-        appendEvent(runId, 'memory.written', {
-          data: { memoryRef: RUN_SUMMARY_MEMORY_REF, memoryId, tags },
-        });
-      } catch {
-        /* memory is a best-effort host surface; never block run completion */
-      }
-      appendEvent(runId, 'run.completed');
-      setRunTerminal(runId, 'completed', null);
-    }
-  } catch (err) {
-    // RFC 0058 — if the deadline fired and the abort propagated as a thrown
-    // error (rather than a `cancelled` node outcome), attribute it to the
-    // run-duration breach instead of a generic internal error.
-    if (timedOut) {
-      failRunDuration(runId, resolvedTimeoutMs, Date.now() - runStartMs);
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      const error = { code: 'internal', message };
-      appendEvent(runId, 'run.failed', { data: error });
-      setRunTerminal(runId, 'failed', error);
-    }
-  } finally {
-    clearTimeout(timeoutTimer);
-    runningAborters.delete(runId);
-    stopHeartbeat(runId);
-  }
-}
-
-// ─── HTTP plumbing ───────────────────────────────────────────────────────────
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
-function sendJSON(
-  res: ServerResponse,
-  status: number,
-  body: unknown,
-  extraHeaders: Record<string, string> = {},
-): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-    ...extraHeaders,
-  });
-  res.end(payload);
-}
-
-function sendError(res: ServerResponse, status: number, code: string, message: string): void {
-  sendJSON(res, status, { error: code, message });
-}
-
-/**
- * Constant-time bearer-token comparison via `crypto.timingSafeEqual`.
- * The length-mismatch short-circuit is safe — same code path as content
- * mismatch, no timing oracle either way.
- */
-function checkAuth(req: IncomingMessage, res: ServerResponse): boolean {
-  const auth = req.headers.authorization;
-  if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) {
-    sendError(res, 401, 'unauthenticated', 'Missing or malformed Authorization header.');
-    return false;
-  }
-  const token = auth.slice('Bearer '.length).trim();
-  const presented = Buffer.from(token, 'utf8');
-  // auth-profiles.md §"openwop-auth-api-key-rotation": both primary
-  // and secondary keys MUST authenticate during the overlap window.
-  // Constant-time across the union — every candidate is compared even
-  // after a match, so the timing oracle that distinguishes "primary
-  // matched" from "secondary matched" doesn't exist. The OR is folded
-  // bit-wise after every candidate's timingSafeEqual completes.
-  const candidates = SECONDARY_API_KEY === null
-    ? [API_KEY]
-    : [API_KEY, SECONDARY_API_KEY];
-  let ok = false;
-  for (const candidate of candidates) {
-    const expected = Buffer.from(candidate, 'utf8');
-    const lengthMatch = presented.length === expected.length;
-    // timingSafeEqual throws if buffers differ in length; gate on
-    // lengthMatch and fall back to a same-length sentinel compare so
-    // every candidate consumes equivalent CPU.
-    const candidateOk = lengthMatch && timingSafeEqual(presented, expected);
-    ok = ok || candidateOk;
-  }
-  if (!ok) {
-    // auth.md §"No credential echo": message MUST NOT include the
-    // rejected token. Generic envelope only.
-    sendError(res, 401, 'invalid_credential', 'Bearer token rejected.');
-    return false;
-  }
-  return true;
-}
-
-/**
- * Resolve a request's bearer to a principal classification.
- * RFC 0011 §A — same-endpoint auth-scoped discovery: handleDiscovery
- * uses this to decide whether to return the primary or narrowed view.
- * Returns `null` for missing/malformed auth or unrecognized bearer
- * (handleDiscovery treats null as the public/unauthenticated view).
- *
- * Constant-time across ALL configured candidates: every candidate's
- * timingSafeEqual completes before the OR fold, so an attacker cannot
- * distinguish "primary matched" from "tenant2 matched" by request
- * latency.
- */
-function principalFor(req: IncomingMessage): 'primary' | 'tenant2' | null {
-  const auth = req.headers.authorization;
-  if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null;
-  const presented = Buffer.from(auth.slice('Bearer '.length).trim(), 'utf8');
-  const tryMatch = (candidate: string | null): boolean => {
-    if (candidate === null) return false;
-    const expected = Buffer.from(candidate, 'utf8');
-    return presented.length === expected.length && timingSafeEqual(presented, expected);
+    run = loadRunRow(runId) as RunRow;
+    if (TERMINAL.has(run.status)) return;
+    const sources = new Set(edgesOf(def).map((e) => e.from));
+    const outputs: Record<string, unknown> = {};
+    for (const n of def.nodes) if (!sources.has(n.id)) Object.assign(outputs, st.outputs.get(n.id) ?? {});
+    appendEvent(run, 'run.completed', { outputs, durationMs: durationSince(startedAt) });
+    finish(run, 'completed', null);
   };
-  const primaryHit = tryMatch(API_KEY);
-  const secondaryHit = tryMatch(SECONDARY_API_KEY);
-  const tenant2Hit = tryMatch(TENANT2_API_KEY);
-  if (primaryHit || secondaryHit) return 'primary';
-  if (tenant2Hit) return 'tenant2';
-  return null;
-}
 
-// The tenant2 bearer maps to its own tenant scope so tenant-scoped
-// surfaces (webhooks.md §Endpoints) can enforce the membership gate
-// against a second principal without a real tenant directory.
-const TENANT2_TENANT_ID = 'tenant:tenant2';
-
-/**
- * webhooks.md §Endpoints — "The caller MUST be a member of the tenant
- * the subscription will live under." This reference host's membership
- * model is the principal→tenant map implied by its static API keys:
- * primary (and the rotation secondary) belong to `tenant:default`;
- * tenant2 belongs to `tenant:tenant2`. Returns the caller's sole
- * tenant, or null for unauthenticated callers (checkAuth rejects those
- * before this is consulted).
- */
-function callerTenantFor(req: IncomingMessage): string | null {
-  const principal = principalFor(req);
-  if (principal === 'primary') return DEFAULT_TENANT_ID;
-  if (principal === 'tenant2') return TENANT2_TENANT_ID;
-  return null;
-}
-
-function hashBody(body: string): string {
-  return createHash('sha256').update(body).digest('hex');
-}
-
-function buildIdempotencyCacheKey(endpoint: string, key: string): string {
-  return createHash('sha256').update(`single-tenant:${endpoint}:${key}`).digest('hex');
-}
-
-function pruneIdempotency(): void {
-  stmts.pruneIdempotency.run(Date.now() - IDEMPOTENCY_TTL_MS);
-}
-
-// ─── Route handlers ──────────────────────────────────────────────────────────
-
-function handleDiscovery(req: IncomingMessage, res: ServerResponse): void {
-  // Advertise the loaded fixture set so conformance scenarios can gate
-  // their skipIf() on isFixtureAdvertised(id). Only the workflow IDs the
-  // host actually has loaded should appear here.
-  // Advertise both `conformance-*` (standard conformance fixtures) and
-  // `openwop-smoke-*` (end-to-end smoke fixtures, e.g., BYOK roundtrip).
-  const advertisedFixtures = Array.from(workflows.keys()).filter(
-    (id) => id.startsWith('conformance-') || id.startsWith('openwop-smoke-'),
-  );
-
-  // RFC 0011 §A — same-endpoint auth-scoped discovery. Determine the
-  // caller's principal (primary | tenant2 | null) and narrow the
-  // capability view for tenant2 per spec annex §"Scoped capability
-  // views" line 69 (no authorization oracle: tenant2 sees a STRICT
-  // SUBSET of primary's capability keys). Public + unrecognized-auth
-  // callers get the full unauthenticated view.
-  const principal = principalFor(req);
-  const isTenant2 = principal === 'tenant2';
-
-  const advertisement = {
-    protocolVersion: '1.0',
-    implementation: {
-      name: 'openwop-host-sqlite',
-      version: '1.1.7',
-      vendor: 'openwop-spec (reference example)',
-    },
-    supportedEnvelopes: [],
-    schemaVersions: {},
-    limits: {
-      clarificationRounds: 0,
-      schemaRounds: 0,
-      envelopesPerTurn: 0,
-      maxNodeExecutions: 1000,
-    },
-    supportedTransports: ['rest'],
-    debugBundle: { supported: true },
-    fixtures: advertisedFixtures,
-    capabilities: {
-      // RFC 0057 — the host attributes its session-end memory writes via the
-      // content-free `memory.written` event (see runWorkflow). Write-side only:
-      // the RFC 0004 read-side (list/get/TTL) is not implemented, so
-      // `supported: false` while `attribution.emitsWriteEvents: true`.
-      memory: { supported: false, attribution: { supported: true, emitsWriteEvents: true } },
-      // RFC 0056 — non-blocking run feedback/annotations. Run-level only;
-      // annotations are a per-run side-store (not the replayable event log).
-      feedback: {
-        supported: true,
-        targets: ['run'],
-        signals: ['rating', 'correction', 'label', 'flag'],
-      },
-      // RFC 0058 — engine-enforced run bounds. Advertised under
-      // `capabilities.limits` (the schema-canonical + conformance-read
-      // location) so clients can pre-flight a `runTimeoutMs` against the host
-      // ceiling the value clamps to. The host enforces this on every run
-      // (see runWorkflow).
-      limits: {
-        maxRunDurationMs: MAX_RUN_DURATION_MS,
-      },
-      // RFC 0011 §A — capability advertisement for the same-endpoint
-      // auth-scoped pattern. Advertised on every view (public +
-      // primary + tenant2) so clients can negotiate against the
-      // public payload before authenticating.
-      discovery: {
-        authScoped: { supported: true, mode: 'same-endpoint' },
-      },
-      auth: {
-        // Two profiles the reference host actually implements:
-        //   - openwop-audit-log-integrity (auth-profiles.md §"Audit-log
-        //     integrity"): hash-chain + signed checkpoints, verified by
-        //     the audit-log-integrity scenario.
-        //   - openwop-auth-api-key-rotation: two-key overlap (primary +
-        //     OPENWOP_SECONDARY_API_KEY) during rotation grace, verified
-        //     end-to-end by auth-api-key-rotation.test.ts.
-        //
-        // The OAuth2-CC, OIDC user-bearer, and mTLS profiles are
-        // deliberately NOT claimed. The SQLite reference host runs as
-        // an HTTP-only listener with bearer-token auth; it doesn't
-        // parse JWTs, introspect against an IdP, or terminate TLS.
-        // Advertising those profiles without their behavior is
-        // over-claiming. Production deployers that front-end this host
-        // with an IdP-aware reverse proxy can layer those profiles
-        // externally — that's outside the reference-host surface.
-        profiles: [
-          'openwop-audit-log-integrity',
-          'openwop-auth-api-key-rotation',
-        ],
-        auditLogIntegrity: {
-          hashChain: true,
-          checkpointSignatureAlgorithm: 'ed25519',
-          checkpointPublicKey: auditSigningKey.publicKeyB64,
-          checkpointIntervalEntries: AUDIT_OPTS.checkpointIntervalEntries,
-          checkpointIntervalSeconds: AUDIT_OPTS.checkpointIntervalSeconds,
-        },
-        // auth-profiles.md §"openwop-auth-api-key-rotation".
-        // minGraceSeconds advertises 24h; operators rotate by setting
-        // OPENWOP_API_KEY to the new key and OPENWOP_SECONDARY_API_KEY
-        // to the prior key during the overlap window.
-        rotation: {
-          supported: true,
-          minGraceSeconds: 86_400,
-        },
-      },
-      // capabilities.md §"Secrets" + run-options.md §"Credential
-      // references". The reference host implements `secrets.resolve`
-      // for the conformance BYOK canary id only — production hosts
-      // wire this to a real KMS/Vault. The aiProviders block is
-      // deliberately omitted: this reference host does not route AI
-      // calls, so claiming BYOK on `anthropic`/`openai` would
-      // over-state the implementation.
-      secrets: {
-        supported: true,
-        scopes: ['tenant', 'user'],
-        resolution: 'host-managed',
-      },
-      // RFC 0031 §E — the host honors `NodeModule.requiredModelCapabilities`
-      // at dispatch (model-capability gate in executeNode) and emits
-      // `model.capability.insufficient`. `advertised: []` because this host
-      // routes no AI calls (no `aiProviders` block) — its active model
-      // satisfies NO model capability, so any node requiring one is refused.
-      // No substitution posture.
-      modelCapabilities: {
-        supported: true,
-        advertised: aggregateAdvertisedCapabilities(SUPPORTED_PROVIDERS),
-        substitutionSupported: SUBSTITUTION_SUPPORTED,
-      },
-      // production-profile.md §Compatibility baseline. The SQLite
-      // reference host meets durability + idempotency + audit-log
-      // integrity + debug-bundle redaction + observability MUSTs, but
-      // does NOT implement backpressure (no inflightCap enforcement)
-      // and does NOT enforce event retention with 410 expiry. The
-      // honest claim is therefore NO production-profile claim from
-      // this host — Postgres reference host
-      // (`examples/hosts/postgres/`) is the canonical claimant per
-      // INTEROP-MATRIX.md.
-      webhooks: {
-        // webhooks.md §"Signature algorithm versioning".
-        supported: true,
-        signatureAlgorithms: ['v1'],
-      },
-      // RFC 0006 §G + RFC 0007 §G — orchestrator + dispatch capability
-      // advertisements. Hosts that advertise orchestrator MUST also
-      // advertise dispatch. For RFC 0011 same-endpoint auth-scoped
-      // discovery: tenant2's view OMITS these optional surfaces. The
-      // resulting capability key set is a strict subset of primary's
-      // view, satisfying the no-authorization-oracle invariant from
-      // capabilities-change-detection.md §"Scoped capability views"
-      // line 69. Operators that need richer per-tenant gating wire a
-      // real tenant model — this is the reference-host minimum.
-      ...(isTenant2
-        ? {}
-        : {
-            orchestrator: {
-              supported: true,
-              workerIdInterpretation: 'node',
-              fanOutSupported: false,
-            },
-            dispatch: {
-              supported: true,
-              models: ['child-run'],
-              fanOutSupported: false,
-              askUserRoutings: ['clarification', 'auto'],
-            },
-            // RFC 0022 §C — host honors inputMapping / outputMapping /
-            // perWorkerInputMappings / perWorkerOutputMappings on the
-            // `core.dispatch` config. Advertised under `agents` because
-            // the conformance suite gates the dispatch-mapping scenarios
-            // on `capabilities.agents.dispatchMapping`. `supported` is
-            // intentionally omitted — the SQLite host does not claim the
-            // broader `agents` profile, only this additive flag.
-            agents: {
-              dispatchMapping: true,
-            },
-            // RFC 0022 §B — host honors `inputMapping` on
-            // `core.subWorkflow`, seeding child variables from
-            // parent-variable projections after the `defaultValue` fold.
-            subWorkflow: {
-              inputMapping: true,
-            },
-          }),
-      // observability.md §"Span attributes" — host advertises OTel
-      // emission only when OTEL_EXPORTER_OTLP_ENDPOINT is configured.
-      ...(observabilityEnabled()
-        ? {
-            observability: {
-              otel: { supported: true, protocol: 'http/json' },
-              metrics: { supported: true, names: ['openwop.run.backlog', 'openwop.queue.depth', 'openwop.run.duration'] },
-            },
-          }
-        : {}),
-    },
-    extensions: {
-      interrupts: {
-        // Optional interrupt profiles (interrupt-profiles.md).
-        profiles: [
-          'openwop-interrupt-quorum',
-          'openwop-interrupt-auth-required',
-          'openwop-interrupt-external-event',
-          'openwop-interrupt-cascade-cancel',
-        ],
-        signedCallbackTokens: true,
-      },
-    },
+  /** runs.md §Cancel — terminal now when nothing is executing; otherwise the executing process finishes it. */
+  const requestCancel = (run: RunRow, reason: string): string => {
+    if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be cancelled`, { runStatus: run.status });
+    if (active.has(run.run_id) || claimedElsewhere(run)) {
+      update(run.run_id, { status: 'cancelling', cancel_requested: 1, cancel_reason: reason });
+      return 'cancelling';
+    }
+    const st = fold(readEvents(run));
+    if (run.current_node_id !== null) appendEvent(run, 'node.cancelled', { nodeId: run.current_node_id, reason: 'run-cancelled' }, run.current_node_id);
+    cancelNow(run, reason, st.startedAt);
+    return 'cancelled';
   };
-  // RFC 0073 — capability families are document-root properties of the discovery
-  // response (capabilities.schema.json roots agents/secrets/etc.; no `capabilities`
-  // wrapper property). Emit them at the root canonically, and retain the nested
-  // `capabilities` object as a DEPRECATED backward-compat mirror for the v1.x window
-  // (removed once consumers migrate — see spec/v1/capabilities.md §"Document-root layout").
-  // `limits` exists at BOTH the root (AI-envelope limits: clarificationRounds /
-  // schemaRounds / envelopesPerTurn + maxNodeExecutions) and under `capabilities`
-  // (RFC 0058 maxRunDurationMs). A plain `...capabilities` spread would clobber the
-  // root `limits` with the capabilities one — dropping the envelope limits that
-  // `capabilities.schema.json §limits` requires. Merge the two so neither is lost.
-  sendJSON(
-    res,
-    200,
-    {
-      ...advertisement,
-      ...advertisement.capabilities,
-      limits: { ...advertisement.limits, ...advertisement.capabilities.limits },
-    },
-    { 'Cache-Control': 'public, max-age=300' },
-  );
-}
 
-function handleOpenApi(_req: IncomingMessage, res: ServerResponse): void {
-  sendJSON(res, 200, {
-    openapi: '3.1',
-    info: { title: 'openwop SQLite reference host', version: '1.1.7' },
-    paths: {
-      '/.well-known/openwop': { get: { responses: { '200': { description: 'OK' } } } },
-      '/v1/runs': { post: { responses: { '201': { description: 'Created' } } } },
-      '/v1/runs/{runId}': { get: { responses: { '200': { description: 'OK' } } } },
-      '/v1/runs/{runId}/cancel': { post: { responses: { '200': { description: 'OK' } } } },
-      '/v1/runs/{runId}/events': { get: { responses: { '200': { description: 'OK' } } } },
-      '/v1/runs/{runId}/events/poll': { get: { responses: { '200': { description: 'OK' } } } },
-      '/v1/runs/{runId}/debug-bundle': { get: { responses: { '200': { description: 'OK' } } } },
-    },
-  });
-}
+  // ─── 7. Interrupts ─────────────────────────────────────────────────────────
 
-async function handleCreateRun(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!checkAuth(req, res)) return;
+  const principalRef = (s: Subject): string => `${s.issuer}#${s.subjectId}`;
 
-  const bodyText = await readBody(req);
-  let parsed: { workflowId?: string; inputs?: Record<string, unknown>; configurable?: unknown };
-  try {
-    parsed = JSON.parse(bodyText) as {
-      workflowId?: string;
-      inputs?: Record<string, unknown>;
-      configurable?: unknown;
-    };
-  } catch {
-    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
-    return;
-  }
-
-  if (typeof parsed.workflowId !== 'string') {
-    sendError(res, 400, 'validation_error', 'workflowId MUST be a string.');
-    return;
-  }
-
-  const workflow = workflows.get(parsed.workflowId);
-  if (!workflow) {
-    sendError(res, 404, 'workflow_not_found', 'Unknown workflowId.');
-    return;
-  }
-
-  // capabilities.md §"Unsupported capability — refusal contract".
-  // A workflow referencing a capability-gated typeId on a host that
-  // does NOT advertise the gating capability MUST be refused. Iterate
-  // the GATED_TYPEID_MAP (the normative table from capabilities.md
-  // §"Capability-gated typeId map") and refuse on the first
-  // unsupported typeId we find — first-fail keeps the error envelope
-  // unambiguous about which typeId tripped the gate.
-  for (const wfNode of workflow.nodes) {
-    const gate = GATED_TYPEID_MAP[wfNode.typeId];
-    if (gate && !HOST_ADVERTISED_GATED_CAPABILITIES.has(gate.capability)) {
-      sendJSON(res, 400, {
-        error: 'capability_required',
-        message: `Workflow "${parsed.workflowId}" references ${wfNode.typeId}, but this host does not advertise ${gate.advertisementPath}: true.`,
-        details: {
-          requiredCapability: gate.capability,
-          offendingTypeId: wfNode.typeId,
-          nodeId: wfNode.id,
-        },
-      });
-      return;
+  const validateResume = (payload: InterruptPayload, resumeValue: unknown, subject: Subject | null): { exits: boolean; decision?: string; action?: string } => {
+    if (payload.kind === 'approval') {
+      const rv = resumeValue as { action?: unknown; refineFeedback?: unknown; editedArtifactData?: unknown } | null;
+      const actions = (payload.data['actions'] as string[] | undefined) ?? ['accept', 'reject'];
+      const action = rv !== null && typeof rv === 'object' ? rv.action : undefined;
+      if (typeof action !== 'string' || action === 'timeout' || !actions.includes(action)) throw err('validation_error', `resumeValue.action MUST be one of the gate's actions [${actions.join(', ')}]`, { field: 'resumeValue.action' });
+      if (action === 'refine' && (rv?.refineFeedback === null || typeof rv?.refineFeedback !== 'object')) throw err('validation_error', 'refine requires refineFeedback', { field: 'resumeValue.refineFeedback' });
+      if (action === 'edit-accept' && rv?.editedArtifactData === undefined) throw err('validation_error', 'edit-accept requires editedArtifactData', { field: 'resumeValue.editedArtifactData' });
+      const approvers = payload.data['approversList'];
+      if (Array.isArray(approvers) && (subject === null || !approvers.includes(principalRef(subject)))) throw err('forbidden', 'the resolver is not in the gate\'s approversList');
+      if (action === 'ask') return { exits: false, action };
+      return { exits: true, action, decision: action === 'reject' ? 'rejected' : 'granted' };
     }
-  }
-
-  // Per-workflow configurableSchema validation (run-options.md §"Per-workflow
-  // configurableSchema"). When the workflow declares a schema, the host MUST
-  // reject mismatched `configurable` overlays with `validation_error`.
-  const wfSchema = workflow.configurableSchema;
-  if (wfSchema && parsed.configurable !== undefined) {
-    const check = validateConfigurable(wfSchema, parsed.configurable);
-    if (!check.valid) {
-      sendError(res, 400, 'validation_error', check.reason);
-      return;
-    }
-  }
-
-  const idempotencyKey = req.headers['idempotency-key'];
-  const incomingBodyHash = hashBody(bodyText);
-  if (typeof idempotencyKey === 'string') {
-    pruneIdempotency();
-    const cacheKey = buildIdempotencyCacheKey('POST /v1/runs', idempotencyKey);
-    const cached = stmts.getIdempotency.get(cacheKey) as
-      | { status: number; body: string; body_hash: string }
-      | undefined;
-    if (cached) {
-      if (cached.body_hash !== incomingBodyHash) {
-        // SP-03 (2026-08-18): `idempotency_key_mismatch` is the canonical code
-        // (`spec/v1/idempotency.md` v1.5 §"Record shape, digest, and lease").
-        // This host emitted `idempotency_key_conflict`, which that section
-        // retires — "conflict" reads as the in-flight case, which has its own
-        // code (`idempotency_in_flight`). The spec named no mismatch error at
-        // all until v1.5, which is how three spellings ended up in the wild.
-        sendError(
-          res,
-          409,
-          'idempotency_key_mismatch',
-          'Idempotency-Key reused with a different request body.',
-        );
-        return;
+    if (payload.kind === 'clarification' && resumeValue !== null && typeof resumeValue === 'object' && Array.isArray((resumeValue as { answers?: unknown }).answers)) {
+      const ids = new Set(((payload.data['questions'] as Array<{ id?: unknown }> | undefined) ?? []).map((x) => String(x.id)));
+      for (const a of (resumeValue as { answers: Array<{ id?: unknown }> }).answers) {
+        if (a === null || typeof a !== 'object' || !ids.has(String(a.id))) throw err('validation_error', 'every answer id MUST be a question id', { field: 'resumeValue.answers' });
       }
-      res.writeHead(cached.status, {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(cached.body),
-        'openwop-Idempotent-Replay': 'true',
-      });
-      res.end(cached.body);
-      return;
     }
-  }
-
-  const runId = `run-${randomUUID()}`;
-  const inputs = parsed.inputs ?? {};
-  const startedAt = new Date().toISOString();
-
-  // Per workflow-definition.schema.json §variables + run-snapshot
-  // §variables, the run's variable map starts initialized from the
-  // workflow's `variables[].defaultValue` declarations, then overlaid
-  // with the run inputs. Two-pass so a run created with no inputs still
-  // carries its declared defaults (RFC 0022 §A/§B dispatch/subWorkflow
-  // inputMapping projects these parent variables into children), while
-  // identity / passthrough fixtures still observe inputs in variables.
-  const createWorkflowDef = workflows.get(parsed.workflowId);
-  const seededVariables: Record<string, unknown> = {};
-  for (const v of createWorkflowDef?.variables ?? []) {
-    if (v.defaultValue !== undefined) seededVariables[v.name] = v.defaultValue;
-  }
-  Object.assign(seededVariables, inputs);
-  stmts.insertRun.run(
-    runId,
-    parsed.workflowId,
-    'pending',
-    JSON.stringify(inputs),
-    startedAt,
-    parsed.configurable !== undefined ? JSON.stringify(parsed.configurable) : null,
-    JSON.stringify(seededVariables),
-  );
-
-  // W3C Trace Context propagation (observability.md §"Trace context propagation").
-  // Parse `traceparent` from the inbound request; if valid, store it so
-  // `startRunSpan` for this runId adopts the caller-supplied trace_id.
-  const traceparentHeader = req.headers['traceparent'];
-  const inboundTrace = parseTraceparent(
-    Array.isArray(traceparentHeader) ? traceparentHeader[0] : traceparentHeader,
-  );
-  if (inboundTrace) recordInboundTraceContext(runId, inboundTrace);
-
-  logAudit(db, {
-    actor: 'tenant:default',
-    action: 'run.create',
-    target: runId,
-    details: { workflowId: parsed.workflowId },
-  });
-  triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
-
-  const responseBody = {
-    runId,
-    status: 'pending',
-    workflowId: parsed.workflowId,
-    startedAt,
-    // Required by api/openapi.yaml POST /v1/runs response schema.
-    eventsUrl: `/v1/runs/${runId}/events`,
-    statusUrl: `/v1/runs/${runId}`,
+    const required = payload.resumeSchema?.['required'];
+    if (Array.isArray(required)) {
+      if (resumeValue === null || typeof resumeValue !== 'object' || required.some((k) => !(String(k) in (resumeValue as object)))) throw err('validation_error', 'resumeValue fails the interrupt\'s resumeSchema', { required });
+    }
+    return { exits: true };
   };
-  const responseText = JSON.stringify(responseBody);
 
-  if (typeof idempotencyKey === 'string') {
-    const cacheKey = buildIdempotencyCacheKey('POST /v1/runs', idempotencyKey);
-    stmts.insertIdempotency.run(cacheKey, 201, responseText, incomingBodyHash, Date.now());
-  }
+  /** Both resolve surfaces converge here: validate, claim the interrupt atomically, record, resume. */
+  const resolve = (run: RunRow, row: InterruptRow, resumeValue: unknown, subject: Subject | null): { runId: string; nodeId: string; status: string } => {
+    if (TERMINAL.has(run.status)) throw err('interrupt_already_resolved', `the run is ${run.status}`);
+    const payload = JSON.parse(row.payload_json) as InterruptPayload;
+    const v = validateResume(payload, resumeValue, subject);
+    if (!v.exits) return { runId: wireId(run), nodeId: row.node_id, status: run.status };
+    if (q.claimInterrupt.run(row.interrupt_id).changes !== 1) throw err('interrupt_already_resolved', 'the interrupt is already resolved');
+    const resolved: Record<string, unknown> = { nodeId: row.node_id, interruptId: row.interrupt_id, kind: payload.kind, resumeValue };
+    if (subject !== null) resolved['resolvedBy'] = subject;
+    if (v.decision !== undefined) resolved['decision'] = v.decision;
+    if (v.action !== undefined) resolved['action'] = v.action;
+    const rv = resumeValue as { refineFeedback?: unknown; editedArtifactData?: unknown } | null;
+    if (v.action === 'refine') resolved['refineFeedback'] = rv?.refineFeedback;
+    if (v.action === 'edit-accept') resolved['editedArtifactData'] = rv?.editedArtifactData;
+    appendEvent(run, 'interrupt.resolved', resolved, row.node_id);
+    const startedAt = fold(readEvents(run)).startedAt;
+    if (applyResolution(run, row.node_id, resolved, startedAt) === 'failed') return { runId: wireId(run), nodeId: row.node_id, status: 'failed' };
+    update(run.run_id, { status: 'running', current_node_id: null });
+    scheduleRun(run.run_id);
+    return { runId: wireId(run), nodeId: row.node_id, status: 'running' };
+  };
 
-  // Try to claim + execute. Single-process model: we expect to win
-  // every time we just created the run, but tryClaim is correct under
-  // multi-process startup too.
-  if (tryClaim(runId)) {
-    void runWorkflow(runId).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      const error = { code: 'internal', message };
-      appendEvent(runId, 'run.failed', { data: error });
-      setRunTerminal(runId, 'failed', error);
-    });
-  }
+  /** identity.md §4 — `ow2.<alg>.<kid>.<payload>.<mac>`; one registered code per refusal. */
+  const verifyToken = (token: string): InterruptRow => {
+    const parts = token.split('.');
+    if (parts.length !== 5 || parts[0] !== 'ow2') throw err('interrupt_token_invalid', 'the token is outside the ow2.<alg>.<kid>.<payload>.<mac> grammar');
+    const [, alg, kid, payload, given] = parts as [string, string, string, string, string];
+    if (alg !== 'hs256') throw err('interrupt_token_invalid', `alg ${alg} is not in interrupt.tokenAlgs`);
+    if (kid !== TOKEN_KID) throw err('interrupt_token_invalid', `kid ${kid} is not held by this host`);
+    const expected = Buffer.from(createHmac('sha256', tokenSecret).update(`hs256.${kid}.${payload}`).digest('hex'));
+    const presented = Buffer.from(given);
+    if (expected.length !== presented.length || !timingSafeEqual(expected, presented)) throw err('interrupt_token_invalid', 'the token MAC does not verify');
+    let claims: { i?: unknown; e?: unknown };
+    try { claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as typeof claims; } catch { throw err('interrupt_token_invalid', 'the token payload is unreadable'); }
+    const row = typeof claims.i === 'string' ? (q.interruptById.get(claims.i) as InterruptRow | undefined) : undefined;
+    if (!row) throw err('interrupt_token_invalid', 'the token names no interrupt on this host');
+    if (typeof claims.e === 'number' && Date.now() > claims.e) throw err('interrupt_expired', 'the token is past its expiresAt');
+    if (row.state !== 'open') throw err('interrupt_already_resolved', 'the interrupt is already resolved, or its run ended');
+    return row;
+  };
 
-  res.writeHead(201, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(responseText),
-    'openwop-Idempotent-Replay': typeof idempotencyKey === 'string' ? 'false' : '',
-  });
-  res.end(responseText);
-}
-
-function handleGetRun(req: IncomingMessage, res: ServerResponse, runId: string): void {
-  if (!checkAuth(req, res)) return;
-  const row = loadRun(runId);
-  if (!row) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-
-  // Suspended runs expose the active interrupt + currentNodeId so clients
-  // can resolve via POST /v1/runs/{runId}/interrupts/{nodeId} (or, for
-  // external-event interrupts, via POST /v1/interrupts/{token}).
-  let interrupt: Record<string, unknown> | null = null;
-  let currentNodeId: string | undefined;
-  if (
-    row.status === 'waiting-approval' ||
-    row.status === 'waiting-input' ||
-    row.status === 'waiting-external'
-  ) {
-    const active = getActiveInterrupt(db, runId);
-    if (active) {
-      interrupt = {
-        kind: active.kind,
-        nodeId: active.node_id,
-        payload: JSON.parse(active.payload_json),
-        ...(active.callback_token
-          ? {
-              interruptToken: active.callback_token,
-              callbackUrl: `/v1/interrupts/${active.callback_token}`,
-            }
-          : {}),
-      };
-      currentNodeId = active.node_id;
+  /**
+   * persistence.md §Runs pinned to v1 — a run suspended on an interrupt at the
+   * cut continues. The v1 host recorded the suspension only in its own
+   * `interrupts` table and as a v1 `node.suspended`; the first v2 resolve
+   * adopts it into `interrupts_v2` from the (translated) log, and the run goes
+   * on under the writer rule: its era-2 log keeps v1 vocabulary.
+   */
+  const legacySuspension = (run: RunRow): { nodeId: string; data: Record<string, unknown> } | null => {
+    if (eraOf(run) >= 3 || !WAITING.has(run.status)) return null;
+    let open: { nodeId: string; data: Record<string, unknown> } | null = null;
+    for (const e of readEvents(run)) {
+      const p = (e.payload ?? {}) as Record<string, unknown>;
+      const n = e.nodeId ?? (typeof p['nodeId'] === 'string' ? p['nodeId'] : undefined);
+      if (e.type === 'node.suspended' && n !== undefined) open = { nodeId: n, data: p };
+      if ((e.type === 'node.resumed' || e.type === 'node.completed' || e.type === 'node.failed') && n === open?.nodeId) open = null;
     }
-  }
+    return open;
+  };
+  const adoptLegacyInterrupt = (run: RunRow, nodeId: string): InterruptRow | undefined => {
+    const legacy = legacySuspension(run);
+    if (legacy === null || legacy.nodeId !== nodeId) return undefined;
+    const config = (legacy.data['config'] ?? {}) as Record<string, unknown>;
+    const kind = String(legacy.data['kind'] ?? 'custom');
+    const typeId = kind === 'approval' ? 'core.approvalGate' : kind === 'clarification' ? 'core.clarificationGate' : 'core.interrupt';
+    const payload = interruptFor(run, { id: nodeId, typeId, config: kind === 'approval' || kind === 'clarification' ? config : { kind, data: { customKind: nodeId } } }, 0);
+    q.insertInterrupt.run(tenantBound(run.tenant), run.run_id, nodeId, payload.key, JSON.stringify(payload), Date.now() + TOKEN_DEFAULT_TTL_MS, nowIso());
+    return q.openInterrupt.get(run.run_id, nodeId) as InterruptRow;
+  };
 
-  // Surface child runs spawned via `core.subWorkflow` so clients can
-  // observe parent/child linkage and conformance scenarios can walk
-  // the cascade. Empty array when no children.
-  const children = db
-    .prepare(
-      'SELECT run_id, status FROM runs WHERE parent_run_id = ? ORDER BY started_at ASC',
-    )
-    .all(runId) as Array<{ run_id: string; status: string }>;
-  const childRuns = children.map((c) => ({ runId: c.run_id, status: c.status }));
+  // ─── 8. Projections ────────────────────────────────────────────────────────
 
-  sendJSON(res, 200, {
-    runId: row.run_id,
-    workflowId: row.workflow_id,
-    status: row.status,
-    inputs: JSON.parse(row.inputs_json),
-    variables: row.variables_json ? JSON.parse(row.variables_json) : {},
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    // version-negotiation.md §Stamping — both axes, projected from the row the
-    // trigger stamped at write time. Omitted (not defaulted) when NULL: that is
-    // a legacy run, and §Legacy detection identifies one by `eventLogSchemaVersion`
-    // being "undefined or < 2", so inventing a value here would erase the very
-    // signal the reader needs.
-    ...(row.engine_version !== null && row.engine_version !== undefined
-      ? { engineVersion: row.engine_version }
-      : {}),
-    ...(row.event_log_schema_version !== null && row.event_log_schema_version !== undefined
-      ? { eventLogSchemaVersion: row.event_log_schema_version }
-      : {}),
-    ...(row.error_json ? { error: JSON.parse(row.error_json) } : {}),
-    ...(currentNodeId ? { currentNodeId } : {}),
-    ...(interrupt ? { interrupt } : {}),
-    ...(row.parent_run_id ? { parentRunId: row.parent_run_id, parentNodeId: row.parent_node_id } : {}),
-    ...(childRuns.length > 0 ? { childRuns } : {}),
-    // RFC 0026 — per-run cost rollup (run-snapshot.schema.json
-    // §metrics.openwopCost). Omitted when no cost was recorded.
-    ...(snapshotCostRollup(row.run_id) ? { metrics: { openwopCost: snapshotCostRollup(row.run_id) } } : {}),
-  });
-}
-
-/**
- * Append the `interrupt.resolved` event (`spec/v2/core/interrupt.md` §Events,
- * payload `run-event-payloads.schema.json#/$defs/interruptResolved`).
- *
- * RFC 0183 §A.1: resolving an approval-kind interrupt MUST record the applied
- * `action`; §A.2: `refine` MUST carry `refineFeedback` and `edit-accept` MUST
- * carry `editedArtifactData`. Both are validated in `resolveApproval` before
- * this is reached, and recorded verbatim.
- *
- * `interruptId` is host-minted in the tenant-bound `<tenant>/<opaque>` form;
- * the opaque part is derived from (run, node, event sequence) so it is stable
- * for a given resolution and distinct across repeat suspensions of one gate.
- */
-function recordInterruptResolved(
-  runId: string,
-  nodeId: string,
-  kind: string,
-  resumeValue: unknown,
-  approval: { action?: string; refineFeedback?: unknown; editedArtifactData?: unknown },
-): void {
-  const seq = (stmts.countEvents.get(runId) as { n: number }).n;
-  const opaque = createHash('sha256').update(`${runId}\0${nodeId}\0${seq}`).digest('hex').slice(0, 32);
-  appendEvent(runId, 'interrupt.resolved', {
-    nodeId,
-    data: {
-      nodeId,
-      interruptId: `default/${opaque}`,
-      kind,
-      resumeValue,
-      ...(approval.action !== undefined ? { action: approval.action } : {}),
-      ...(approval.refineFeedback !== undefined ? { refineFeedback: approval.refineFeedback } : {}),
-      ...(approval.editedArtifactData !== undefined ? { editedArtifactData: approval.editedArtifactData } : {}),
-    },
-  });
-}
-
-async function handleResolveInterrupt(
-  req: IncomingMessage,
-  res: ServerResponse,
-  runId: string,
-  nodeId: string,
-): Promise<void> {
-  if (!checkAuth(req, res)) return;
-
-  const row = loadRun(runId);
-  if (!row) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-
-  const interrupt = getInterrupt(db, runId, nodeId);
-  if (!interrupt) {
-    sendError(
-      res,
-      404,
-      'interrupt_not_found',
-      `No active interrupt at (runId=${runId}, nodeId=${nodeId}).`,
-    );
-    return;
-  }
-
-  const bodyText = await readBody(req);
-  let parsed: { resumeValue?: unknown };
-  try {
-    parsed = bodyText ? (JSON.parse(bodyText) as { resumeValue?: unknown }) : {};
-  } catch {
-    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
-    return;
-  }
-
-  const resumeValue = parsed.resumeValue;
-  const outcome =
-    interrupt.kind === 'approval'
-      ? resolveApproval(db, runId, nodeId, resumeValue)
-      : resolveClarification(db, runId, nodeId, resumeValue);
-
-  if (outcome.kind === 'unknown') {
-    sendError(res, 404, 'interrupt_not_found', 'Interrupt resolved or missing.');
-    return;
-  }
-  if (outcome.kind === 'expired') {
-    // 410 Gone is the spec-preferred late-resolve code; same shape as
-    // the post-cascade resolve path in interrupt-profiles.md.
-    sendError(res, 410, 'interrupt_expired', 'Interrupt has expired.');
-    return;
-  }
-  if (outcome.kind === 'invalid') {
-    sendError(res, outcome.status, outcome.code, outcome.message);
-    return;
-  }
-
-  logAudit(db, {
-    actor: 'tenant:default',
-    action: 'interrupt.resolve',
-    target: `${runId}:${nodeId}`,
-    details: { outcome: outcome.kind, votes: outcome.kind === 'pending' ? outcome.votes.length : undefined },
-  });
-  triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
-
-  if (outcome.kind === 'pending') {
-    // Quorum not yet met. Emit a vote event so observers can see progress;
-    // run remains in waiting-approval.
-    appendEvent(runId, 'interrupt.vote', {
-      nodeId,
-      data: { votes: outcome.votes },
-    });
-    sendJSON(res, 200, {
-      runId,
-      status: 'waiting-approval',
-      interrupt: {
-        kind: interrupt.kind,
-        nodeId,
-        votes: outcome.votes,
-      },
-    });
-    return;
-  }
-
-  if (outcome.kind === 'refined') {
-    // RFC 0183 §A.1/§A.2 — record the applied action with the feedback it
-    // requires, then send the gate back for another pass. There is no upstream
-    // generator in this executor to re-run with the feedback, so the cursor is
-    // left ON the gate and the executor re-enters it, re-suspending as a fresh
-    // interrupt (createInterrupt replaces the resolved row).
-    recordInterruptResolved(runId, nodeId, interrupt.kind, resumeValue, {
-      action: 'refine',
-      refineFeedback: outcome.refineFeedback,
-    });
-    db.prepare("UPDATE runs SET status = 'running' WHERE run_id = ?").run(runId);
-    if (tryClaim(runId)) {
-      void runWorkflow(runId).catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        appendEvent(runId, 'run.failed', { data: { code: 'internal', message } });
-        setRunTerminal(runId, 'failed', { code: 'internal', message });
-      });
+  const snapshot = (run: RunRow): Record<string, unknown> => {
+    const options = optionsOf(run);
+    const snap: Record<string, unknown> = { runId: wireId(run), workflowId: run.workflow_id, status: run.status, owner: ownerOf(run), eventLogSchemaVersion: eraOf(run), inputs: JSON.parse(run.inputs_json) as unknown };
+    if (run.engine_version !== null) snap['engineVersion'] = run.engine_version;
+    if (run.status !== 'pending') snap['startedAt'] = run.started_at;
+    if (run.ended_at !== null) snap['completedAt'] = run.ended_at;
+    const currentNodeId = run.current_node_id ?? legacySuspension(run)?.nodeId ?? null;
+    if (WAITING.has(run.status) && currentNodeId !== null) snap['currentNodeId'] = currentNodeId;
+    if (run.status === 'failed' && run.error_json !== null) {
+      const e = JSON.parse(run.error_json) as { code?: unknown; message?: unknown };
+      snap['error'] = { code: String(e.code ?? 'internal_error'), message: String(e.message ?? 'the run failed') };
     }
-    sendJSON(res, 200, {
-      runId,
-      status: 'running',
-      interrupt: { kind: interrupt.kind, nodeId, outcome: 'refined', votes: outcome.votes },
-    });
-    return;
-  }
+    if (options.configurable !== undefined) snap['configurable'] = options.configurable;
+    if (options.tags !== undefined) snap['tags'] = options.tags;
+    if (options.metadata !== undefined) snap['metadata'] = options.metadata;
+    if (run.parent_run_id !== null) {
+      const parent = loadRunRow(run.parent_run_id);
+      snap['parentRunId'] = parent ? wireId(parent) : run.parent_run_id;
+    }
+    return snap;
+  };
 
-  if (outcome.kind === 'rejected') {
-    recordInterruptResolved(runId, nodeId, interrupt.kind, resumeValue, { action: 'reject' });
-    appendEvent(runId, 'node.completed', { nodeId, data: { outcome: 'rejected' } });
-    appendEvent(runId, 'run.failed', {
-      data: { code: 'interrupt_rejected', message: 'Approval gate rejected by quorum.' },
-    });
-    setRunTerminal(runId, 'failed', {
-      code: 'interrupt_rejected',
-      message: 'Approval gate rejected by quorum.',
-    });
-    sendJSON(res, 200, {
-      runId,
-      status: 'failed',
-      interrupt: { kind: interrupt.kind, nodeId, outcome: 'rejected', votes: outcome.votes },
-    });
-    return;
-  }
+  /** events.md §Stream modes — the one grammar; this host serves all four modes. */
+  const STREAM_MODE = /^(values|(updates|messages|debug)(,(updates|messages|debug))*)$/;
+  const parseStreamModes = (raw: string | null): string[] => {
+    const value = raw === null || raw === '' ? 'updates' : raw;
+    if (!STREAM_MODE.test(value)) throw err('unsupported_stream_mode', `streamMode ${value} is outside the grammar`, { supported: ['updates', 'values', 'messages', 'debug'] });
+    return value.split(',');
+  };
+  const DEBUG_ONLY = new Set(['log.appended', 'variable.changed', 'version.pinned', 'lease.acquired', 'lease.renewed', 'lease.lost', 'lease.handed-off', 'node.retried']);
+  /** events.md §Stream modes — which mode admits an event, or null. */
+  const admittedBy = (modes: string[], type: string): string | null => {
+    for (const mode of modes) {
+      if (mode === 'debug') return 'debug';
+      if ((mode === 'updates' || mode === 'values') && !DEBUG_ONLY.has(type)) return mode;
+      if (mode === 'messages' && type === 'output.chunk') return 'messages';
+    }
+    return null;
+  };
 
-  // 'resumed' — close out this node and resume the executor from the next one.
-  recordInterruptResolved(
-    runId,
-    nodeId,
-    interrupt.kind,
-    resumeValue,
-    interrupt.kind === 'approval'
-      ? {
-          action: outcome.finalAction,
-          ...(outcome.finalAction === 'edit-accept' ? { editedArtifactData: outcome.editedArtifactData } : {}),
+  // ─── 9. The front door ─────────────────────────────────────────────────────
+  //
+  // versioning.md §1.3: one major is served, 2. No header, `2` or `2.<n>` is
+  // served under it; any other major is 406; a malformed header is 400. Every
+  // protocol response carries `OpenWOP-Version: 2.0` (§1.4), refusals included.
+
+  interface Reply { status: number; body?: unknown; headers?: Record<string, string> }
+  interface Ctx {
+    req: IncomingMessage;
+    res: ServerResponse;
+    url: URL;
+    params: Record<string, string>;
+    subject: Subject | null;
+    baseUrl: string;
+    body(): Promise<Record<string, unknown>>;
+    rawBody(): Promise<string>;
+    header(name: string): string | null;
+  }
+  type Handler = (ctx: Ctx) => Promise<Reply | 'streamed'>;
+  interface Route { method: string; pattern: RegExp; auth: boolean; handler: Handler }
+
+  const routes: Route[] = [];
+  const route = (method: string, path: string, auth: boolean, handler: Handler): void => {
+    const re = new RegExp(`^${path.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{(\w+)\}/g, '(?<$1>[^/]+)')}$`);
+    routes.push({ method, pattern: re, auth, handler });
+  };
+
+  const BOUND_PARAMS = new Set(['runId']);
+  const send = (res: ServerResponse, reply: Reply): void => {
+    const headers: Record<string, string> = { 'OpenWOP-Version': PROTOCOL_VERSION, ...(reply.headers ?? {}) };
+    if (reply.body === undefined) { res.writeHead(reply.status, headers); res.end(); return; }
+    headers['Content-Type'] = 'application/json; charset=utf-8';
+    res.writeHead(reply.status, headers);
+    res.end(JSON.stringify(reply.body));
+  };
+
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    try {
+      const raw = req.headers['openwop-version'];
+      const version = typeof raw === 'string' ? raw.trim() : '';
+      if (version !== '') {
+        const m = /^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$/.exec(version);
+        if (!m) throw err('validation_error', 'OpenWOP-Version MUST be <major> or <major>.<minor>', { header: 'OpenWOP-Version' });
+        if (m[1] !== '2') throw err('protocol_version_unsupported', `major ${m[1]} is not served by this host`, { protocolVersions: [PROTOCOL_VERSION] });
+      }
+      const method = (req.method ?? 'GET').toUpperCase();
+      let matched: Route | undefined;
+      let groups: Record<string, string> = {};
+      let pathSeen = false;
+      for (const r of routes) {
+        const m = r.pattern.exec(url.pathname);
+        if (!m) continue;
+        pathSeen = true;
+        if (r.method !== method) continue;
+        matched = r;
+        groups = m.groups ?? {};
+        break;
+      }
+      if (!matched) throw err('not_found', pathSeen ? `${method} is not served at ${url.pathname}` : `no operation at ${url.pathname}`);
+      const params = Object.fromEntries(Object.entries(groups).map(([k, v]) => {
+        const decoded = decodeURIComponent(v);
+        return [k, BOUND_PARAMS.has(k) ? unprojectBoundId(decoded) : decoded];
+      }));
+      const subject = matched.auth ? authenticate(req) : null;
+      let cached: string | null = null;
+      const rawBody = async (): Promise<string> => {
+        if (cached !== null) return cached;
+        const chunks: Buffer[] = [];
+        let total = 0;
+        for await (const c of req) {
+          total += (c as Buffer).length;
+          if (total > MAX_REQUEST_BODY_BYTES) throw err('validation_error', 'the request body exceeds limits.maxRequestBodyBytes', { maxRequestBodyBytes: MAX_REQUEST_BODY_BYTES });
+          chunks.push(c as Buffer);
         }
-      : {},
-  );
-  appendEvent(runId, 'node.resumed', { nodeId, data: { action: outcome.finalAction } });
-  appendEvent(runId, 'node.completed', { nodeId });
-  // Bump the executor cursor past the resumed node so runWorkflow starts
-  // at the next node. Re-acquire claim if needed and re-enter the executor.
-  db.prepare("UPDATE runs SET status = 'running', next_node_index = ? WHERE run_id = ?").run(
-    (row.next_node_index ?? 0) + 1,
-    runId,
-  );
-  if (tryClaim(runId)) {
-    // Fire-and-forget — the executor handles its own lifecycle.
-    void runWorkflow(runId).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      appendEvent(runId, 'run.failed', { data: { code: 'internal', message } });
-      setRunTerminal(runId, 'failed', { code: 'internal', message });
-    });
-  }
-  sendJSON(res, 200, {
-    runId,
-    status: 'running',
-    interrupt: { kind: interrupt.kind, nodeId, outcome: 'accepted', votes: outcome.votes },
+        cached = Buffer.concat(chunks).toString('utf8');
+        return cached;
+      };
+      const ctx: Ctx = {
+        req, res, url, params, subject,
+        baseUrl: `${(req.headers['x-forwarded-proto'] as string | undefined) ?? 'http'}://${req.headers['host'] ?? `${opts.host}:${opts.port}`}`,
+        rawBody,
+        body: async () => {
+          const text = await rawBody();
+          if (text.trim() === '') return {};
+          let parsed: unknown;
+          try { parsed = JSON.parse(text); } catch { throw err('validation_error', 'the request body is not JSON'); }
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw err('validation_error', 'the request body MUST be a JSON object');
+          return parsed as Record<string, unknown>;
+        },
+        header: (name) => { const v = req.headers[name.toLowerCase()]; return typeof v === 'string' ? v : null; },
+      };
+      const reply = await matched.handler(ctx);
+      if (reply !== 'streamed') send(res, reply);
+    } catch (e) {
+      if (res.headersSent) { res.end(); return; }
+      if (e instanceof HostError) { send(res, { status: e.status, body: e.body(), headers: e.headers }); return; }
+      console.error(`[${HOST_NAME}] unhandled error:`, e);
+      send(res, { status: 500, body: { error: 'internal_error', message: 'the host failed to serve the request' } });
+    }
+  };
+
+  /**
+   * idempotency.md §Layer 1 — keyed (tenant, endpoint, key); a final outcome is
+   * replayed with `OpenWOP-Idempotent-Replay: true`; another digest under the
+   * key is 409 idempotency_key_mismatch; a concurrent duplicate is 409
+   * idempotency_in_flight; 400/401/403/429/5xx are never cached.
+   */
+  const withIdempotency = async (ctx: Ctx, endpoint: string, fn: () => Promise<Reply>): Promise<Reply> => {
+    const key = ctx.header('idempotency-key');
+    if (key === null || ctx.subject === null) return fn();
+    if (!IDEMPOTENCY_KEY.test(key)) throw err('idempotency_key_invalid', 'Idempotency-Key MUST match ^[A-Za-z0-9._~-]{22,128}$');
+    const tenant = ctx.subject.tenant;
+    const digest = createHash('sha256').update(`${ctx.url.pathname}\n${await ctx.rawBody()}`).digest('hex');
+    q.pruneIdem.run(Date.now() - 24 * 3_600_000);
+    const existing = q.getIdem.get(tenant, endpoint, key) as { digest: string; status: number | null; headers_json: string | null; body: string | null } | undefined;
+    if (existing) {
+      if (existing.digest !== digest) throw err('idempotency_key_mismatch', 'a different request was presented under the same Idempotency-Key');
+      if (existing.status === null) throw err('idempotency_in_flight', 'a request under this Idempotency-Key is in flight', undefined, { 'Retry-After': '1' });
+      const replay: Reply = { status: existing.status, headers: { ...(JSON.parse(existing.headers_json ?? '{}') as Record<string, string>), 'OpenWOP-Idempotent-Replay': 'true' } };
+      if (existing.body !== null) replay.body = JSON.parse(existing.body);
+      return replay;
+    }
+    if (q.claimIdem.run(tenant, endpoint, key, digest, Date.now()).changes !== 1) throw err('idempotency_in_flight', 'a concurrent request under this Idempotency-Key is in flight', undefined, { 'Retry-After': '1' });
+    const cacheable = (status: number): boolean => status < 500 && status !== 429 && status !== 400 && status !== 401 && status !== 403;
+    let reply: Reply;
+    try {
+      reply = await fn();
+    } catch (e) {
+      if (e instanceof HostError && cacheable(e.status)) q.completeIdem.run(e.status, JSON.stringify(e.headers), JSON.stringify(e.body()), tenant, endpoint, key);
+      else q.releaseIdem.run(tenant, endpoint, key);
+      throw e;
+    }
+    if (cacheable(reply.status)) q.completeIdem.run(reply.status, JSON.stringify(reply.headers ?? {}), reply.body === undefined ? null : JSON.stringify(reply.body), tenant, endpoint, key);
+    else q.releaseIdem.run(tenant, endpoint, key);
+    return reply;
+  };
+
+  const subjectOf = (ctx: Ctx): Subject => ctx.subject as Subject;
+  const links = (ctx: Ctx, run: RunRow): { eventsUrl: string; statusUrl: string } => {
+    const id = projectBoundId(wireId(run));
+    return { eventsUrl: `${ctx.baseUrl}/runs/${id}/events`, statusUrl: `${ctx.baseUrl}/runs/${id}` };
+  };
+  const etagOf = (text: string): string => `"${createHash('sha256').update(text).digest('hex').slice(0, 32)}"`;
+  /** RFC 9110 §13.1.2 — `*` or any listed tag, under weak comparison. */
+  const ifNoneMatch = (ctx: Ctx, etag: string): boolean => {
+    const h = ctx.header('if-none-match');
+    if (h === null) return false;
+    const strip = (t: string): string => t.trim().replace(/^W\//, '');
+    return h.split(',').some((t) => t.trim() === '*' || strip(t) === strip(etag));
+  };
+
+  // ─── 10. Discovery ─────────────────────────────────────────────────────────
+  //
+  // capabilities.md — the closed v2 root: metadata keys plus one record per
+  // family, `{ status, since, until?, witness, ...facets }`. A family is
+  // advertised only when this host serves it end to end.
+
+  const record = (witness: string, facets: Record<string, unknown> = {}): Record<string, unknown> => ({ status: 'experimental', since: SINCE, until: EXPERIMENTAL_UNTIL, witness, ...facets });
+  const discoveryDocument = (): Record<string, unknown> => ({
+    protocolVersions: [PROTOCOL_VERSION],
+    preferredVersion: PROTOCOL_VERSION,
+    implementation: { name: HOST_NAME, version: HOST_VERSION, vendor: 'openwop (reference example)' },
+    engineVersion: ENGINE_VERSION,
+    eventLogSchemaVersion: ERA,
+    fixtures: [...workflows.keys()].sort(),
+    limits: { status: 'stable', since: SINCE, witness: 'witnessable-gated', clarificationRounds: 0, maxNodeExecutions: MAX_NODE_EXECUTIONS, maxRunDurationMs: opts.maxRunDurationMs, maxRequestBodyBytes: MAX_REQUEST_BODY_BYTES },
+    auth: record('seam-gated', { lanes: [{ lane: 'api-key', issuers: [API_KEY_ISSUER], revocation: 'next-request', minimumAssurance: 'bearer' }] }),
+    eventLog: record('claims-check'),
+    idempotency: record('witnessable-gated', { crossRegion: 'single-region' }),
+    interrupt: record('witnessable-gated', { tokenAlgs: ['hs256'], refKinds: ['principal'] }),
+    replay: record('witnessable-gated', { modes: ['replay', 'branch'], effectSeamsManifest: '/host/effect-seams' }),
+    runList: record('witnessable-gated', { maxPageSize: RUN_LIST_MAX_PAGE, filters: ['workflowId', 'status'] }),
   });
-}
 
-async function handleResolveInterruptByToken(
-  req: IncomingMessage,
-  res: ServerResponse,
-  token: string,
-): Promise<void> {
-  // Signed-callback resolve: the token IS the authorization, so no bearer
-  // check here. The token's unguessability is the entire access control.
-  const interrupt = getInterruptByToken(db, token);
-  if (!interrupt) {
-    sendError(res, 404, 'interrupt_not_found', 'Unknown or expired interrupt token.');
-    return;
-  }
+  const hostBuild = { kind: 'artifact-sha256', id: createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex') };
 
-  // The auth-required profile (interrupt-profiles.md §"openwop-interrupt-auth-required")
-  // REJECTS signed-token resolve when active. Hosts that advertise that
-  // profile MUST require a bearer credential instead.
-  const config = JSON.parse(interrupt.config_json) as { profile?: string };
-  if (config.profile === 'openwop-interrupt-auth-required') {
-    sendError(
-      res,
-      403,
-      'auth_elevation_required',
-      'This interrupt requires bearer authentication; signed-token resume is disabled.',
-    );
-    return;
-  }
-
-  const bodyText = await readBody(req);
-  let parsed: { resumeValue?: unknown };
-  try {
-    parsed = bodyText ? (JSON.parse(bodyText) as { resumeValue?: unknown }) : {};
-  } catch {
-    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
-    return;
-  }
-
-  const outcome =
-    interrupt.kind === 'external-event'
-      ? resolveExternalEvent(db, interrupt.run_id, interrupt.node_id, parsed.resumeValue)
-      : { kind: 'invalid' as const, status: 400 as const, code: 'unsupported_token_kind', message: 'Signed-token resolve is not supported for this interrupt kind.' };
-
-  if (outcome.kind === 'unknown') {
-    sendError(res, 404, 'interrupt_not_found', 'Interrupt resolved or missing.');
-    return;
-  }
-  if (outcome.kind === 'expired') {
-    sendError(res, 410, 'interrupt_expired', 'Interrupt has expired.');
-    return;
-  }
-  if (outcome.kind === 'invalid') {
-    sendError(res, outcome.status, outcome.code, outcome.message);
-    return;
-  }
-
-  logAudit(db, {
-    actor: 'callback-token',
-    action: 'interrupt.resolve',
-    target: `${interrupt.run_id}:${interrupt.node_id}`,
-    details: { outcome: outcome.kind, via: 'signed-token' },
+  route('GET', '/.well-known/openwop', false, async (ctx) => {
+    const text = JSON.stringify(discoveryDocument());
+    const etag = etagOf(text);
+    const headers = { ETag: etag, 'Cache-Control': 'public, max-age=60' };
+    if (ifNoneMatch(ctx, etag)) return { status: 304, headers };
+    return { status: 200, body: JSON.parse(text) as unknown, headers };
   });
-  triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
 
-  // For external-event: 'resumed' is the only success outcome.
-  if (outcome.kind === 'resumed') {
-    appendEvent(interrupt.run_id, 'node.resumed', {
-      nodeId: interrupt.node_id,
-      data: { action: outcome.finalAction },
+  // replay.md §The effect-seam manifest — this host's node runtime reaches no outbound effect path.
+  route('GET', '/host/effect-seams', true, async () => ({ status: 200, body: { manifestVersion: '1', host: { name: HOST_NAME, build: hostBuild }, seams: [] } }));
+
+  // ─── 11. Runs ──────────────────────────────────────────────────────────────
+
+  const CREATE_KEYS = new Set(['workflowId', 'inputs', 'residency', 'tenantId', 'scopeId', 'callbackUrl', 'mode', 'evalSuiteRef', 'agentId', 'runSecrets', 'configurable', 'tags', 'metadata']);
+  const CONFIGURABLE_SECTIONS: Record<string, Set<string>> = {
+    run: new Set(['recursionLimit', 'runTimeoutMs', 'maxLoopIterations', 'escalationThreshold']),
+    ai: new Set(['provider', 'model', 'temperature', 'maxTokens', 'credentialRef', 'promptOverrides', 'mockProvider', 'reasoningVerbosity', 'maxRefusals']),
+    distillation: new Set(['tokenBudget']),
+  };
+
+  /** runs.md §Run options — `configurable` is closed, nested and versioned. */
+  const validateConfigurable = (c: unknown): void => {
+    if (c === undefined) return;
+    if (c === null || typeof c !== 'object' || Array.isArray(c)) throw err('validation_error', 'configurable MUST be an object', { path: 'configurable' });
+    const obj = c as Record<string, unknown>;
+    if (obj['version'] !== 1) throw err('validation_error', 'configurable.version is REQUIRED and MUST be 1', { path: 'configurable.version' });
+    for (const [k, v] of Object.entries(obj)) {
+      if (k === 'version') continue;
+      if (k === 'budget') throw err('capability_not_provided', 'this host does not advertise budget', { path: 'configurable.budget' });
+      if (k === 'extensions') { if (v === null || typeof v !== 'object' || Array.isArray(v)) throw err('validation_error', 'configurable.extensions MUST be an object'); continue; }
+      const section = CONFIGURABLE_SECTIONS[k];
+      if (section === undefined) throw err('validation_error', `unknown configurable key ${k}`, { path: `configurable.${k}` });
+      if (v === null || typeof v !== 'object' || Array.isArray(v)) throw err('validation_error', `configurable.${k} MUST be an object`, { path: `configurable.${k}` });
+      for (const inner of Object.keys(v as object)) if (!section.has(inner)) throw err('validation_error', `unknown key ${inner} in configurable.${k}`, { path: `configurable.${k}.${inner}` });
+      const s = v as Record<string, unknown>;
+      if (k === 'ai' && s['provider'] !== undefined) throw err('validation_error', 'ai.provider MUST be in aiProviders.providers; this host advertises none', { path: 'configurable.ai.provider' });
+      if (k === 'ai' && s['temperature'] !== undefined && (typeof s['temperature'] !== 'number' || s['temperature'] < 0 || s['temperature'] > 2)) throw err('validation_error', 'ai.temperature is 0..2', { path: 'configurable.ai.temperature' });
+      const int = (name: string, max: number): void => {
+        const x = s[name];
+        if (x !== undefined && (!Number.isInteger(x) || (x as number) < 1 || (x as number) > max)) throw err('validation_error', `run.${name} is out of range (1..${max})`, { path: `configurable.run.${name}` });
+      };
+      if (k === 'run') { int('recursionLimit', MAX_NODE_EXECUTIONS); int('runTimeoutMs', opts.maxRunDurationMs); }
+    }
+  };
+
+  const validateOptions = (body: Record<string, unknown>): Record<string, unknown> => {
+    validateConfigurable(body['configurable']);
+    const tags = body['tags'];
+    if (tags !== undefined && (!Array.isArray(tags) || tags.length > 100 || !tags.every((t) => typeof t === 'string' && t.length <= 256))) throw err('validation_error', 'tags: at most 100 strings of at most 256 characters', { field: 'tags' });
+    const metadata = body['metadata'];
+    if (metadata !== undefined && (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata))) throw err('validation_error', 'metadata MUST be an object', { field: 'metadata' });
+    const options: Record<string, unknown> = {};
+    if (body['configurable'] !== undefined) options['configurable'] = body['configurable'];
+    if (tags !== undefined) options['tags'] = tags;
+    if (metadata !== undefined) options['metadata'] = metadata;
+    return options;
+  };
+
+  const insertRun = (row: { run_id: string; tenant: string; workflow_id: string; inputs: unknown; options: unknown; owner: Owner; parent_run_id?: string; fork_mode?: string; from_seq?: number; scope_id?: string | null }): RunRow => {
+    const now = nowIso();
+    q.insertRun.run({
+      run_id: row.run_id, tenant: row.tenant, workflow_id: row.workflow_id, status: 'pending',
+      inputs_json: JSON.stringify(row.inputs), options_json: JSON.stringify(row.options), owner_json: JSON.stringify(row.owner),
+      created_at: now, started_at: now, parent_run_id: row.parent_run_id ?? null, fork_mode: row.fork_mode ?? null,
+      from_seq: row.from_seq ?? null, scope_id: row.scope_id ?? null,
     });
-    appendEvent(interrupt.run_id, 'node.completed', { nodeId: interrupt.node_id });
-    const row = loadRun(interrupt.run_id);
-    if (row) {
-      db.prepare("UPDATE runs SET status = 'running', next_node_index = ? WHERE run_id = ?").run(
-        (row.next_node_index ?? 0) + 1,
-        interrupt.run_id,
-      );
-      if (tryClaim(interrupt.run_id)) {
-        void runWorkflow(interrupt.run_id).catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          appendEvent(interrupt.run_id, 'run.failed', { data: { code: 'internal', message } });
-          setRunTerminal(interrupt.run_id, 'failed', { code: 'internal', message });
-        });
-      }
+    return loadRunRow(row.run_id) as RunRow;
+  };
+
+  route('POST', '/runs', true, async (ctx) => withIdempotency(ctx, 'createRun', async () => {
+    const body = await ctx.body();
+    const subject = subjectOf(ctx);
+    for (const k of Object.keys(body)) if (!CREATE_KEYS.has(k)) throw err('validation_error', `unknown key ${k}; the createRun body is closed`, { field: k });
+    if (body['mode'] === 'eval') throw err('capability_not_provided', 'mode: eval needs agents.evalSuite, which this host does not advertise', { capability: 'agents.evalSuite' });
+    if (body['mode'] !== undefined) throw err('validation_error', 'mode MUST be eval when present', { field: 'mode' });
+    const workflowId = body['workflowId'];
+    if (typeof workflowId !== 'string' || !WORKFLOW_ID.test(workflowId)) throw err('validation_error', 'workflowId is REQUIRED', { field: 'workflowId' });
+    if (body['tenantId'] !== undefined && body['tenantId'] !== subject.tenant) throw err('forbidden', 'tenantId MUST be the credential\'s tenant');
+    if (body['callbackUrl'] !== undefined) throw err('validation_error', 'callbackUrl is refused: this host does not advertise interrupt.callbackDelivery', { field: 'callbackUrl' });
+    if (body['runSecrets'] !== undefined) throw err('validation_error', 'runSecrets is refused: this host does not advertise secrets.runSecrets', { field: 'runSecrets' });
+    if (body['inputs'] !== undefined && (body['inputs'] === null || typeof body['inputs'] !== 'object' || Array.isArray(body['inputs']))) throw err('validation_error', 'inputs MUST be an object', { field: 'inputs' });
+    const options = validateOptions(body);
+    const def = workflows.get(workflowId);
+    if (!def) throw err('not_found', `workflow ${workflowId} is not registered on this host`, { workflowId });
+    const scopeId = typeof body['scopeId'] === 'string' ? body['scopeId'] : null;
+    if (ctx.header('openwop-dedup') === 'enforce' && scopeId !== null) {
+      const live = q.activeForScope.get(subject.tenant, scopeId) as { run_id: string } | undefined;
+      if (live) throw err('run_already_active', `a run for scopeId ${scopeId} is active`, { scopeId }, { 'Retry-After': '5' });
     }
-    sendJSON(res, 200, {
-      runId: interrupt.run_id,
-      nodeId: interrupt.node_id,
-      status: 'running',
-    });
-    return;
-  }
-
-  // Unreachable for external-event resolve, but exhaustiveness keeps TS happy.
-  sendError(res, 500, 'internal', 'Unexpected resolve outcome.');
-}
-
-function handleGetWorkflow(req: IncomingMessage, res: ServerResponse, workflowId: string): void {
-  if (!checkAuth(req, res)) return;
-  const wf = workflows.get(workflowId);
-  if (!wf) {
-    sendError(res, 404, 'workflow_not_found', `Unknown workflowId: ${workflowId}`);
-    return;
-  }
-  // Return the full workflow definition as loaded from disk so clients
-  // can pre-flight-validate against any declared configurableSchema
-  // (run-options.md §"Per-workflow configurableSchema").
-  sendJSON(res, 200, wf);
-}
-
-/**
- * Validate a `configurable` overlay against a workflow's optional
- * `configurableSchema` (a JSON Schema 2020-12 fragment). Minimal
- * implementation — supports the subset of JSON Schema the reference
- * fixtures use: `type`, `additionalProperties: false`, `properties.*`,
- * `properties.<k>.type`, `properties.<k>.minimum`, `items.type`.
- * A real host would use Ajv2020.
- */
-function validateConfigurable(
-  schema: Record<string, unknown> | undefined,
-  configurable: unknown,
-): { valid: true } | { valid: false; reason: string } {
-  if (!schema) return { valid: true };
-  if (configurable === undefined || configurable === null) return { valid: true };
-  if (typeof configurable !== 'object') {
-    return { valid: false, reason: 'configurable MUST be an object' };
-  }
-  const obj = configurable as Record<string, unknown>;
-  const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
-  const allowAdditional = schema.additionalProperties !== false;
-
-  for (const [key, val] of Object.entries(obj)) {
-    const propSchema = props[key];
-    if (!propSchema) {
-      if (!allowAdditional) {
-        return {
-          valid: false,
-          reason: `configurable.${key} is not declared in configurableSchema (additionalProperties: false)`,
-        };
-      }
-      continue;
-    }
-    const expectedType = propSchema.type as string | undefined;
-    if (expectedType === 'integer') {
-      if (typeof val !== 'number' || !Number.isInteger(val)) {
-        return { valid: false, reason: `configurable.${key} MUST be an integer` };
-      }
-      if (typeof propSchema.minimum === 'number' && val < propSchema.minimum) {
-        return { valid: false, reason: `configurable.${key} MUST be >= ${propSchema.minimum}` };
-      }
-    } else if (expectedType === 'string') {
-      if (typeof val !== 'string') {
-        return { valid: false, reason: `configurable.${key} MUST be a string` };
-      }
-    } else if (expectedType === 'array') {
-      if (!Array.isArray(val)) {
-        return { valid: false, reason: `configurable.${key} MUST be an array` };
-      }
-      const items = propSchema.items as { type?: string } | undefined;
-      if (items?.type === 'string' && !val.every((v) => typeof v === 'string')) {
-        return { valid: false, reason: `configurable.${key} items MUST all be strings` };
-      }
-    } else if (expectedType === 'object') {
-      if (typeof val !== 'object' || val === null || Array.isArray(val)) {
-        return { valid: false, reason: `configurable.${key} MUST be an object` };
-      }
-    } else if (expectedType === 'number') {
-      if (typeof val !== 'number') {
-        return { valid: false, reason: `configurable.${key} MUST be a number` };
-      }
-    } else if (expectedType === 'boolean') {
-      if (typeof val !== 'boolean') {
-        return { valid: false, reason: `configurable.${key} MUST be a boolean` };
-      }
-    }
-  }
-  return { valid: true };
-}
-
-async function handleRegisterWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!checkAuth(req, res)) return;
-  const bodyText = await readBody(req);
-  let parsed: { url?: unknown; secret?: unknown; eventTypes?: unknown; tenantId?: unknown };
-  try {
-    parsed = bodyText ? (JSON.parse(bodyText) as typeof parsed) : {};
-  } catch {
-    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
-    return;
-  }
-  if (typeof parsed.url !== 'string' || parsed.url.length === 0) {
-    sendError(res, 400, 'validation_error', 'url MUST be a non-empty string.');
-    return;
-  }
-  try {
-    // Validate URL parseable.
-    new URL(parsed.url);
-  } catch {
-    sendError(res, 400, 'validation_error', 'url MUST be a parseable URL.');
-    return;
-  }
-  // webhooks.md §Register + RFC 0093 §A.3 — registration-time tenant-
-  // membership gate: "The caller MUST be a member of the tenant the
-  // subscription will live under." When tenantId is omitted, the
-  // subscription scopes to the caller's own tenant.
-  const callerTenant = callerTenantFor(req) ?? DEFAULT_TENANT_ID;
-  if (parsed.tenantId !== undefined) {
-    if (typeof parsed.tenantId !== 'string' || parsed.tenantId.length === 0) {
-      sendError(res, 400, 'validation_error', 'tenantId MUST be a non-empty string when provided.');
-      return;
-    }
-    if (parsed.tenantId !== callerTenant) {
-      sendError(
-        res,
-        403,
-        'tenant_membership_required',
-        'The caller is not a member of the requested tenant.',
-      );
-      return;
-    }
-  }
-  const tenantId = typeof parsed.tenantId === 'string' ? parsed.tenantId : callerTenant;
-  const eventTypes = Array.isArray(parsed.eventTypes)
-    ? (parsed.eventTypes as string[]).filter((t) => typeof t === 'string')
-    : [];
-  let sub;
-  try {
-    sub = registerWebhook(db, {
-      url: parsed.url,
-      ...(typeof parsed.secret === 'string' ? { secret: parsed.secret } : {}),
-      eventTypes,
-      tenantId,
-    });
-  } catch (err) {
-    if (err instanceof WebhookUrlRejected) {
-      sendError(res, 400, 'webhook_url_rejected', err.reason);
-      return;
-    }
-    throw err;
-  }
-  sendJSON(res, 201, {
-    subscriptionId: sub.subscriptionId,
-    // webhooks.md §Register response — canonical id field. Kept alongside
-    // the host's historical `subscriptionId` alias for compatibility.
-    webhookId: sub.subscriptionId,
-    url: sub.url,
-    secret: sub.secret, // returned once on register, never again
-    eventTypes: sub.eventTypes,
-    createdAt: sub.createdAt,
-    tenantId: sub.tenantId,
-  });
-}
-
-function handleUnregisterWebhook(
-  req: IncomingMessage,
-  res: ServerResponse,
-  subscriptionId: string,
-  url: URL,
-): void {
-  if (!checkAuth(req, res)) return;
-  // webhooks.md §Unregister + RFC 0093 §A.3 — the optional ?tenantId=
-  // names the tenant scope of the delete; the caller MUST be a member.
-  // Reject foreign scopes BEFORE any lookup so no existence information
-  // leaks across tenants. Omitted tenantId scopes to the caller's tenant.
-  const callerTenant = callerTenantFor(req) ?? DEFAULT_TENANT_ID;
-  const requestedTenant = url.searchParams.get('tenantId');
-  if (requestedTenant !== null && requestedTenant !== callerTenant) {
-    sendError(
-      res,
-      403,
-      'tenant_membership_required',
-      'The caller is not a member of the requested tenant.',
-    );
-    return;
-  }
-  const removed = unregisterWebhook(db, subscriptionId, requestedTenant ?? callerTenant);
-  if (!removed) {
-    sendError(res, 404, 'subscription_not_found', `Unknown subscriptionId: ${subscriptionId}`);
-    return;
-  }
-  sendJSON(res, 200, { subscriptionId, unregistered: true });
-}
-
-function handleAuditVerify(req: IncomingMessage, res: ServerResponse, url: URL): void {
-  if (!checkAuth(req, res)) return;
-  const fromSeqRaw = url.searchParams.get('fromSeq');
-  const toSeqRaw = url.searchParams.get('toSeq');
-  const fromSeq = fromSeqRaw === null ? 0 : Number(fromSeqRaw);
-  const toSeq = toSeqRaw === null ? Number.MAX_SAFE_INTEGER : Number(toSeqRaw);
-  if (!Number.isFinite(fromSeq) || !Number.isFinite(toSeq) || fromSeq < 0 || toSeq < 0) {
-    sendError(res, 400, 'validation_error', 'fromSeq and toSeq MUST be non-negative integers.');
-    return;
-  }
-  const result = verifyAuditChain(db, fromSeq, toSeq, auditSigningKey);
-  sendJSON(res, 200, toWireVerifyResult(result));
-}
-
-/**
- * Per-runId cancel mechanics extracted from handleCancelRun so the
- * bulk-cancel handler can call it once per id without duplicating the
- * audit-log + cascade + abort logic. Returns the per-id result the
- * bulk-cancel response surfaces; the single-run handler maps onto
- * either `{ runId, status, alreadyTerminal? }` (200) or
- * `{ runId, status: 'cancelled' }` (200).
- */
-function cancelOneRun(runId: string): { ok: true; status: 'cancelled' | 'cancelling'; alreadyTerminal?: boolean } | { ok: false; error: { code: string; message: string } } {
-  const row = loadRun(runId);
-  if (!row) {
-    return { ok: false, error: { code: 'not_found', message: `Unknown runId: ${runId}` } };
-  }
-  if (row.status === 'cancelled') {
-    // Idempotent re-cancel: already cancelled is a clean ok.
-    return { ok: true, status: 'cancelled', alreadyTerminal: true };
-  }
-  if (row.status === 'completed' || row.status === 'failed') {
-    // Terminal but NOT cancelled — caller can't transition this run.
-    return { ok: false, error: { code: 'run_terminal', message: `Run "${runId}" is already terminal (${row.status}); cannot cancel.` } };
-  }
-  const children = db
-    .prepare(
-      "SELECT run_id FROM runs WHERE parent_run_id = ? AND status NOT IN ('completed','failed','cancelled')",
-    )
-    .all(runId) as Array<{ run_id: string }>;
-  for (const c of children) {
-    cancelRunInternal(c.run_id, 'parent-cancelled');
-  }
-  const isSuspended =
-    row.status === 'waiting-approval' ||
-    row.status === 'waiting-input' ||
-    row.status === 'waiting-external';
-  if (isSuspended) {
-    invalidateInterrupts(db, runId, 'cancelled');
-    appendEvent(runId, 'run.cancelled');
-    setRunTerminal(runId, 'cancelled', null);
-    logAudit(db, {
-      actor: 'tenant:default',
-      action: 'run.cancel',
-      target: runId,
-      details: { priorStatus: row.status, viaSuspended: true, cascadedChildren: children.length },
-    });
-    triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
-    return { ok: true, status: 'cancelled' };
-  }
-  stmts.setCancelRequested.run(runId);
-  logAudit(db, {
-    actor: 'tenant:default',
-    action: 'run.cancel',
-    target: runId,
-    details: { priorStatus: row.status, cascadedChildren: children.length },
-  });
-  triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
-  runningAborters.get(runId)?.abort();
-  return { ok: true, status: 'cancelling' };
-}
-
-async function handleBulkCancel(
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
-  // rest-endpoints.md §"POST /v1/runs:bulk-cancel". Bulk-cancel is a
-  // top-level operation that succeeds (200) as long as the request
-  // reached the host; per-id outcomes are in the `results` array.
-  if (!checkAuth(req, res)) return;
-  const bodyText = await readBody(req);
-  let parsed: { runIds?: unknown; reason?: unknown };
-  try {
-    parsed = JSON.parse(bodyText) as { runIds?: unknown; reason?: unknown };
-  } catch {
-    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
-    return;
-  }
-  if (!Array.isArray(parsed.runIds) || parsed.runIds.length === 0) {
-    sendError(res, 400, 'validation_error', 'runIds MUST be a non-empty array.');
-    return;
-  }
-  const BULK_CANCEL_MAX = 100;
-  if (parsed.runIds.length > BULK_CANCEL_MAX) {
-    sendJSON(res, 400, {
-      error: 'validation_error',
-      message: `runIds carries ${parsed.runIds.length} entries; host-defined cap is ${BULK_CANCEL_MAX}.`,
-      details: { maxRunIds: BULK_CANCEL_MAX, observed: parsed.runIds.length },
-    });
-    return;
-  }
-  if (!parsed.runIds.every((id) => typeof id === 'string' && id.length > 0)) {
-    sendError(res, 400, 'validation_error', 'runIds entries MUST all be non-empty strings.');
-    return;
-  }
-  const runIds = parsed.runIds as string[];
-  const results = runIds.map((id) => {
-    const outcome = cancelOneRun(id);
-    return { runId: id, ...outcome };
-  });
-  sendJSON(res, 200, { results });
-}
-
-async function handleCancelRun(
-  req: IncomingMessage,
-  res: ServerResponse,
-  runId: string,
-): Promise<void> {
-  if (!checkAuth(req, res)) return;
-  await readBody(req);
-
-  const row = loadRun(runId);
-  if (!row) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-  if (row.status === 'completed' || row.status === 'failed' || row.status === 'cancelled') {
-    sendJSON(res, 200, { runId, status: row.status, alreadyTerminal: true });
-    return;
-  }
-
-  // Cascade cancel: invalidate any active children first. The child's
-  // parent's executor poll loop also handles cascade defensively, but
-  // doing it eagerly here means the resulting GET on children shows
-  // terminal 'cancelled' sooner.
-  const children = db
-    .prepare(
-      "SELECT run_id FROM runs WHERE parent_run_id = ? AND status NOT IN ('completed','failed','cancelled')",
-    )
-    .all(runId) as Array<{ run_id: string }>;
-  for (const c of children) {
-    cancelRunInternal(c.run_id, 'parent-cancelled');
-  }
-
-  // If the run is suspended on an interrupt, there's no executor running
-  // to observe a 'cancelling' flip — drive the run directly to cancelled
-  // and invalidate any pending interrupts.
-  const isSuspended =
-    row.status === 'waiting-approval' ||
-    row.status === 'waiting-input' ||
-    row.status === 'waiting-external';
-  if (isSuspended) {
-    invalidateInterrupts(db, runId, 'cancelled');
-    appendEvent(runId, 'run.cancelled');
-    setRunTerminal(runId, 'cancelled', null);
-    logAudit(db, {
-      actor: 'tenant:default',
-      action: 'run.cancel',
-      target: runId,
-      details: { priorStatus: row.status, viaSuspended: true, cascadedChildren: children.length },
-    });
-    triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
-    sendJSON(res, 200, { runId, status: 'cancelled' });
-    return;
-  }
-
-  stmts.setCancelRequested.run(runId);
-  logAudit(db, {
-    actor: 'tenant:default',
-    action: 'run.cancel',
-    target: runId,
-    details: { priorStatus: row.status, cascadedChildren: children.length },
-  });
-  triggerCheckpointIfDue(db, auditSigningKey, AUDIT_OPTS);
-  // If the run is executing in THIS process, abort its in-flight node.
-  // Otherwise the executing process will see the status flip on its
-  // next loadRun() check.
-  runningAborters.get(runId)?.abort();
-
-  sendJSON(res, 200, { runId, status: 'cancelling' });
-}
-
-function handleEventsPoll(
-  req: IncomingMessage,
-  res: ServerResponse,
-  runId: string,
-  url: URL,
-): void {
-  if (!checkAuth(req, res)) return;
-  const row = loadRun(runId);
-  if (!row) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-
-  // version-negotiation.md §"events/poll forward-compat tolerance".
-  // Canonical param is `lastSequence`; `since` accepted for back-compat.
-  // A past-end cursor MUST yield 200 + empty events, never 4xx.
-  // Non-numeric or negative input is a request-shape error → 400, NOT
-  // silently treated as past-end (which would mask client bugs).
-  const lastSeqParam =
-    url.searchParams.get('lastSequence') ?? url.searchParams.get('since');
-  let since = -1;
-  if (lastSeqParam !== null) {
-    const parsed = Number(lastSeqParam);
-    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < -1) {
-      sendError(
-        res,
-        400,
-        'validation_error',
-        'lastSequence (or legacy `since`) MUST be a non-negative integer (or -1 for "from beginning").',
-      );
-      return;
-    }
-    since = parsed;
-  }
-  const rows = stmts.getEventsAfter.all(runId, since) as EventRow[];
-  // Emit BOTH legacy host field names (seq, data) AND canonical
-  // RunEventDoc fields (eventId, sequence, payload) per
-  // schemas/run-event.schema.json §required. Older readers keep
-  // working; conformance scenarios that grep the canonical 6 fields
-  // start passing. eventId derived as `evt-${runId}-${seq}` —
-  // deterministic, unique per run, no separate column needed.
-  const events = rows.map((r) => ({
-    eventId: `evt-${r.run_id}-${r.seq}`,
-    seq: r.seq,
-    sequence: r.seq,
-    runId: r.run_id,
-    type: r.type,
-    nodeId: r.node_id,
-    data: r.data_json !== null ? JSON.parse(r.data_json) : null,
-    payload: r.data_json !== null ? JSON.parse(r.data_json) : null,
-    timestamp: r.timestamp,
-    ...(r.causation_id !== null ? { causationId: r.causation_id } : {}),
+    const inputs: Record<string, unknown> = { ...Object.fromEntries((def.variables ?? []).filter((v) => v.defaultValue !== undefined).map((v) => [v.name, v.defaultValue])), ...((body['inputs'] as Record<string, unknown> | undefined) ?? {}) };
+    for (const v of def.variables ?? []) if (v.required === true && inputs[v.name] === undefined) throw err('validation_error', `input ${v.name} is required by the workflow`, { field: `inputs.${v.name}` });
+    const run = insertRun({ run_id: tenantBound(subject.tenant), tenant: subject.tenant, workflow_id: workflowId, inputs, options, owner: { tenant: subject.tenant, subject: { ...subject } }, scope_id: scopeId });
+    scheduleRun(run.run_id);
+    return { status: 201, body: { runId: wireId(run), status: 'pending', ...links(ctx, run) } };
   }));
-  const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : since;
 
-  sendJSON(res, 200, {
-    runId,
-    events,
-    lastEventSeq: lastSeq,
-    runStatus: row.status,
-    isTerminal:
-      row.status === 'completed' || row.status === 'failed' || row.status === 'cancelled',
-  });
-}
-
-function handleEventsSse(req: IncomingMessage, res: ServerResponse, runId: string): void {
-  if (!checkAuth(req, res)) return;
-  const row = loadRun(runId);
-  if (!row) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-
-  // Validation-gate ordering invariant:
-  //
-  //   1. streamMode validation (this block)
-  //   2. bufferMs validation
-  //   3. Content negotiation (Accept-header dispatch SSE vs JSON)
-  //   4. Last-Event-ID parsing
-  //   5. Response setup + write
-  //
-  // Gates 1-2 MUST run BEFORE the content-negotiation branch so an
-  // invalid streamMode or out-of-range bufferMs returns 400 to
-  // EVERY client — JSON callers included.
-  //
-  // Validate streamMode per stream-modes.md §"Mode selection". Single
-  // mode OR comma-separated subset of {values, updates, messages,
-  // debug}. `values` is exclusive — can't combine with others.
-  // Unknown mode → 400 unsupported_stream_mode + details.supported.
-  // This host doesn't yet *filter* by mode — it returns the full
-  // event stream regardless — but the validation gate is required
-  // by the conformance suite (stream-modes.test.ts +
-  // stream-modes-mixed.test.ts).
-  const SUPPORTED_STREAM_MODES = ['values', 'updates', 'messages', 'debug'];
-  const streamModeRaw = req.url
-    ? new URL(req.url, `http://${req.headers.host ?? 'localhost'}`).searchParams.get('streamMode')
-    : null;
-  if (streamModeRaw !== null && streamModeRaw.length > 0) {
-    const requested = streamModeRaw.split(',').map((s) => s.trim());
-    const unknown = requested.filter((m) => !SUPPORTED_STREAM_MODES.includes(m));
-    const valuesExclusiveViolation = requested.includes('values') && requested.length > 1;
-    if (unknown.length > 0 || valuesExclusiveViolation) {
-      sendJSON(res, 400, {
-        error: 'unsupported_stream_mode',
-        message:
-          unknown.length > 0
-            ? `Unsupported streamMode value(s): ${unknown.join(', ')}`
-            : "'values' streamMode MUST NOT be combined with another mode (state.snapshot semantics need exclusive ownership of the stream).",
-        details: { supported: SUPPORTED_STREAM_MODES, requested },
-      });
-      return;
+  /** RFC 0182 listRuns — newest first; the cursor is MAC'd so a cursor this host did not mint is refused. */
+  const STATUSES = new Set(['pending', 'running', 'paused', 'waiting-approval', 'waiting-input', 'waiting-external', 'completed', 'failed', 'cancelling', 'cancelled']);
+  route('GET', '/runs', true, async (ctx) => {
+    const tenant = subjectOf(ctx).tenant;
+    const sp = ctx.url.searchParams;
+    const limitRaw = sp.get('limit');
+    if (limitRaw !== null && !/^[1-9]\d*$/.test(limitRaw)) throw err('validation_error', 'limit MUST be an integer >= 1', { field: 'limit' });
+    const limit = Math.min(limitRaw === null ? RUN_LIST_MAX_PAGE : Number(limitRaw), RUN_LIST_MAX_PAGE);
+    const where = ['tenant = @tenant'];
+    const args: Record<string, unknown> = { tenant, limit: limit + 1 };
+    const workflowId = sp.get('workflowId');
+    if (workflowId !== null) { if (!WORKFLOW_ID.test(workflowId)) throw err('validation_error', 'workflowId does not match its grammar', { field: 'workflowId' }); where.push('workflow_id = @workflowId'); args['workflowId'] = workflowId; }
+    const status = sp.get('status');
+    if (status !== null) { if (!STATUSES.has(status)) throw err('validation_error', 'status is not a run status', { field: 'status' }); where.push('status = @status'); args['status'] = status; }
+    const cursor = sp.get('cursor');
+    if (cursor !== null) {
+      const [createdAt, runId, mac] = Buffer.from(cursor, 'base64url').toString('utf8').split('|');
+      const expect = createHmac('sha256', cursorSecret).update(`${createdAt}|${runId}`).digest('base64url');
+      if (createdAt === undefined || runId === undefined || mac === undefined || mac.length !== expect.length || !timingSafeEqual(Buffer.from(mac), Buffer.from(expect))) throw err('validation_error', 'the cursor is not one this host minted', { field: 'cursor' });
+      where.push('(COALESCE(created_at, started_at) < @createdAt OR (COALESCE(created_at, started_at) = @createdAt AND run_id < @runId))');
+      args['createdAt'] = createdAt; args['runId'] = runId;
     }
-  }
-
-  // Validate bufferMs per stream-modes.md §"Aggregation hint" —
-  // integer in [0, 5000]. bufferMs > 0: emit `event: batch` SSE
-  // frames whose data is a JSON array of RunEventDocs; force-flush
-  // on terminal so terminal events don't get held back past the
-  // next timer interval.
-  const bufferMsRaw = req.url
-    ? new URL(req.url, `http://${req.headers.host ?? 'localhost'}`).searchParams.get('bufferMs')
-    : null;
-  let bufferMs = 0;
-  if (bufferMsRaw !== null && bufferMsRaw.length > 0) {
-    const parsed = Number(bufferMsRaw);
-    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 5000 || !Number.isInteger(parsed)) {
-      sendJSON(res, 400, {
-        error: 'validation_error',
-        message: 'bufferMs MUST be an integer in [0, 5000].',
-        details: { bufferMs: parsed, min: 0, max: 5000 },
-      });
-      return;
+    const rows = db.prepare(`SELECT * FROM runs WHERE ${where.join(' AND ')} ORDER BY COALESCE(created_at, started_at) DESC, run_id DESC LIMIT @limit`).all(args) as RunRow[];
+    const page = rows.slice(0, limit);
+    const body: Record<string, unknown> = { runs: page.map(snapshot) };
+    const last = page[page.length - 1];
+    if (rows.length > limit && last) {
+      const payload = `${last.created_at ?? last.started_at}|${last.run_id}`;
+      body['nextCursor'] = Buffer.from(`${payload}|${createHmac('sha256', cursorSecret).update(payload).digest('base64url')}`).toString('base64url');
     }
-    bufferMs = parsed;
-  }
-
-  // Content negotiation: Accept: text/event-stream → SSE (canonical);
-  // anything else (e.g., the conformance suite's append-ordering test
-  // hitting /events via plain fetch) → polled JSON, same shape as
-  // /events/poll. See spec/v1/stream-modes.md §"Content negotiation".
-  const acceptHeader = req.headers['accept'];
-  const wantsSse =
-    typeof acceptHeader === 'string' && acceptHeader.includes('text/event-stream');
-  if (!wantsSse) {
-    const events = stmts.getEventsAfter.all(runId, -1) as EventRow[];
-    sendJSON(res, 200, {
-      events: events.map((r) => ({
-        eventId: `evt-${r.run_id}-${r.seq}`,
-        runId: r.run_id,
-        seq: r.seq,
-        sequence: r.seq,
-        type: r.type,
-        nodeId: r.node_id,
-        data: r.data_json !== null ? JSON.parse(r.data_json) : null,
-        payload: r.data_json !== null ? JSON.parse(r.data_json) : null,
-        timestamp: r.timestamp,
-        ...(r.causation_id !== null ? { causationId: r.causation_id } : {}),
-      })),
-    });
-    return;
-  }
-
-  // Per spec/v1/stream-modes.md §"Reconnection": Last-Event-ID signals
-  // a resumption — replay only events with seq > lastEventId.
-  const lastEventIdHeader = req.headers['last-event-id'];
-  let resumeAfterSeq = -1;
-  if (typeof lastEventIdHeader === 'string') {
-    const parsed = Number(lastEventIdHeader);
-    if (Number.isFinite(parsed)) resumeAfterSeq = parsed;
-  }
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
+    return { status: 200, body };
   });
 
-  const canonicalizeEvent = (event: RunEvent): Record<string, unknown> => ({
-    eventId: `evt-${event.runId}-${event.seq}`,
-    runId: event.runId,
-    seq: event.seq,
-    sequence: event.seq,
-    type: event.type,
-    nodeId: event.nodeId,
-    data: event.data,
-    payload: event.data,
-    timestamp: event.timestamp,
+  route('GET', '/runs/{runId}', true, async (ctx) => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const etag = `"seq-${lastSequence(run.run_id)}-${run.status}"`;
+    if (ifNoneMatch(ctx, etag)) return { status: 304, headers: { ETag: etag } };
+    return { status: 200, body: snapshot(run), headers: { ETag: etag } };
   });
 
-  // Batched delivery state (bufferMs > 0). Flushes on timer interval
-  // OR on terminal event (force-flush rule).
-  let batchBuffer: RunEvent[] = [];
-  let batchTimer: NodeJS.Timeout | null = null;
-  const flushBatch = (): void => {
-    if (batchBuffer.length === 0) return;
-    const items = batchBuffer.map(canonicalizeEvent);
-    res.write(`event: batch\n`);
-    res.write(`data: ${JSON.stringify(items)}\n\n`);
-    batchBuffer = [];
-  };
-  if (bufferMs > 0) {
-    batchTimer = setInterval(flushBatch, bufferMs);
-    batchTimer.unref?.();
-  }
+  // events.md §Poll — `afterSequence` is an exclusive cursor; long-polls up to `timeout` seconds.
+  route('GET', '/runs/{runId}/events/poll', true, async (ctx) => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const rawAfter = ctx.url.searchParams.get('afterSequence');
+    if (rawAfter !== null && !/^(0|[1-9]\d*)$/.test(rawAfter)) throw err('validation_error', 'afterSequence MUST be an integer >= 0', { field: 'afterSequence' });
+    const rawTimeout = ctx.url.searchParams.get('timeout');
+    const timeout = rawTimeout === null ? 30 : Number(rawTimeout);
+    if (!Number.isInteger(timeout) || timeout < 1 || timeout > 60) throw err('validation_error', 'timeout is 1..60 seconds', { field: 'timeout' });
+    const after = rawAfter === null ? -1 : Number(rawAfter);
+    const until = Date.now() + timeout * 1000;
+    let events = readEvents(run, after);
+    let fresh = loadRunRow(run.run_id) as RunRow;
+    while (events.length === 0 && !TERMINAL.has(fresh.status) && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 100));
+      events = readEvents(run, after);
+      fresh = loadRunRow(run.run_id) as RunRow;
+    }
+    return { status: 200, body: { runId: wireId(run), events, lastSequence: lastSequence(run.run_id), status: fresh.status, isTerminal: TERMINAL.has(fresh.status) } };
+  });
 
-  const writeEvent = (event: RunEvent): void => {
-    if (bufferMs > 0) {
-      batchBuffer.push(event);
-      if (
-        event.type === 'run.completed' ||
-        event.type === 'run.failed' ||
-        event.type === 'run.cancelled'
-      ) {
-        flushBatch();
+  /**
+   * events.md §SSE frames — `id:` is the sequence, `event:` the type (single
+   * mode) or the admitting mode (mixed), `data:` the RunEventDoc. The tail
+   * reads the durable log, so an event another process appends reaches the
+   * stream too; the in-process bus only wakes it sooner.
+   */
+  route('GET', '/runs/{runId}/events', true, async (ctx) => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const modes = parseStreamModes(ctx.url.searchParams.get('streamMode'));
+    const lastRaw = ctx.header('last-event-id');
+    if (lastRaw !== null && !/^(0|[1-9]\d*)$/.test(lastRaw.trim())) throw err('validation_error', 'Last-Event-ID MUST be a non-negative integer', { header: 'Last-Event-ID' });
+    const bufferRaw = ctx.url.searchParams.get('bufferMs');
+    const bufferMs = bufferRaw === null ? 0 : Number(bufferRaw);
+    if (!Number.isInteger(bufferMs) || bufferMs < 0 || bufferMs > 5000) throw err('validation_error', 'bufferMs is 0..5000', { field: 'bufferMs' });
+    let delivered = lastRaw === null ? -1 : Number(lastRaw.trim());
+    const backlog = readEvents(run, delivered);
+    const res = ctx.res;
+    res.writeHead(200, { 'OpenWOP-Version': PROTOCOL_VERSION, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    let closed = false;
+    let batch: RunEventDoc[] = [];
+    const frame = (id: number, event: string, data: unknown): void => { if (!closed) res.write(`id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+    const flush = (): void => { if (batch.length > 0) { frame((batch[batch.length - 1] as RunEventDoc).sequence, 'batch', batch); batch = []; } };
+    const values = modes.includes('values');
+    const isTerminalEvent = (t: string): boolean => t === 'run.completed' || t === 'run.failed' || t === 'run.cancelled';
+    const end = (): void => {
+      if (closed) return;
+      flush();
+      closed = true;
+      clearInterval(keepAlive);
+      clearInterval(tail);
+      bus.off(`run:${run.run_id}`, wake);
+      res.end();
+    };
+    const emit = (doc: RunEventDoc): void => {
+      delivered = doc.sequence;
+      const mode = admittedBy(modes, doc.type);
+      if (mode !== null) {
+        if (bufferMs > 0) { batch.push(doc); if (doc.type === 'node.suspended' || isTerminalEvent(doc.type)) flush(); }
+        else frame(doc.sequence, modes.length === 1 ? doc.type : mode, doc);
+        if (values && mode === 'values') frame(doc.sequence, 'state.snapshot', snapshot(loadRunRow(run.run_id) as RunRow));
       }
-      return;
-    }
-    const canonical = canonicalizeEvent(event);
-    res.write(`id: ${event.seq}\n`);
-    res.write(`event: ${event.type}\n`);
-    res.write(`data: ${JSON.stringify(canonical)}\n\n`);
-  };
-
-  const closeStream = (): void => {
-    if (batchTimer) {
-      clearInterval(batchTimer);
-      batchTimer = null;
-    }
-    flushBatch();
-    res.end();
-  };
-
-  const backlog = stmts.getEventsAfter.all(runId, resumeAfterSeq) as EventRow[];
-  for (const r of backlog) {
-    writeEvent({
-      seq: r.seq,
-      runId: r.run_id,
-      type: r.type,
-      nodeId: r.node_id,
-      data: r.data_json !== null ? JSON.parse(r.data_json) : null,
-      timestamp: r.timestamp,
-      ...(r.causation_id !== null ? { causationId: r.causation_id } : {}),
-    });
-  }
-
-  if (row.status === 'completed' || row.status === 'failed' || row.status === 'cancelled') {
-    closeStream();
-    return;
-  }
-
-  const onEvent = (event: RunEvent): void => {
-    writeEvent(event);
-    if (
-      event.type === 'run.completed' ||
-      event.type === 'run.failed' ||
-      event.type === 'run.cancelled'
-    ) {
-      eventBus.off(`events:${runId}`, onEvent);
-      closeStream();
-    }
-  };
-  eventBus.on(`events:${runId}`, onEvent);
-
-  req.on('close', () => {
-    eventBus.off(`events:${runId}`, onEvent);
-    if (batchTimer) {
-      clearInterval(batchTimer);
-      batchTimer = null;
-    }
+      if (isTerminalEvent(doc.type)) end();
+    };
+    const pump = (): void => {
+      if (closed) return;
+      for (const doc of readEvents(run, delivered)) { emit(doc); if (closed) return; }
+      if (bufferMs > 0) flush();
+      if (TERMINAL.has((loadRunRow(run.run_id) as RunRow).status)) end();
+    };
+    const wake = (): void => { setImmediate(pump); };
+    const keepAlive = setInterval(() => { if (!closed) res.write(': keep-alive\n\n'); }, 15_000);
+    const tail = setInterval(pump, bufferMs > 0 ? bufferMs : 250);
+    res.on('close', end);
+    if (values && lastRaw !== null) frame(delivered, 'state.snapshot', snapshot(run));
+    for (const doc of backlog) { emit(doc); if (closed) return 'streamed'; }
+    if (bufferMs > 0) flush();
+    if (TERMINAL.has((loadRunRow(run.run_id) as RunRow).status)) { end(); return 'streamed'; }
+    bus.on(`run:${run.run_id}`, wake);
+    return 'streamed';
   });
-}
 
-function handleDebugBundle(req: IncomingMessage, res: ServerResponse, runId: string, url: URL): void {
-  if (!checkAuth(req, res)) return;
-  const row = loadRun(runId);
-  if (!row) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-  const events = stmts.getEventsAfter.all(runId, -1) as EventRow[];
-
-  // Truncation cap (debug-bundle.md §"Bundle size limits"). Default 8MB
-  // wire size; the host MAY also accept a `?maxEvents=N` host-implementation
-  // override for deterministic-truncation conformance tests.
-  const totalEvents = events.length;
-  const maxEventsParam = url.searchParams.get('maxEvents');
-  const maxEvents = maxEventsParam !== null && Number.isFinite(Number(maxEventsParam))
-    ? Math.max(0, Number(maxEventsParam))
-    : Number.POSITIVE_INFINITY;
-
-  const keepEvents = Math.min(totalEvents, maxEvents);
-  let truncated = keepEvents < totalEvents;
-  let truncatedReason: string | undefined = truncated ? 'events_truncated_to_max_events' : undefined;
-  const eventSlice = events.slice(0, keepEvents);
-
-  const baseBundle: Record<string, unknown> = {
-    bundleVersion: '1',
-    generatedAt: new Date().toISOString(),
-    host: { name: 'openwop-host-sqlite', version: '1.1.7', vendor: 'openwop-spec (reference example)' },
-    run: {
-      runId: row.run_id,
-      workflowId: row.workflow_id,
-      status: row.status,
-      inputs: {}, // omitted per spec/v1/debug-bundle.md §"Redaction guarantees"
-      startedAt: row.started_at,
-      endedAt: row.ended_at,
-      ...(row.error_json ? { error: JSON.parse(row.error_json) } : {}),
-      variables: {},
-    },
-    events: eventSlice.map((r) => ({
-      sequence: r.seq,
-      type: r.type,
-      timestamp: r.timestamp,
-      nodeId: r.node_id,
-      data: r.data_json !== null ? JSON.parse(r.data_json) : null,
-      ...(r.causation_id !== null ? { causationId: r.causation_id } : {}),
-    })),
-    spans: [] as unknown[],
-    metrics: {
-      nodeCount: new Set(events.filter((e) => e.node_id !== null).map((e) => e.node_id)).size,
-      eventCount: totalEvents,
-    },
-    redactionApplied: true,
-    redactionMode: 'omit' as const,
-  };
-
-  // 8MB byte cap. If the JSON-encoded bundle exceeds it, trim from the
-  // back of the event list until it fits.
-  const SIZE_CAP_BYTES = Number(process.env.OPENWOP_DEBUG_BUNDLE_BYTE_CAP ?? 8 * 1024 * 1024);
-  let serialized = JSON.stringify(baseBundle);
-  while (
-    Buffer.byteLength(serialized, 'utf8') > SIZE_CAP_BYTES &&
-    Array.isArray(baseBundle.events) &&
-    (baseBundle.events as unknown[]).length > 0
-  ) {
-    (baseBundle.events as unknown[]).pop();
-    truncated = true;
-    truncatedReason = 'events_truncated_to_size_cap';
-    serialized = JSON.stringify(baseBundle);
-  }
-
-  if (truncated) {
-    baseBundle.truncated = true;
-    baseBundle.truncatedReason = truncatedReason;
-  }
-  sendJSON(res, 200, baseBundle, { 'Cache-Control': 'no-store' });
-}
-
-// ─── RFC 0056 run feedback / annotations ─────────────────────────────────────
-
-// Secret-shaped redaction for untrusted annotation free-text (SR-1, RFC 0056
-// §E + SECURITY invariant `annotation-content-redaction`). Mirrors the
-// in-memory reference's pattern set so cross-host behavior is identical.
-const ANNOTATION_SECRET_SHAPED = [
-  /\bsk-[A-Za-z0-9_-]{6,}/g, // OpenAI-style `sk-` keys
-  /\b(?:AKIA|ASIA)[A-Z0-9]{12,}/g, // AWS access key IDs
-  /\bxox[baprs]-[A-Za-z0-9-]{8,}/g, // Slack tokens
-  /\bgh[pousr]_[A-Za-z0-9]{16,}/g, // GitHub tokens
-  /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWTs
-];
-function scrubAnnotationText(value: string): string {
-  let out = value;
-  for (const re of ANNOTATION_SECRET_SHAPED) out = out.replace(re, '[redacted]');
-  return out;
-}
-
-async function handleCreateAnnotation(req: IncomingMessage, res: ServerResponse, runId: string): Promise<void> {
-  if (!checkAuth(req, res)) return;
-  if (!loadRun(runId)) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-  const bodyText = await readBody(req);
-  let body: { signal?: Record<string, unknown>; target?: { eventId?: unknown; nodeId?: unknown }; note?: unknown };
-  try {
-    body = JSON.parse(bodyText) as typeof body;
-  } catch {
-    sendError(res, 400, 'validation_error', 'Request body MUST be valid JSON.');
-    return;
-  }
-  const signal = body.signal;
-  if (typeof signal !== 'object' || signal === null || Array.isArray(signal)) {
-    sendError(res, 400, 'validation_error', 'signal: object is required.');
-    return;
-  }
-  const kind = signal['kind'];
-  if (kind !== 'rating' && kind !== 'correction' && kind !== 'label' && kind !== 'flag') {
-    sendError(res, 400, 'validation_error', 'signal.kind MUST be one of rating|correction|label|flag.');
-    return;
-  }
-  const rating = signal['rating'];
-  if (kind === 'rating' && (typeof rating !== 'number' || !Number.isInteger(rating) || rating < 1 || rating > 5)) {
-    sendError(res, 400, 'validation_error', 'signal.rating: integer 1..5 is required when kind is rating.');
-    return;
-  }
-  if (kind === 'label' && typeof signal['label'] !== 'string') {
-    sendError(res, 400, 'validation_error', 'signal.label: string is required when kind is label.');
-    return;
-  }
-  if (kind === 'correction' && typeof signal['correction'] !== 'string') {
-    sendError(res, 400, 'validation_error', 'signal.correction: string is required when kind is correction.');
-    return;
-  }
-  // annotation.schema.json declares signal with additionalProperties:false —
-  // reject unknown keys rather than persist an un-scrubbed extra field.
-  const ALLOWED_SIGNAL_KEYS = new Set(['kind', 'rating', 'label', 'correction']);
-  for (const key of Object.keys(signal)) {
-    if (!ALLOWED_SIGNAL_KEYS.has(key)) {
-      sendError(res, 400, 'validation_error', `signal.${key}: unknown field (signal allows kind|rating|label|correction).`);
-      return;
-    }
-  }
-  // SR-1: scrub EVERY string-valued signal field + note before persistence.
-  const storedSignal: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(signal)) {
-    storedSignal[key] = typeof value === 'string' ? scrubAnnotationText(value) : value;
-  }
-  const annotation = {
-    annotationId: `ann-${randomUUID()}`,
-    target: {
-      runId,
-      ...(typeof body.target?.eventId === 'string' ? { eventId: body.target.eventId } : {}),
-      ...(typeof body.target?.nodeId === 'string' ? { nodeId: body.target.nodeId } : {}),
-    },
-    signal: storedSignal,
-    // Single-API-key host: opaque principal ref, never the credential itself.
-    actor: { principalRef: 'apikey:sqlite' },
-    ...(typeof body.note === 'string' ? { note: scrubAnnotationText(body.note) } : {}),
-    createdAt: new Date().toISOString(),
-  };
-  db.prepare('INSERT INTO annotations (annotation_id, run_id, data_json, created_at) VALUES (?, ?, ?, ?)').run(
-    annotation.annotationId,
-    runId,
-    JSON.stringify(annotation),
-    annotation.createdAt,
-  );
-  sendJSON(res, 201, annotation);
-}
-
-function handleListAnnotations(req: IncomingMessage, res: ServerResponse, runId: string): void {
-  if (!checkAuth(req, res)) return;
-  if (!loadRun(runId)) {
-    sendError(res, 404, 'run_not_found', `Unknown runId: ${runId}`);
-    return;
-  }
-  // Run-scoped query → inherently isolated to this run (RFC 0056 §E / CTI-1).
-  const rows = db
-    .prepare('SELECT data_json FROM annotations WHERE run_id = ? ORDER BY created_at ASC, annotation_id ASC')
-    .all(runId) as Array<{ data_json: string }>;
-  sendJSON(res, 200, { annotations: rows.map((r) => JSON.parse(r.data_json) as unknown) });
-}
-
-// ─── Router ──────────────────────────────────────────────────────────────────
-
-const RUN_ANNOTATIONS_PATTERN = /^\/v1\/runs\/([^/]+)\/annotations$/; // RFC 0056
-const RUN_ID_PATTERN = /^\/v1\/runs\/([^/]+)$/;
-const RUN_CANCEL_PATTERN = /^\/v1\/runs\/([^/]+)\/cancel$/;
-const RUN_EVENTS_POLL_PATTERN = /^\/v1\/runs\/([^/]+)\/events\/poll$/;
-const RUN_EVENTS_SSE_PATTERN = /^\/v1\/runs\/([^/]+)\/events$/;
-const RUN_DEBUG_BUNDLE_PATTERN = /^\/v1\/runs\/([^/]+)\/debug-bundle$/;
-const RUN_INTERRUPT_PATTERN = /^\/v1\/runs\/([^/]+)\/interrupts\/([^/]+)$/;
-const RUN_ARTIFACT_PATTERN = /^\/v1\/runs\/([^/]+)\/artifacts\/([^/]+)$/;
-const INTERRUPT_TOKEN_PATTERN = /^\/v1\/interrupts\/([^/]+)$/;
-const WORKFLOW_ID_PATTERN = /^\/v1\/workflows\/([^/]+)$/;
-const WEBHOOK_ID_PATTERN = /^\/v1\/webhooks\/([^/]+)$/;
-
-// rest-endpoints.md §"429 Too Many Requests envelope". Deterministic
-// 429-induction harness gated on OPENWOP_FORCE_RATE_LIMIT=true. When
-// enabled, the host fabricates a 429 against every Nth request so the
-// conformance scenario can reliably assert the envelope shape under CI.
-// The induction MUST be visible only on test-only keys (any API key in
-// this reference host) and MUST emit the canonical envelope.
-const FORCE_RATE_LIMIT = process.env.OPENWOP_FORCE_RATE_LIMIT === 'true';
-let forceRateLimitCounter = 0;
-
-function maybeForceRateLimit(req: IncomingMessage, res: ServerResponse, path: string): boolean {
-  if (!FORCE_RATE_LIMIT) return false;
-  // Skip the discovery endpoint's FIRST hit so the conformance harness
-  // can complete its discovery probe; trip on the next probe.
-  forceRateLimitCounter += 1;
-  if (forceRateLimitCounter < 2) return false;
-  // Trip every other request after the warm-up so the burst in
-  // rate-limit-envelope.test.ts hits within its 50-call window.
-  if (forceRateLimitCounter % 2 !== 0) return false;
-  const retryAfterMs = 5_000;
-  res.writeHead(429, {
-    'Content-Type': 'application/json',
-    'Retry-After': '5',
-  });
-  res.end(JSON.stringify({
-    error: 'rate_limited',
-    message: `Rate limit exceeded for ${path} (forced by OPENWOP_FORCE_RATE_LIMIT).`,
-    details: {
-      retryAfterMs,
-      scope: 'route',
-      limit: 50,
-      observedRate: 51,
-    },
+  route('POST', '/runs/{runId}/cancel', true, async (ctx) => withIdempotency(ctx, 'cancelRun', async () => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const body = await ctx.body();
+    const reason = typeof body['reason'] === 'string' ? body['reason'] : 'caller-requested';
+    return { status: 200, body: { runId: wireId(run), status: requestCancel(run, reason) } };
   }));
-  return true;
-}
 
-async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  const path = url.pathname;
-  const method = req.method ?? 'GET';
+  route('POST', '/runs:bulk-cancel', true, async (ctx) => withIdempotency(ctx, 'bulkCancelRuns', async () => {
+    const body = await ctx.body();
+    for (const k of Object.keys(body)) if (k !== 'runIds' && k !== 'reason') throw err('validation_error', `unknown key ${k}`, { field: k });
+    const ids = body['runIds'];
+    if (!Array.isArray(ids) || ids.length === 0) throw err('validation_error', 'runIds MUST be a non-empty array', { field: 'runIds', maxRunIds: 100 });
+    if (ids.length > 100) throw err('validation_error', 'runIds exceeds the host cap', { maxRunIds: 100 });
+    const reason = typeof body['reason'] === 'string' ? body['reason'] : 'caller-requested';
+    const results = ids.map((id) => {
+      try {
+        if (typeof id !== 'string') throw err('validation_error', 'a runId MUST be a string');
+        const run = runFor(subjectOf(ctx), unprojectBoundId(id));
+        return { runId: id, ok: true, status: requestCancel(run, reason) };
+      } catch (e) {
+        const he = e instanceof HostError ? e : err('internal_error', 'the cancel failed');
+        return { runId: typeof id === 'string' && id !== '' ? id : '?', ok: false, error: he.body() };
+      }
+    });
+    return { status: 200, body: { results } };
+  }));
 
-  if (maybeForceRateLimit(req, res, path)) return;
-
-  if (method === 'GET' && path === '/.well-known/openwop') return handleDiscovery(req, res);
-  if (method === 'GET' && path === '/v1/openapi.json') return handleOpenApi(req, res);
-  if (method === 'GET' && path === '/v1/audit/verify') return handleAuditVerify(req, res, url);
-  if (method === 'POST' && path === '/v1/runs') return handleCreateRun(req, res);
-  if (method === 'POST' && path === '/v1/runs:bulk-cancel') return handleBulkCancel(req, res);
-  if (method === 'POST' && path === '/v1/webhooks') return handleRegisterWebhook(req, res);
-  let mw = WORKFLOW_ID_PATTERN.exec(path);
-  if (mw && method === 'GET') return handleGetWorkflow(req, res, decodeURIComponent(mw[1]!));
-  mw = WEBHOOK_ID_PATTERN.exec(path);
-  if (mw && method === 'DELETE') return handleUnregisterWebhook(req, res, decodeURIComponent(mw[1]!), url);
-
-  let m = RUN_EVENTS_POLL_PATTERN.exec(path);
-  if (m && method === 'GET') return handleEventsPoll(req, res, m[1]!, url);
-  m = RUN_EVENTS_SSE_PATTERN.exec(path);
-  if (m && method === 'GET') return handleEventsSse(req, res, m[1]!);
-  m = RUN_DEBUG_BUNDLE_PATTERN.exec(path);
-  if (m && method === 'GET') return handleDebugBundle(req, res, m[1]!, url);
-  m = RUN_ANNOTATIONS_PATTERN.exec(path); // RFC 0056 — run feedback
-  if (m && method === 'POST') return handleCreateAnnotation(req, res, m[1]!);
-  if (m && method === 'GET') return handleListAnnotations(req, res, m[1]!);
-  m = RUN_CANCEL_PATTERN.exec(path);
-  if (m && method === 'POST') return handleCancelRun(req, res, m[1]!);
-  m = RUN_INTERRUPT_PATTERN.exec(path);
-  if (m && method === 'POST') return handleResolveInterrupt(req, res, m[1]!, decodeURIComponent(m[2]!));
-  m = INTERRUPT_TOKEN_PATTERN.exec(path);
-  if (m && method === 'POST')
-    return handleResolveInterruptByToken(req, res, decodeURIComponent(m[1]!));
-  m = RUN_ID_PATTERN.exec(path);
-  if (m && method === 'GET') return handleGetRun(req, res, m[1]!);
-
-  // The host does NOT operate a pack registry. The spec allows hosts
-  // to omit the entire /v1/packs/* namespace; the conformance suite's
-  // pack-registry tests probe for "registry presence" via GET
-  // /v1/packs/-/search and treat any JSON body with `error` or
-  // `results` as "registry mounted." A plain-text 404 (no JSON
-  // envelope) signals "no registry here" and lets the probe short-
-  // circuit; the 3 pack-registry scenarios then trivially-pass via
-  // their early `if (!probe.registryPresent) return;` guard. Mirror
-  // of the Postgres host's catch-all.
-  if (path.startsWith('/v1/packs/')) {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('This host does not operate a pack registry.');
-    return;
-  }
-
-  // Artifact endpoint stub. The host doesn't implement artifact
-  // storage end-to-end, but the route MUST 401 on missing auth before
-  // 404'ing on missing resource — per `artifact-auth` scenario and
-  // `auth.md §"Error envelope"`. Without this stub, the catch-all
-  // 404 below would respond before any auth check, letting an
-  // unauthenticated caller probe whether a runId/artifactId pair
-  // exists (info-leak). Match ANY method: checkAuth runs first
-  // (401s internally on missing/invalid Bearer); then 405 for
-  // non-GET methods (per `rest-endpoints.md §getArtifact` —
-  // artifact endpoint advertises GET only); then 404 on GET since
-  // the host has no artifact storage to look up.
-  m = RUN_ARTIFACT_PATTERN.exec(path);
-  if (m) {
-    if (!checkAuth(req, res)) return;
-    if (method !== 'GET') {
-      sendError(
-        res,
-        405,
-        'method_not_allowed',
-        `Artifact endpoint accepts GET only; received ${method}.`,
-      );
-      return;
+  route('POST', '/runs/{runId}:pause', true, async (ctx) => withIdempotency(ctx, 'pauseRun', async () => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const body = await ctx.body();
+    const drainPolicy = body['drainPolicy'] ?? 'drain-current-node';
+    if (drainPolicy !== 'immediate' && drainPolicy !== 'drain-current-node') throw err('validation_error', 'drainPolicy is immediate | drain-current-node', { field: 'drainPolicy' });
+    if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be paused`, { runStatus: run.status });
+    if ((run.status !== 'running' && run.status !== 'pending') || run.pause_requested !== null) throw err('run_state_conflict', `a run in status ${run.status} cannot be paused${run.pause_requested !== null ? ' (a pause is already pending)' : ''}`, { runStatus: run.status });
+    const reason = typeof body['reason'] === 'string' ? body['reason'] : 'operator';
+    const executing = active.has(run.run_id) || claimedElsewhere(run);
+    if (executing && drainPolicy === 'drain-current-node') {
+      // The executing process pauses the run when the current node reaches its terminal.
+      update(run.run_id, { pause_requested: drainPolicy });
+      return { status: 202, body: { runId: wireId(run), status: 'paused' } };
     }
-    sendError(
-      res,
-      404,
-      'not_found',
-      `artifact '${decodeURIComponent(m[2]!)}' not found on run '${decodeURIComponent(m[1]!)}'`,
-    );
-    return;
-  }
-
-  sendError(res, 404, 'not_found', `No route for ${method} ${path}`);
-}
-
-/**
- * Scan for orphaned runs at startup. Per spec/v1/scale-profiles.md
- * §"Replay semantics": when a process holding a claim dies
- * without releasing it, the claim expires after CLAIM_TTL_MS. Another
- * process restarting the host then picks up these orphans and resumes
- * execution.
- *
- * Orphan = status IN ('pending', 'running') AND
- *          (claim_holder_id IS NULL OR claim_expires_at < now).
- */
-const findOrphansStmt = db.prepare(`
-  SELECT run_id FROM runs
-  WHERE status IN ('pending', 'running', 'cancelling')
-    AND (claim_holder_id IS NULL OR claim_expires_at < ?)
-`);
-
-function resumeOrphans(): void {
-  const now = Date.now();
-  const rows = findOrphansStmt.all(now) as Array<{ run_id: string }>;
-  if (rows.length === 0) return;
-
-  let claimed = 0;
-  for (const { run_id: runId } of rows) {
-    if (tryClaim(runId)) {
-      claimed++;
-      void runWorkflow(runId).catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        const error = { code: 'internal', message };
-        appendEvent(runId, 'run.failed', { data: error });
-        setRunTerminal(runId, 'failed', error);
-      });
+    // Nothing executing, or `immediate`: the pause is recorded here and now. An
+    // executing attempt is cut between events (no terminal node event for it);
+    // the loop, in whichever process holds the claim, sees `paused` and stops.
+    const payload: Record<string, unknown> = { reason, drainPolicy };
+    if (executing) {
+      let open: { nodeId: string; attempt: number } | null = null;
+      for (const e of readEvents(run)) {
+        const n = e.nodeId;
+        if (e.type === 'node.started' && n !== undefined) open = { nodeId: n, attempt: Number((e.payload as { attempt?: unknown }).attempt ?? 0) + 1 };
+        if ((e.type === 'node.completed' || e.type === 'node.failed' || e.type === 'node.suspended' || e.type === 'node.cancelled') && n === open?.nodeId) open = null;
+      }
+      if (open !== null) { payload['interruptedNodeId'] = open.nodeId; payload['interruptedAttempt'] = open.attempt; }
     }
-  }
-  if (claimed > 0) {
-    console.log(
-      `[openwop-host-sqlite] resume-on-startup: claimed ${claimed} of ${rows.length} orphaned run(s)`,
-    );
-  }
-}
+    appendEvent(run, 'run.paused', payload);
+    update(run.run_id, { status: 'paused', pause_requested: null });
+    return { status: 202, body: { runId: wireId(run), status: 'paused', pausedAt: nowIso() } };
+  }));
 
-// ─── Bootstrap ───────────────────────────────────────────────────────────────
+  route('POST', '/runs/{runId}:resume', true, async (ctx) => withIdempotency(ctx, 'resumeRun', async () => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const body = await ctx.body();
+    if (TERMINAL.has(run.status)) throw err('run_terminal', `a ${run.status} run cannot be resumed`, { runStatus: run.status });
+    if (run.status !== 'paused') throw err('run_state_conflict', `a run in status ${run.status} is not paused`, { runStatus: run.status });
+    appendEvent(run, 'run.resumed', typeof body['reason'] === 'string' ? { reason: body['reason'] } : {});
+    update(run.run_id, { status: 'running' });
+    scheduleRun(run.run_id);
+    return { status: 202, body: { runId: wireId(run), status: 'running', resumedAt: nowIso() } };
+  }));
 
-loadFixtures();
-resumeOrphans();
-
-// Boot audit entry + initial checkpoint so a fresh host has at least one
-// signed anchor when conformance hits /v1/audit/verify with no prior runs.
-logAudit(db, {
-  actor: 'system',
-  action: 'host.started',
-  target: PROCESS_ID,
-  details: { dbPath: DB_PATH, fixtures: workflows.size },
-});
-// Force a checkpoint on boot regardless of interval thresholds so the
-// verify endpoint has at least one signed checkpoint to return.
-createCheckpoint(db, auditSigningKey);
-
-// OTel metric loop — no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
-startMetricLoop(db);
-
-const server = createServer((req, res) => {
-  void route(req, res).catch((err: unknown) => {
-    // The full error (with stack) is logged here; the client gets only the
-    // error code and a generic message, so internal detail never leaves the host.
-    console.error('[openwop-host-sqlite] unhandled error while routing a request:', err);
-    if (!res.headersSent) sendError(res, 500, 'internal', 'Internal server error.');
-    else res.end();
+  // idempotency.md §Witness — no node executor here performs an external effect, so the ledger is empty.
+  route('GET', '/runs/{runId}/effects', true, async (ctx) => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    return { status: 200, body: { runId: wireId(run), effects: [] } };
   });
-});
 
-server.listen(PORT, HOST, () => {
-  console.log(
-    `[openwop-host-sqlite] listening on http://${HOST}:${PORT} (api key: ${API_KEY_SOURCE}, db: ${DB_PATH}, processId: ${PROCESS_ID}, ${workflows.size} fixtures)`,
-  );
-});
+  /**
+   * replay.md — events `< fromSeq` are copied as fixed history (read through the
+   * storage boundary, so an era-2 parent is copied translated); the child then
+   * re-executes. A replay keys its interrupts on its source and takes the
+   * source's recorded resolution; a branch is an independent run.
+   */
+  route('POST', '/runs/{runId}:fork', true, async (ctx) => withIdempotency(ctx, 'forkRun', async () => {
+    const source = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const body = await ctx.body();
+    for (const k of Object.keys(body)) if (k !== 'mode' && k !== 'fromSeq' && k !== 'runOptionsOverlay') throw err('validation_error', `unknown key ${k}`, { field: k });
+    const mode = body['mode'];
+    if (mode !== 'replay' && mode !== 'branch') throw err('validation_error', 'mode is replay | branch', { field: 'mode' });
+    const rawFrom = body['fromSeq'];
+    if (rawFrom === undefined && mode === 'branch') throw err('validation_error', 'fromSeq is REQUIRED for branch', { field: 'fromSeq' });
+    if (rawFrom !== undefined && (!Number.isInteger(rawFrom) || (rawFrom as number) < 0)) throw err('validation_error', 'fromSeq MUST be an integer >= 0', { field: 'fromSeq' });
+    const fromSeq = (rawFrom as number | undefined) ?? 0;
+    const overlay = body['runOptionsOverlay'];
+    if (overlay !== undefined && (overlay === null || typeof overlay !== 'object' || Array.isArray(overlay))) throw err('validation_error', 'runOptionsOverlay MUST be an object', { field: 'runOptionsOverlay' });
+    if (mode === 'replay' && overlay !== undefined && Object.keys(overlay).length > 0) throw err('validation_error', 'runOptionsOverlay is branch-only', { field: 'runOptionsOverlay' });
+    const events = readEvents(source);
+    if (fromSeq > 0 && !events.some((e) => e.sequence === fromSeq)) throw err('fork_point_invalid', `fromSeq ${fromSeq} is not in the source log`, { fromSeq });
+    const terminal = events.find((e) => e.type === 'run.completed' || e.type === 'run.failed' || e.type === 'run.cancelled');
+    if (terminal && fromSeq > terminal.sequence) throw err('fork_point_invalid', `fromSeq ${fromSeq} is past the source's terminal event`, { fromSeq });
+    const options = { ...optionsOf(source), ...(overlay !== undefined ? validateOptions(overlay as Record<string, unknown>) : {}) };
+    const child = insertRun({
+      run_id: tenantBound(source.tenant), tenant: source.tenant, workflow_id: source.workflow_id, inputs: JSON.parse(source.inputs_json) as unknown,
+      options, owner: ownerOf(source), parent_run_id: source.run_id, fork_mode: mode, from_seq: fromSeq,
+    });
+    for (const e of events.filter((x) => x.sequence < fromSeq)) {
+      q.insertEvent.run(child.run_id, e.sequence, e.type, e.nodeId ?? null, JSON.stringify(e.payload ?? {}), e.timestamp, e.causationId ?? null, opaque(), e.schemaVersion, e.engineVersion ?? null);
+    }
+    scheduleRun(child.run_id);
+    return { status: 201, body: { runId: wireId(child), sourceRunId: wireId(source), fromSeq, mode, status: 'pending', eventsUrl: links(ctx, child).eventsUrl } };
+  }));
 
-// Graceful close on Ctrl-C — release any claims this process holds.
-const shutdown = (): void => {
-  console.log(`[openwop-host-sqlite] shutting down, releasing claims`);
-  stopMetricLoop();
-  for (const [, aborter] of runningAborters) aborter.abort();
-  for (const [, handle] of runningHeartbeats) clearInterval(handle);
-  runningHeartbeats.clear();
-  db.exec(`UPDATE runs SET claim_holder_id = NULL WHERE claim_holder_id = '${PROCESS_ID}'`);
-  db.close();
-  server.close(() => process.exit(0));
-};
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+  // ─── 12. Interrupt surfaces ────────────────────────────────────────────────
+
+  route('POST', '/runs/{runId}/interrupts/{nodeId}', true, async (ctx) => withIdempotency(ctx, 'resolveInterruptByRun', async () => {
+    const run = runFor(subjectOf(ctx), ctx.params['runId'] as string);
+    const nodeId = ctx.params['nodeId'] as string;
+    if (!NODE_ID.test(nodeId)) throw err('not_found', 'no such node');
+    const body = await ctx.body();
+    for (const k of Object.keys(body)) if (k !== 'resumeValue') throw err('validation_error', `unknown key ${k}; the body is { resumeValue }`, { field: k });
+    if (!('resumeValue' in body)) throw err('validation_error', 'resumeValue is REQUIRED', { field: 'resumeValue' });
+    const row = (q.openInterrupt.get(run.run_id, nodeId) as InterruptRow | undefined) ?? adoptLegacyInterrupt(run, nodeId);
+    if (!row) {
+      if (TERMINAL.has(run.status) || q.anyInterrupt.get(run.run_id, nodeId)) throw err('interrupt_already_resolved', 'the interrupt is already resolved, or its run ended');
+      throw err('not_found', `node ${nodeId} holds no interrupt`);
+    }
+    return { status: 200, body: resolve(run, row, body['resumeValue'], subjectOf(ctx)) };
+  }));
+
+  route('GET', '/interrupts/{token}', false, async (ctx) => {
+    const row = verifyToken(ctx.params['token'] as string);
+    return { status: 200, body: JSON.parse(row.payload_json) as unknown };
+  });
+
+  route('POST', '/interrupts/{token}', false, async (ctx) => {
+    const row = verifyToken(ctx.params['token'] as string);
+    const run = loadRunRow(row.run_id) as RunRow;
+    const body = await ctx.body();
+    for (const k of Object.keys(body)) if (k !== 'resumeValue') throw err('validation_error', `unknown key ${k}; the body is { resumeValue }`, { field: k });
+    if (!('resumeValue' in body)) throw err('validation_error', 'resumeValue is REQUIRED', { field: 'resumeValue' });
+    return { status: 200, body: resolve(run, row, body['resumeValue'], null) };
+  });
+
+  // ─── 13. Bootstrap ─────────────────────────────────────────────────────────
+  //
+  // Resume on startup: a run left pending or running with no live claim was
+  // being executed by a process that died. Claim it and re-enter its loop; the
+  // fold picks up after the last recorded event.
+
+  const resumeOrphans = (): number => {
+    const rows = q.orphans.all(Date.now()) as Array<{ run_id: string }>;
+    for (const { run_id } of rows) scheduleRun(run_id);
+    return rows.length;
+  };
+  const resumed = resumeOrphans();
+  const sweep = setInterval(resumeOrphans, opts.claimTtlMs);
+  sweep.unref();
+
+  const server = createServer((req, res) => { void handle(req, res); });
+  await new Promise<void>((ok) => server.listen(opts.port, opts.host, ok));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : opts.port;
+  console.log(`[${HOST_NAME}] listening on http://${opts.host}:${port} (OpenWOP ${PROTOCOL_VERSION}; db ${opts.dbPath}; ${workflows.size} fixtures; process ${processId}${resumed > 0 ? `; resumed ${resumed} orphaned run(s)` : ''})`);
+
+  return {
+    port,
+    server,
+    processId,
+    close: async () => {
+      closing = true;
+      clearInterval(sweep);
+      server.closeAllConnections();
+      await new Promise<void>((ok) => server.close(() => ok()));
+      // Let every loop stop at its next check; each releases its claim on the way
+      // out, so another process can take the run over at once.
+      await Promise.allSettled([...active.values()]);
+      db.close();
+    },
+  };
+}
+
+const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  startHost().then((running) => {
+    const stop = (): void => { void running.close().then(() => process.exit(0)); };
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+  }).catch((e: unknown) => { console.error(e); process.exit(1); });
+}

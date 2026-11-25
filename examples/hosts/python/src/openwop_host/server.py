@@ -1,1354 +1,1187 @@
-"""HTTP server + request handlers.
+"""The front door: negotiation, identity, idempotency, discovery and the run routes.
 
-Mirrors `examples/hosts/in-memory/src/server.ts`. Uses
-`http.server.ThreadingHTTPServer` so each request gets its own thread
-(SSE handlers can park on a Condition without blocking other requests).
-
-Routes (per `spec/v1/rest-endpoints.md`):
-
-    GET   /.well-known/openwop       — discovery
-    GET   /v1/openapi.json           — minimal OpenAPI stub
-    POST  /v1/runs                   — create run (Layer-1 idempotent)
-    GET   /v1/runs/{runId}           — run snapshot
-    POST  /v1/runs/{runId}/cancel    — cancel
-    GET   /v1/runs/{runId}/events    — SSE stream (Last-Event-ID supported)
-    GET   /v1/runs/{runId}/events/poll
-    GET   /v1/runs/{runId}/debug-bundle
-
-Single-tenant; auth is bearer-token equality against an env-configured
-key. Production hosts replace this with real JWT verification.
+Stdlib only: `http.server.ThreadingHTTPServer`, one thread per connection.
+HTTP/1.1 with keep-alive; SSE responses use chunked transfer encoding.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
-import os
 import re
+import socket
 import threading
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
-from urllib.parse import urlparse, parse_qs
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import parse_qsl, unquote, urlsplit
 
-
-def _now_iso() -> str:
-    """RFC 3339 timestamp with microseconds + Z suffix per debug-bundle.md."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-from .fixtures import load_fixtures
-from .idempotency import IdempotencyCache, IdempotencyEntry
-from .runs import (
-    MAX_RUN_DURATION_MS,
-    RunRegistry,
-    iter_events_since,
-    wait_for_next_event_or_terminal,
+from . import __version__
+from .contract import (
+    ERA,
+    ENGINE_VERSION,
+    EXPERIMENTAL_UNTIL,
+    IDEMPOTENCY_KEY,
+    NODE_ID,
+    NON_NEGATIVE_INT,
+    POSITIVE_INT,
+    PROTOCOL_VERSION,
+    RUN_STATUSES,
+    SINCE,
+    TERMINAL,
+    TERMINAL_EVENTS,
+    VERSION_HEADER,
+    WAITING,
+    WORKFLOW_ID,
+    HostError,
+    b64url,
+    b64url_decode,
+    check_tenant_bound,
+    err,
+    now_iso,
+    now_ms,
+    project_bound_id,
+    tenant_bound,
+    unproject_bound_id,
 )
-from .webhooks import DEFAULT_TENANT_ID, WebhookRegistry, WebhookUrlRejected, fan_out_event
-import time
+from .executor import MAX_NODE_EXECUTIONS, Executor, options_of, payload_of
+from .fixtures import load_workflows
+from .store import Store
 
-_RUN_ID_RE = re.compile(r"^/v1/runs/([^/]+)$")
-_RUN_CANCEL_RE = re.compile(r"^/v1/runs/([^/]+)/cancel$")
-_RUN_PAUSE_RE = re.compile(r"^/v1/runs/([^/]+):pause$")
-_RUN_RESUME_RE = re.compile(r"^/v1/runs/([^/]+):resume$")
-_RUN_EVENTS_POLL_RE = re.compile(r"^/v1/runs/([^/]+)/events/poll$")
-_RUN_EVENTS_SSE_RE = re.compile(r"^/v1/runs/([^/]+)/events$")
-_RUN_DEBUG_BUNDLE_RE = re.compile(r"^/v1/runs/([^/]+)/debug-bundle$")
-_BULK_CANCEL_RE = re.compile(r"^/v1/runs:bulk-cancel$")
-_WEBHOOKS_RE = re.compile(r"^/v1/webhooks$")
-_WEBHOOK_ID_RE = re.compile(r"^/v1/webhooks/([^/]+)$")
-_WORKFLOW_ID_RE = re.compile(r"^/v1/workflows/([^/]+)$")
-_ARTIFACT_RE = re.compile(r"^/v1/runs/([^/]+)/artifacts/([^/]+)$")  # rest-endpoints.md §Artifacts
+HOST_NAME = "openwop-host-python"
+API_KEY_ISSUER = f"urn:{HOST_NAME}:api-key"
+MAX_REQUEST_BODY_BYTES = 4_194_304
+RUN_LIST_MAX_PAGE = 100
+KEEP_ALIVE_SECONDS = 15.0
 
 
-# stream-modes.md §"Mode selection" — closed enum of supported per-event
-# stream modes. Comma-separated subsets are also supported (e.g.
-# `updates,debug`); `values` is exclusive (cannot mix with others) per
-# stream-modes-mixed.test.ts.
-SUPPORTED_STREAM_MODES: frozenset[str] = frozenset({"updates", "values", "messages", "debug"})
+@dataclass
+class HostOptions:
+    host: str = "127.0.0.1"
+    port: int = 3840
+    db_path: str = "data/openwop-host-python.sqlite"
+    api_key: str = "openwop-python-dev-key"
+    tenant: str = "openwop-python-tenant"
+    tenant_b_key: str | None = None
+    tenant_b: str = "openwop-python-tenant-b"
+    max_run_duration_ms: int = 600_000
+    fixtures_dir: str | None = None
+    log_resume_tokens: bool = False
 
 
-# capabilities.md §"Unsupported capability — refusal contract":
-# every spec-standardized typeId belongs to exactly one capability key.
-# The host MUST refuse create-run with `capability_required` if a node's
-# typeId is gated by a capability the host does NOT advertise.
-GATED_TYPEID_MAP: dict[str, str] = {
-    "core.llm.chat": "aiProviders",
-    "core.llm.completion": "aiProviders",
-    "core.subWorkflow": "subWorkflows",
-    "core.orchestrator.supervisor": "orchestrator",
-    "core.dispatch": "dispatch",
-    "core.channelWrite": "channels",
-    "core.identity": "identity",
-    "core.http.request": "httpClient",
-    "core.mcp.toolCall": "mcpClient",
-}
-
-# Python stdlib-only reference host advertises NONE of the gated
-# capabilities. core.noop and core.delay are unconditionally available
-# (no capability key) — every other typeId triggers a refusal.
-HOST_ADVERTISED_GATED_CAPABILITIES: frozenset[str] = frozenset()
+@dataclass
+class Reply:
+    status: int
+    body: Any = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
-# rest-endpoints.md:95 — bulk-cancel REQUIRES a host-defined upper bound
-# (RECOMMENDED 100). Requests exceeding this cap are refused with 400
-# `validation_error` + `details.maxRunIds`.
-MAX_BULK_CANCEL_RUN_IDS = 100
+STREAMED = object()
 
 
-# Honest advertisement set (mirrors SQLite Phase A close-out): the
-# Python reference host's node executor implements ONLY these typeIds.
-# Fixtures whose nodes reference anything else are loaded into the
-# workflow store (so workflow_not_found stays testable) but are NOT
-# advertised under /.well-known/openwop's `fixtures[]` — conformance
-# scenarios gated on `isFixtureAdvertised(...)` cleanly SKIP instead
-# of FAILing against a workflow this host cannot execute.
-SUPPORTED_EXECUTABLE_TYPEIDS: frozenset[str] = frozenset({"core.noop", "core.delay"})
+class Ctx:
+    """One request, as the handlers see it."""
+
+    def __init__(
+        self,
+        handler: "Handler",
+        path: str,
+        query: dict[str, str],
+        params: dict[str, str],
+        subject: dict[str, Any] | None,
+    ) -> None:
+        self.handler = handler
+        self.path = path
+        self.query = query
+        self.params = params
+        self.subject = subject
+
+    def header(self, name: str) -> str | None:
+        return self.handler.headers.get(name)
+
+    @property
+    def base_url(self) -> str:
+        proto = self.header("x-forwarded-proto") or "http"
+        host = self.header("host") or f"{self.handler.app.opts.host}:{self.handler.app.opts.port}"
+        return f"{proto}://{host}"
+
+    def raw_body(self) -> bytes:
+        return self.handler.read_body()
+
+    def body(self) -> dict[str, Any]:
+        text = self.raw_body().decode("utf-8", errors="replace")
+        if text.strip() == "":
+            return {}
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            raise err("validation_error", "the request body is not JSON") from None
+        if not isinstance(parsed, dict):
+            raise err("validation_error", "the request body MUST be a JSON object")
+        return parsed
 
 
-# Fixtures that exercise enforcement contracts the host does NOT
-# implement, even though their nodes are all in SUPPORTED_EXECUTABLE_
-# TYPEIDS. Unadvertising them lets the matching conformance scenarios
-# SKIP rather than FAIL — the host's design choice is to NOT enforce
-# these contracts (per honesty principle); see capabilities.md
-# §"runtime-capabilities" + run-options.md §"Per-workflow
-# configurableSchema".
-ENFORCEMENT_FIXTURE_BLOCKLIST: frozenset[str] = frozenset({
-    # cap-breach.test.ts asserts `configurable.recursionLimit` is enforced
-    # by aborting with `cap.breached` + terminal `failed`. The Python
-    # reference host does not enforce the limit (no maxNodeExecutions /
-    # recursionLimit ceiling wired through executor).
-    "conformance-cap-breach",
-    # configurable-schema.test.ts asserts the host validates the run's
-    # `configurable` against the workflow's `configurableSchema` and
-    # rejects mismatches with 400/422. The reference host does not run
-    # a JSON-schema validator against `configurable`.
-    "conformance-configurable-schema",
-})
+Route = tuple[str, re.Pattern[str], bool, Callable[[Ctx], Any]]
 
 
-def _fixture_is_executable(workflow: dict[str, Any], workflow_id: str) -> bool:
-    """A workflow is fully executable iff every node's typeId is in
-    SUPPORTED_EXECUTABLE_TYPEIDS and the workflow isn't in the
-    enforcement-fixture blocklist. Workflows that reference unsupported
-    typeIds or exercise unimplemented enforcement contracts are not
-    advertised — conformance scenarios gated on `isFixtureAdvertised(...)`
-    then skip honestly instead of failing.
-    """
-    if workflow_id in ENFORCEMENT_FIXTURE_BLOCKLIST:
-        return False
-    for node in workflow.get("nodes", []) or []:
-        if not isinstance(node, dict):
-            return False
-        type_id = node.get("typeId", "")
-        if type_id not in SUPPORTED_EXECUTABLE_TYPEIDS:
-            return False
-    return True
+def _dumps(value: Any) -> bytes:
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-class _State:
-    """Shared mutable state injected into the handler class."""
+def _is_int(x: Any) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool)
 
-    def __init__(self) -> None:
-        self.workflows: dict[str, dict[str, Any]] = load_fixtures()
-        self.webhooks = WebhookRegistry()
-        # Wire every run-event append into the webhook fan-out so registered
-        # subscribers receive HMAC-signed deliveries per webhooks.md.
-        # Fire-and-forget background threads — registry mutation is thread-safe.
-        self.runs = RunRegistry(
+
+class App:
+    """Host state shared by every request thread."""
+
+    def __init__(self, opts: HostOptions) -> None:
+        self.opts = opts
+        self.store = Store(opts.db_path)
+        self.workflows = load_workflows(opts.fixtures_dir)
+        self.executor = Executor(
+            self.store,
             self.workflows,
-            event_hook=lambda payload: fan_out_event(self.webhooks, payload),
+            max_run_duration_ms=opts.max_run_duration_ms,
+            log_resume_tokens=opts.log_resume_tokens,
+            host_name=HOST_NAME,
         )
-        self.idempotency = IdempotencyCache()
-        self.api_key = os.environ.get("OPENWOP_API_KEY", "openwop-inmem-dev-key")
+        self.cursor_secret = self.store.secret("run-list-cursor")
+        self.closing = threading.Event()
+        # ─── Identity ── one lane, `api-key`; each key is bound to one tenant and
+        # resolves to one Subject (identity.md §1.1). The key realm is the issuer.
+        self.keys: dict[str, dict[str, Any]] = {opts.api_key: self.subject_for(opts.tenant, "primary-key")}
+        if opts.tenant_b_key:
+            self.keys[opts.tenant_b_key] = self.subject_for(opts.tenant_b, "tenant-b-key")
+        src = Path(__file__).resolve().parent
+        digest = hashlib.sha256()
+        for f in sorted(src.glob("*.py")):
+            digest.update(f.read_bytes())
+        self.host_build = {"kind": "artifact-sha256", "id": digest.hexdigest()}
+        self.routes: list[Route] = []
+        self._register_routes()
 
+    @staticmethod
+    def subject_for(tenant: str, subject_id: str) -> dict[str, Any]:
+        return {"issuer": API_KEY_ISSUER, "subjectId": subject_id, "tenant": tenant, "lane": "api-key", "kind": "user"}
 
-def make_handler(state: _State) -> type[BaseHTTPRequestHandler]:
-    """Return a BaseHTTPRequestHandler subclass closed over `state`."""
+    def authenticate(self, header: str | None) -> dict[str, Any]:
+        m = re.match(r"^Bearer\s+(.+)$", (header or "").strip(), re.IGNORECASE)
+        if not m:
+            raise err("unauthenticated", "a Bearer credential is required", None, {"WWW-Authenticate": "Bearer"})
+        presented = m.group(1).strip().encode()
+        for key, subject in self.keys.items():
+            if hmac.compare_digest(key.encode(), presented):
+                return subject
+        raise err(
+            "unauthenticated", "the credential is not valid", None, {"WWW-Authenticate": 'Bearer error="invalid_token"'}
+        )
 
-    class Handler(BaseHTTPRequestHandler):
-        # Silence default access-log spam; the host prints its own startup line.
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-            return
-
-        # ─── helpers ─────────────────────────────────────────────────
-
-        def _send_json(self, status: int, payload: Any, extra_headers: dict[str, str] | None = None) -> None:
-            body = json.dumps(payload).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            for k, v in (extra_headers or {}).items():
-                self.send_header(k, v)
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _send_error_envelope(
-            self, status: int, code: str, message: str, extra: dict[str, Any] | None = None
-        ) -> None:
-            payload: dict[str, Any] = {"error": code, "message": message}
-            if extra:
-                payload.update(extra)
-            self._send_json(status, payload)
-
-        def _check_auth(self) -> bool:
-            auth = self.headers.get("Authorization", "")
-            if not auth.startswith("Bearer "):
-                self._send_error_envelope(401, "unauthenticated", "Missing or malformed Authorization header.")
-                return False
-            token = auth[len("Bearer "):].strip()
-            if token != state.api_key:
-                self._send_error_envelope(401, "invalid_credential", "Bearer token rejected.")
-                return False
-            return True
-
-        def _read_body(self) -> str:
-            length = int(self.headers.get("Content-Length") or "0")
-            if length == 0:
-                return ""
-            return self.rfile.read(length).decode("utf-8")
-
-        def _check_layer1_idempotency(
-            self, endpoint: str, body_text: str
-        ) -> tuple[str | None, str, bool]:
-            """Layer-1 cache lookup helper per idempotency.md §"Cache key composition".
-
-            Returns (idempotency_key, body_hash, replayed). When `replayed=True`,
-            this helper has ALREADY written the cached response to the wire and
-            the caller MUST return immediately. When `replayed=False`, the
-            caller MAY proceed to execute and SHOULD call `_store_idempotent`
-            with the final response to register the cache entry.
-
-            On Idempotency-Key reuse with a different body, this helper writes
-            a 409 `idempotency_key_mismatch` response and signals replayed=True
-            so the caller short-circuits cleanly. (SP-03, 2026-08-18: canonical
-            per `spec/v1/idempotency.md` v1.5 §"Record shape, digest, and
-            lease"; `idempotency_key_conflict` is retired there.)
-            """
-            idempotency_key = self.headers.get("Idempotency-Key")
-            body_hash = IdempotencyCache.hash_body(body_text)
-            if not idempotency_key:
-                return None, body_hash, False
-            cache_key = IdempotencyCache.cache_key(endpoint, idempotency_key)
-            cached = state.idempotency.get(cache_key)
-            if cached is None:
-                return idempotency_key, body_hash, False
-            if cached.body_hash != body_hash:
-                self._send_error_envelope(
-                    409,
-                    "idempotency_key_mismatch",
-                    "Idempotency-Key reused with a different request body.",
-                )
-                return idempotency_key, body_hash, True
-            raw = cached.body.encode("utf-8")
-            self.send_response(cached.status)
-            self.send_header("Content-Type", cached.content_type)
-            self.send_header("Content-Length", str(len(raw)))
-            self.send_header("openwop-Idempotent-Replay", "true")
-            self.end_headers()
-            self.wfile.write(raw)
-            return idempotency_key, body_hash, True
-
-        def _store_idempotent(
-            self,
-            endpoint: str,
-            idempotency_key: str | None,
-            body_hash: str,
-            status: int,
-            response_payload: dict[str, Any],
-        ) -> None:
-            if not idempotency_key:
-                return
-            cache_key = IdempotencyCache.cache_key(endpoint, idempotency_key)
-            state.idempotency.put(
-                cache_key,
-                IdempotencyEntry(
-                    status=status,
-                    body=json.dumps(response_payload),
-                    content_type="application/json",
-                    body_hash=body_hash,
-                    stored_at=time.time(),
-                ),
+    def run_for(self, subject: dict[str, Any], id_: str) -> dict[str, Any]:
+        """A tenant-bound run id for the caller. The bare (v1) form is 400: this host serves no 1.x member."""
+        if "/" not in id_:
+            raise err(
+                "validation_error",
+                "a bare run id is the v1 spelling; this host serves v2 only, so use <tenantId>/<id> (identity.md §5)",
+                {"runId": id_},
             )
+        check_tenant_bound(id_, subject["tenant"], "run")
+        run = self.store.get_run(id_)
+        if run is None or run["tenant"] != subject["tenant"]:
+            raise err("not_found", "run not found")
+        return run
 
-        # ─── routes ──────────────────────────────────────────────────
+    # ─── Projections ──────────────────────────────────────────────────────
+    def event_doc(self, row: dict[str, Any]) -> dict[str, Any]:
+        doc: dict[str, Any] = {
+            "eventId": row["event_id"],
+            "runId": row["run_id"],
+            "type": row["type"],
+            "payload": payload_of(row),
+            "timestamp": row["timestamp"],
+            "sequence": row["seq"],
+            "schemaVersion": row["schema_version"],
+        }
+        if row["engine_version"] is not None:
+            doc["engineVersion"] = row["engine_version"]
+        if row["node_id"] is not None:
+            doc["nodeId"] = row["node_id"]
+        return doc
 
-        def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler signature
-            parsed = urlparse(self.path)
-            path = parsed.path
-            if path == "/.well-known/openwop":
-                self._handle_discovery()
-                return
-            if path == "/v1/openapi.json":
-                self._handle_openapi()
-                return
-            m = _RUN_EVENTS_POLL_RE.match(path)
-            if m:
-                self._handle_events_poll(m.group(1), parsed.query)
-                return
-            m = _RUN_EVENTS_SSE_RE.match(path)
-            if m:
-                self._handle_events_sse(m.group(1), parsed.query)
-                return
-            m = _RUN_DEBUG_BUNDLE_RE.match(path)
-            if m:
-                self._handle_debug_bundle(m.group(1))
-                return
-            m = _WORKFLOW_ID_RE.match(path)
-            if m:
-                self._handle_get_workflow(m.group(1))
-                return
-            m = _ARTIFACT_RE.match(path)
-            if m:
-                # rest-endpoints.md §"GET /v1/runs/{runId}/artifacts/{artifactId}".
-                # This host doesn't persist artifacts, but the endpoint MUST
-                # reject unauthenticated requests with 401 BEFORE any existence
-                # check — else a missing Authorization header could probe whether
-                # a run/artifact exists (existence oracle). Auth first, then 404.
-                if not self._check_auth():
-                    return
-                self._send_error_envelope(
-                    404,
-                    "artifact_not_found",
-                    f'No artifact "{m.group(2)}" on run "{m.group(1)}".',
-                )
-                return
-            m = _RUN_ID_RE.match(path)
-            if m:
-                self._handle_get_run(m.group(1))
-                return
-            # /v1/packs/* — the Python reference host does NOT operate a
-            # pack registry. pack-registry.test.ts §"registry presence
-            # probe" detects this via a non-OpenWOP-shaped 404: returning
-            # a plain-text body rather than the canonical {error,message}
-            # envelope makes the probe identify "registry absent" and
-            # cleanly skip all 8 read-endpoint scenarios.
-            if path.startswith("/v1/packs/"):
-                body = b"No pack registry mounted on this host."
-                self.send_response(404)
-                self.send_header("Content-Type", "text/plain")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            self._send_error_envelope(404, "not_found", f"No route for GET {path}")
+    def read_events(self, run_id: str, after: int = -1) -> list[dict[str, Any]]:
+        return [self.event_doc(r) for r in self.store.events_after(run_id, after)]
 
-        def do_POST(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            path = parsed.path
-            if path == "/v1/runs":
-                self._handle_create_run()
-                return
-            if _BULK_CANCEL_RE.match(path):
-                self._handle_bulk_cancel()
-                return
-            if _WEBHOOKS_RE.match(path):
-                self._handle_register_webhook()
-                return
-            m = _RUN_CANCEL_RE.match(path)
-            if m:
-                self._handle_cancel_run(m.group(1))
-                return
-            m = _RUN_PAUSE_RE.match(path)
-            if m:
-                self._handle_pause_run(m.group(1))
-                return
-            m = _RUN_RESUME_RE.match(path)
-            if m:
-                self._handle_resume_run(m.group(1))
-                return
-            self._send_error_envelope(404, "not_found", f"No route for POST {path}")
-
-        def do_DELETE(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            path = parsed.path
-            m = _WEBHOOK_ID_RE.match(path)
-            if m:
-                self._handle_unregister_webhook(m.group(1), parsed.query)
-                return
-            self._send_error_envelope(404, "not_found", f"No route for DELETE {path}")
-
-        # ─── handlers ────────────────────────────────────────────────
-
-        def _handle_discovery(self) -> None:
-            payload = {
-                "protocolVersion": "1.0",
-                "implementation": {
-                    "name": "openwop-host-in-memory-python",
-                    "version": "1.0.0",
-                    "vendor": "openwop-spec (reference example)",
-                },
-                "supportedEnvelopes": [],
-                "schemaVersions": {},
-                "limits": {
-                    "clarificationRounds": 0,
-                    "schemaRounds": 0,
-                    "envelopesPerTurn": 0,
-                    "maxNodeExecutions": 1000,
-                    # RFC 0058 — wall-clock ceiling the executor enforces;
-                    # `RunOptions.configurable.runTimeoutMs` resolves to
-                    # `min(runTimeoutMs, maxRunDurationMs)`.
-                    "maxRunDurationMs": MAX_RUN_DURATION_MS,
-                },
-                "supportedTransports": ["rest"],
-                "debugBundle": {"supported": True},
-                "capabilities": {
-                    # capabilities.md §`runs.pauseResume` — drainPolicies is
-                    # a closed-array of host-supported policies. This host
-                    # implements drain-current-node only; `immediate` is
-                    # refused by the :pause endpoint with 422.
-                    "runs": {
-                        "pauseResume": {"supported": True, "drainPolicies": ["drain-current-node"]},
-                        "bulkCancel": {"supported": True, "maxRunIds": 100},
-                    },
-                    # capabilities.md §`webhooks.signatureAlgorithms` —
-                    # array of advertised algorithm tags. v1 = HMAC-SHA256
-                    # over `{timestamp}.{rawBody}` per webhooks.md.
-                    "webhooks": {
-                        "supported": True,
-                        "signatureAlgorithms": ["v1"],
-                    },
-                    # Gated typeIds the host explicitly does NOT implement.
-                    # Workflows containing these nodes are refused at create
-                    # time with `capability_required` per capabilities.md.
-                    "refusedCapabilities": sorted(
-                        {
-                            cap
-                            for cap in GATED_TYPEID_MAP.values()
-                            if cap not in HOST_ADVERTISED_GATED_CAPABILITIES
-                        }
-                    ),
-                },
-                # Filtered to advertise only fixtures whose every node
-                # typeId is in SUPPORTED_EXECUTABLE_TYPEIDS — workflows
-                # referencing interrupts / conversations / agents / BYOK /
-                # subworkflows / orchestrator / dispatch / etc. are loaded
-                # (so workflow_not_found stays testable) but NOT
-                # advertised. Conformance scenarios gated on
-                # `isFixtureAdvertised(...)` skip rather than fail.
-                "fixtures": sorted(
-                    wf_id for wf_id, wf in state.workflows.items()
-                    if _fixture_is_executable(wf, wf_id)
-                ),
+    def snapshot(self, run: dict[str, Any]) -> dict[str, Any]:
+        options = options_of(run)
+        snap: dict[str, Any] = {
+            "runId": run["run_id"],
+            "workflowId": run["workflow_id"],
+            "status": run["status"],
+            "owner": json.loads(run["owner_json"]),
+            "eventLogSchemaVersion": run["event_log_schema_version"],
+            "inputs": json.loads(run["inputs_json"]),
+            "engineVersion": run["engine_version"],
+        }
+        if run["status"] != "pending" and run["started_at"] is not None:
+            snap["startedAt"] = run["started_at"]
+        if run["ended_at"] is not None:
+            snap["completedAt"] = run["ended_at"]
+        if run["status"] in WAITING and run["current_node_id"] is not None:
+            snap["currentNodeId"] = run["current_node_id"]
+        if run["status"] == "failed" and run["error_json"] is not None:
+            e = json.loads(run["error_json"])
+            snap["error"] = {
+                "code": str(e.get("code", "internal_error")),
+                "message": str(e.get("message", "the run failed")),
             }
-            # RFC 0073 — capability families are document-root properties of the
-            # discovery response (capabilities.schema.json roots agents/secrets/etc.;
-            # there is no `capabilities` wrapper property). Emit them at the root
-            # canonically + retain the nested `capabilities` object as a DEPRECATED
-            # v1.x-window mirror (see spec/v1/capabilities.md §"Document-root layout").
-            payload = {**payload, **payload["capabilities"]}
-            self._send_json(200, payload, {"Cache-Control": "public, max-age=300"})
+        for k in ("configurable", "tags", "metadata"):
+            if k in options:
+                snap[k] = options[k]
+        if run["parent_run_id"] is not None:
+            snap["parentRunId"] = run["parent_run_id"]
+        return snap
 
-        def _handle_openapi(self) -> None:
-            self._send_json(
-                200,
-                {
-                    "openapi": "3.1",
-                    "info": {
-                        "title": "openwop in-memory reference host (Python)",
-                        "version": "1.0.0",
-                        "description": (
-                            "Stub OpenAPI document. Full canonical bundle at api/openapi.yaml in the openwop repo."
-                        ),
-                    },
-                    "paths": {
-                        "/.well-known/openwop": {"get": {"summary": "Capability discovery"}},
-                        "/v1/runs": {"post": {"summary": "Create run"}},
-                        "/v1/runs/{runId}": {"get": {"summary": "Get run snapshot"}},
-                        "/v1/runs/{runId}/cancel": {"post": {"summary": "Cancel run"}},
-                        "/v1/runs/{runId}/events": {"get": {"summary": "SSE event stream"}},
-                        "/v1/runs/{runId}/events/poll": {"get": {"summary": "Polling event read"}},
-                    },
-                },
+    def links(self, ctx: Ctx, run_id: str) -> dict[str, str]:
+        pid = project_bound_id(run_id)
+        return {"eventsUrl": f"{ctx.base_url}/runs/{pid}/events", "statusUrl": f"{ctx.base_url}/runs/{pid}"}
+
+    # ─── Discovery ────────────────────────────────────────────────────────
+    #
+    # capabilities.md — the closed v2 root: metadata keys plus one record per
+    # family, `{ status, since, until?, witness, ...facets }`. A family is
+    # advertised only when this host serves it end to end.
+
+    @staticmethod
+    def record(witness: str, **facets: Any) -> dict[str, Any]:
+        return {"status": "experimental", "since": SINCE, "until": EXPERIMENTAL_UNTIL, "witness": witness, **facets}
+
+    def discovery_document(self) -> dict[str, Any]:
+        r = self.record
+        return {
+            "protocolVersions": [PROTOCOL_VERSION],
+            "preferredVersion": PROTOCOL_VERSION,
+            "implementation": {"name": HOST_NAME, "version": __version__, "vendor": "openwop (reference example)"},
+            "engineVersion": ENGINE_VERSION,
+            "eventLogSchemaVersion": ERA,
+            "fixtures": sorted(self.workflows),
+            "limits": {
+                "status": "stable",
+                "since": SINCE,
+                "witness": "witnessable-gated",
+                "clarificationRounds": 0,
+                "maxNodeExecutions": MAX_NODE_EXECUTIONS,
+                "maxRunDurationMs": self.opts.max_run_duration_ms,
+                "maxRequestBodyBytes": MAX_REQUEST_BODY_BYTES,
+            },
+            "auth": r(
+                "seam-gated",
+                lanes=[
+                    {
+                        "lane": "api-key",
+                        "issuers": [API_KEY_ISSUER],
+                        "revocation": "next-request",
+                        "minimumAssurance": "bearer",
+                    }
+                ],
+            ),
+            "eventLog": r("claims-check"),
+            "idempotency": r("witnessable-gated", crossRegion="single-region"),
+            "interrupt": r("witnessable-gated", tokenAlgs=["hs256"], refKinds=["principal"]),
+            "replay": r("witnessable-gated", modes=["replay", "branch"], effectSeamsManifest="/host/effect-seams"),
+            "runList": r("witnessable-gated", maxPageSize=RUN_LIST_MAX_PAGE, filters=["workflowId", "status"]),
+        }
+
+    # ─── Idempotency ──────────────────────────────────────────────────────
+    def with_idempotency(self, ctx: Ctx, endpoint: str, fn: Callable[[], Reply]) -> Reply:
+        """idempotency.md §Layer 1 — keyed (tenant, endpoint, key); a final outcome is
+        replayed with `OpenWOP-Idempotent-Replay: true`; another digest under the key
+        is 409 idempotency_key_mismatch; a concurrent duplicate is 409
+        idempotency_in_flight; 400/401/403/429/5xx are never cached."""
+        key = ctx.header("idempotency-key")
+        if key is None or ctx.subject is None:
+            return fn()
+        if not IDEMPOTENCY_KEY.match(key):
+            raise err("idempotency_key_invalid", "Idempotency-Key MUST match ^[A-Za-z0-9._~-]{22,128}$")
+        tenant = ctx.subject["tenant"]
+        digest = hashlib.sha256(ctx.path.encode() + b"\n" + ctx.raw_body()).hexdigest()
+        s = self.store
+        s.prune_idem(now_ms() - 24 * 3_600_000)
+        existing = s.get_idem(tenant, endpoint, key)
+        if existing is not None:
+            if existing["digest"] != digest:
+                raise err(
+                    "idempotency_key_mismatch", "a different request was presented under the same Idempotency-Key"
+                )
+            if existing["status"] is None:
+                raise err(
+                    "idempotency_in_flight",
+                    "a request under this Idempotency-Key is in flight",
+                    None,
+                    {"Retry-After": "1"},
+                )
+            headers = {**json.loads(existing["headers_json"] or "{}"), "OpenWOP-Idempotent-Replay": "true"}
+            return Reply(
+                existing["status"], None if existing["body"] is None else json.loads(existing["body"]), headers
+            )
+        if not s.claim_idem(tenant, endpoint, key, digest, now_ms()):
+            raise err(
+                "idempotency_in_flight",
+                "a concurrent request under this Idempotency-Key is in flight",
+                None,
+                {"Retry-After": "1"},
             )
 
-        def _handle_create_run(self) -> None:
-            if not self._check_auth():
-                return
-            body_text = self._read_body()
-            try:
-                parsed = json.loads(body_text) if body_text else {}
-            except json.JSONDecodeError:
-                self._send_error_envelope(400, "validation_error", "Request body MUST be valid JSON.")
-                return
+        def cacheable(status: int) -> bool:
+            return status < 500 and status not in (400, 401, 403, 429)
 
-            workflow_id = parsed.get("workflowId")
-            if not isinstance(workflow_id, str):
-                self._send_error_envelope(400, "validation_error", "workflowId MUST be a string.")
-                return
-            if workflow_id not in state.workflows:
-                self._send_error_envelope(404, "workflow_not_found", "Unknown workflowId.")
-                return
-
-            # Pre-emptive capability refusal per capabilities.md §"Unsupported
-            # capability — refusal contract". Scan workflow nodes for any
-            # typeId that is gated by a capability the host does NOT advertise
-            # and return 422 `capability_required` with the canonical envelope:
-            #   details.requiredCapability, details.offendingTypeId, details.nodeId
-            workflow_def = state.workflows[workflow_id]
-            for node in workflow_def.get("nodes", []) or []:
-                type_id = node.get("typeId", "") if isinstance(node, dict) else ""
-                gating = GATED_TYPEID_MAP.get(type_id)
-                if gating and gating not in HOST_ADVERTISED_GATED_CAPABILITIES:
-                    self._send_error_envelope(
-                        422,
-                        "capability_required",
-                        f'Workflow "{workflow_id}" references {type_id}, but this host '
-                        f"does not advertise capabilities.{gating}: true.",
-                        {"details": {
-                            "requiredCapability": gating,
-                            "offendingTypeId": type_id,
-                            "nodeId": node.get("id"),
-                        }},
-                    )
-                    return
-
-            inputs = parsed.get("inputs") or {}
-            if not isinstance(inputs, dict):
-                self._send_error_envelope(400, "validation_error", "inputs MUST be an object when provided.")
-                return
-
-            # run-options.md §RunOptions.configurable — carries the RFC 0058
-            # `runTimeoutMs` wall-clock bound the executor enforces.
-            configurable = parsed.get("configurable") or {}
-            if not isinstance(configurable, dict):
-                self._send_error_envelope(
-                    400, "validation_error", "configurable MUST be an object when provided."
-                )
-                return
-
-            # Layer-1 idempotency. Hold the per-key lock across the
-            # get → create → put sequence so concurrent requests with
-            # the same Idempotency-Key serialize and produce exactly one
-            # run (highConcurrency.test.ts §"10 parallel requests with
-            # same key yield ONE runId").
-            idempotency_key = self.headers.get("Idempotency-Key")
-            incoming_body_hash = IdempotencyCache.hash_body(body_text)
-            cache_key = (
-                IdempotencyCache.cache_key("POST /v1/runs", idempotency_key)
-                if idempotency_key else None
-            )
-            key_lock = state.idempotency.key_lock(cache_key) if cache_key else None
-            if key_lock is not None:
-                key_lock.acquire()
-            try:
-                if cache_key is not None:
-                    cached = state.idempotency.get(cache_key)
-                    if cached is not None:
-                        if cached.body_hash != incoming_body_hash:
-                            self._send_error_envelope(
-                                409,
-                                "idempotency_key_mismatch",
-                                "Idempotency-Key reused with a different request body.",
-                            )
-                            return
-                        raw = cached.body.encode("utf-8")
-                        self.send_response(cached.status)
-                        self.send_header("Content-Type", cached.content_type)
-                        self.send_header("Content-Length", str(len(raw)))
-                        self.send_header("openwop-Idempotent-Replay", "true")
-                        self.end_headers()
-                        self.wfile.write(raw)
-                        return
-
-                run = state.runs.create_and_start(workflow_id, inputs, configurable)
-                response_body = {
-                    "runId": run.run_id,
-                    "status": run.status,
-                    "workflowId": run.workflow_id,
-                    "startedAt": run.started_at,
-                }
-                response_text = json.dumps(response_body)
-
-                if cache_key is not None:
-                    state.idempotency.put(
-                        cache_key,
-                        IdempotencyEntry(
-                            status=201,
-                            body=response_text,
-                            content_type="application/json",
-                            body_hash=incoming_body_hash,
-                            stored_at=time.time(),
-                        ),
-                    )
-
-                raw = response_text.encode("utf-8")
-                self.send_response(201)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(raw)))
-                self.send_header("openwop-Idempotent-Replay", "false" if idempotency_key else "")
-                self.end_headers()
-                self.wfile.write(raw)
-            finally:
-                if key_lock is not None:
-                    key_lock.release()
-
-        def _handle_get_run(self, run_id: str) -> None:
-            if not self._check_auth():
-                return
-            run = state.runs.get(run_id)
-            if run is None:
-                self._send_error_envelope(404, "run_not_found", f"Unknown runId: {run_id}")
-                return
-            snapshot: dict[str, Any] = {
-                "runId": run.run_id,
-                "workflowId": run.workflow_id,
-                "status": run.status,
-                # Projected from the record the writer stamped
-                # (version-negotiation.md §Stamping), never defaulted here.
-                "engineVersion": run.engine_version,
-                "eventLogSchemaVersion": run.event_log_schema_version,
-                "inputs": run.inputs,
-                "startedAt": run.started_at,
-                "endedAt": run.ended_at,
-            }
-            if run.error is not None:
-                snapshot["error"] = run.error
-            self._send_json(200, snapshot)
-
-        def _handle_get_workflow(self, workflow_id: str) -> None:
-            """GET /v1/workflows/{workflowId} per rest-endpoints.md +
-            route-coverage.test.ts §"GET /v1/workflows/{workflowId}".
-
-            Returns the seeded workflow definition for an advertised
-            fixture; 404 `workflow_not_found` otherwise. Read-only — the
-            reference host has no workflow-registration endpoint.
-            """
-            if not self._check_auth():
-                return
-            workflow = state.workflows.get(workflow_id)
-            if workflow is None:
-                self._send_error_envelope(
-                    404, "workflow_not_found", f"Unknown workflowId: {workflow_id}"
-                )
-                return
-            self._send_json(200, workflow)
-
-        def _handle_cancel_run(self, run_id: str) -> None:
-            if not self._check_auth():
-                return
-            self._read_body()
-            run = state.runs.get(run_id)
-            if run is None:
-                self._send_error_envelope(404, "run_not_found", f"Unknown runId: {run_id}")
-                return
-            if run.is_terminal():
-                self._send_json(200, {"runId": run_id, "status": run.status, "alreadyTerminal": True})
-                return
-            state.runs.cancel(run_id)
-            self._send_json(200, {"runId": run_id, "status": "cancelling"})
-
-        def _handle_pause_run(self, run_id: str) -> None:
-            """POST /v1/runs/{runId}:pause per rest-endpoints.md §pause/resume.
-
-            Body (optional):
-                { "reason": "...", "drainPolicy": "drain-current-node | immediate" }
-
-            This host implements `drain-current-node` only; `immediate`
-            requests are refused with 422 `validation_error` +
-            `details.unsupportedDrainPolicy` per the host's advertised
-            `capabilities.runs.pauseResume.drainPolicies` array.
-
-            Response: 202 + { runId, status: "paused", pausedAt: ISO8601 }.
-            Already-paused / terminal / un-pausable: 409 +
-            `details.runStatus` carrying the current state.
-            """
-            if not self._check_auth():
-                return
-            body_text = self._read_body()
-            try:
-                body = json.loads(body_text) if body_text else {}
-            except json.JSONDecodeError:
-                self._send_error_envelope(400, "validation_error", "Body MUST be valid JSON.")
-                return
-            if not isinstance(body, dict):
-                self._send_error_envelope(400, "validation_error", "Body MUST be an object.")
-                return
-            drain_policy = body.get("drainPolicy", "drain-current-node")
-            if drain_policy != "drain-current-node":
-                self._send_error_envelope(
-                    422,
-                    "validation_error",
-                    f'drainPolicy "{drain_policy}" is not supported by this host.',
-                    {"details": {"unsupportedDrainPolicy": drain_policy,
-                                 "supportedDrainPolicies": ["drain-current-node"]}},
-                )
-                return
-
-            endpoint = f"POST /v1/runs/{run_id}:pause"
-            idem_key, body_hash, replayed = self._check_layer1_idempotency(endpoint, body_text)
-            if replayed:
-                return
-
-            paused_at = _now_iso()
-            run, outcome = state.runs.pause(run_id, paused_at=paused_at)
-            if outcome == "not_found":
-                self._send_error_envelope(404, "not_found", f"Unknown runId: {run_id}")
-                return
-            assert run is not None
-            if outcome == "terminal":
-                # pause-resume.test.ts: terminal pause MUST return 409 with
-                # `error: "conflict"` + `details.runStatus` per rest-endpoints.md.
-                self._send_error_envelope(
-                    409,
-                    "conflict",
-                    f"Run {run_id} is terminal ({run.status}); pause not applicable.",
-                    {"details": {"runStatus": run.status}},
-                )
-                return
-            if outcome == "already_paused":
-                # Idempotent re-pause per pause-resume.test.ts §"pause is
-                # idempotent when already paused": MUST return 200/202, NOT
-                # 409. We replay the original pausedAt so callers can match
-                # against the first response.
-                response = {
-                    "runId": run_id,
-                    "status": "paused",
-                    "pausedAt": run.paused_at or paused_at,
-                }
-                self._send_json(202, response)
-                return
-            response = {"runId": run_id, "status": "paused", "pausedAt": paused_at}
-            self._store_idempotent(endpoint, idem_key, body_hash, 202, response)
-            self._send_json(202, response)
-
-        def _handle_resume_run(self, run_id: str) -> None:
-            """POST /v1/runs/{runId}:resume per rest-endpoints.md §pause/resume.
-
-            Response: 202 + { runId, status: "running", resumedAt: ISO8601 }.
-            Not-paused / terminal: 409 + `details.runStatus`.
-            """
-            if not self._check_auth():
-                return
-            body_text = self._read_body()
-
-            endpoint = f"POST /v1/runs/{run_id}:resume"
-            idem_key, body_hash, replayed = self._check_layer1_idempotency(endpoint, body_text)
-            if replayed:
-                return
-
-            resumed_at = _now_iso()
-            run, outcome = state.runs.resume(run_id, resumed_at=resumed_at)
-            if outcome == "not_found":
-                self._send_error_envelope(404, "not_found", f"Unknown runId: {run_id}")
-                return
-            assert run is not None
-            if outcome in ("terminal", "not_paused"):
-                # pause-resume.test.ts §":resume on a non-paused run":
-                # 409 + `error: "conflict"` + `details.runStatus`.
-                self._send_error_envelope(
-                    409,
-                    "conflict",
-                    f"Run {run_id} is not paused (current status: {run.status}).",
-                    {"details": {"runStatus": run.status}},
-                )
-                return
-            response = {"runId": run_id, "status": "running", "resumedAt": resumed_at}
-            self._store_idempotent(endpoint, idem_key, body_hash, 202, response)
-            self._send_json(202, response)
-
-        def _handle_bulk_cancel(self) -> None:
-            """POST /v1/runs:bulk-cancel per rest-endpoints.md §"Bulk cancel".
-
-            Body:
-                { "runIds": ["run-…", …], "reason"?: "string" }
-
-            `runIds` MUST be a non-empty array of 1..MAX_BULK_CANCEL_RUN_IDS
-            entries; oversized requests get 400 + `details.maxRunIds`.
-
-            Response 200 + `{ results: [{runId, ok, status?, error?}] }`.
-            Order of `results[]` MUST match the request's `runIds` order.
-            """
-            if not self._check_auth():
-                return
-            body_text = self._read_body()
-            try:
-                body = json.loads(body_text) if body_text else {}
-            except json.JSONDecodeError:
-                self._send_error_envelope(400, "validation_error", "Request body MUST be valid JSON.")
-                return
-            if not isinstance(body, dict):
-                self._send_error_envelope(400, "validation_error", "Body MUST be an object.")
-                return
-
-            requested = body.get("runIds")
-            if not isinstance(requested, list) or not requested:
-                self._send_error_envelope(
-                    400,
-                    "validation_error",
-                    "runIds MUST be a non-empty array of run-id strings.",
-                )
-                return
-            if not all(isinstance(x, str) and x for x in requested):
-                self._send_error_envelope(
-                    400,
-                    "validation_error",
-                    "Every runIds entry MUST be a non-empty string.",
-                )
-                return
-            if len(requested) > MAX_BULK_CANCEL_RUN_IDS:
-                self._send_error_envelope(
-                    400,
-                    "validation_error",
-                    f"runIds exceeds host cap ({len(requested)} > {MAX_BULK_CANCEL_RUN_IDS}).",
-                    {"details": {"maxRunIds": MAX_BULK_CANCEL_RUN_IDS}},
-                )
-                return
-
-            endpoint = "POST /v1/runs:bulk-cancel"
-            idem_key, body_hash, replayed = self._check_layer1_idempotency(endpoint, body_text)
-            if replayed:
-                return
-
-            results: list[dict[str, Any]] = []
-            for rid in requested:
-                run = state.runs.get(rid)
-                if run is None:
-                    results.append({
-                        "runId": rid,
-                        "ok": False,
-                        "error": {"code": "not_found", "message": f"Unknown runId: {rid}"},
-                    })
-                    continue
-                if run.is_terminal():
-                    # Already-terminal runs report ok:true with the existing
-                    # terminal status per rest-endpoints.md:118 ("re-issuing
-                    # the same bulk request returns the same per-id outcomes
-                    # — already-cancelled runs return ok: true, status:
-                    # 'cancelled'"). Surfacing run_terminal as ok:false would
-                    # break the documented re-issue idempotency.
-                    results.append({"runId": rid, "ok": True, "status": run.status})
-                    continue
-                state.runs.cancel(rid)
-                results.append({"runId": rid, "ok": True, "status": "cancelling"})
-
-            response = {"results": results}
-            self._store_idempotent(endpoint, idem_key, body_hash, 200, response)
-            self._send_json(200, response)
-
-        # ─── Webhooks ────────────────────────────────────────────────
-
-        def _handle_register_webhook(self) -> None:
-            """POST /v1/webhooks — register a signed-delivery subscriber.
-
-            Body shape per webhooks.md §"Registering subscribers":
-                {
-                  "url": "https://receiver.example.com/openwop",
-                  "secret": "<optional; host generates if absent>",
-                  "eventTypes": ["run.completed", ...]   // optional; empty/absent = all
-                }
-
-            Response includes the secret EXACTLY ONCE — callers MUST persist
-            it client-side; the host never re-issues a subscription's secret.
-            """
-            if not self._check_auth():
-                return
-            body_text = self._read_body()
-            try:
-                body = json.loads(body_text) if body_text else {}
-            except json.JSONDecodeError:
-                self._send_error_envelope(400, "validation_error", "Body MUST be valid JSON.")
-                return
-            if not isinstance(body, dict):
-                self._send_error_envelope(400, "validation_error", "Body MUST be an object.")
-                return
-
-            url = body.get("url")
-            if not isinstance(url, str) or not url:
-                self._send_error_envelope(400, "validation_error", "url MUST be a non-empty string.")
-                return
-            secret = body.get("secret")
-            if secret is not None and not isinstance(secret, str):
-                self._send_error_envelope(400, "validation_error", "secret MUST be a string when provided.")
-                return
-            event_types = body.get("eventTypes")
-            if event_types is not None and (
-                not isinstance(event_types, list) or not all(isinstance(x, str) for x in event_types)
-            ):
-                self._send_error_envelope(
-                    400, "validation_error", "eventTypes MUST be an array of strings when provided."
-                )
-                return
-
-            # webhooks.md §Register + RFC 0093 §A.3 — registration-time
-            # tenant-membership gate: "The caller MUST be a member of the
-            # tenant the subscription will live under." This single-tenant
-            # host's only tenant is DEFAULT_TENANT_ID; an explicit foreign
-            # tenantId is refused with 403. Omitted tenantId scopes the
-            # subscription to the caller's tenant.
-            tenant_id = body.get("tenantId")
-            if tenant_id is not None:
-                if not isinstance(tenant_id, str) or not tenant_id:
-                    self._send_error_envelope(
-                        400, "validation_error", "tenantId MUST be a non-empty string when provided."
-                    )
-                    return
-                if tenant_id != DEFAULT_TENANT_ID:
-                    self._send_error_envelope(
-                        403,
-                        "tenant_membership_required",
-                        "The caller is not a member of the requested tenant.",
-                    )
-                    return
-
-            try:
-                sub = state.webhooks.register(
-                    url,
-                    secret=secret,
-                    event_types=event_types,
-                    tenant_id=tenant_id or DEFAULT_TENANT_ID,
-                )
-            except WebhookUrlRejected as e:
-                # webhooks.md §"SSRF guard" — rejection error code is
-                # `webhook_url_rejected` per the conformance contract
-                # (`webhook-negative.test.ts` + `webhook-signed-delivery.
-                # test.ts`'s soft-skip clause both key on this exact
-                # string). The SDK HTTP_ERROR_CODES catalog carries it
-                # alongside `subscription_not_found` so consumers can
-                # discriminate.
-                self._send_error_envelope(
-                    400,
-                    "webhook_url_rejected",
-                    "webhook url rejected by SSRF guard",
-                    {"details": {"reason": e.reason}},
-                )
-                return
-            self._send_json(201, sub.to_public_dict())
-
-        def _handle_unregister_webhook(self, subscription_id: str, query: str = "") -> None:
-            """DELETE /v1/webhooks/{subscriptionId}[?tenantId=] — remove a subscriber.
-
-            webhooks.md §Unregister + RFC 0093 §A.3: the optional
-            ?tenantId= names the tenant scope of the delete; the caller
-            MUST be a member. Foreign scopes are refused with 403 BEFORE
-            any lookup so no existence information leaks across tenants.
-            """
-            if not self._check_auth():
-                return
-            params = parse_qs(query)
-            requested = params.get("tenantId", [None])[0]
-            if requested is not None and requested != DEFAULT_TENANT_ID:
-                self._send_error_envelope(
-                    403,
-                    "tenant_membership_required",
-                    "The caller is not a member of the requested tenant.",
-                )
-                return
-            removed = state.webhooks.unregister(subscription_id, requested or DEFAULT_TENANT_ID)
-            if not removed:
-                # webhooks.md + webhook-negative.test.ts §"unregister of
-                # unknown subscription" — canonical code is
-                # `subscription_not_found` (not the generic `not_found` —
-                # callers distinguish missing-subscription from missing-
-                # run/route).
-                self._send_error_envelope(
-                    404,
-                    "subscription_not_found",
-                    f"Unknown subscriptionId: {subscription_id}",
-                )
-                return
-            self._send_json(200, {"subscriptionId": subscription_id, "deleted": True})
-
-        def _handle_events_poll(self, run_id: str, query: str) -> None:
-            """GET /v1/runs/{runId}/events/poll — events polling endpoint.
-
-            Per `version-negotiation.md` §"events/poll forward-compat
-            tolerance": `lastSequence` is the canonical query parameter;
-            `since` accepted for back-compat. Non-numeric / non-integer
-            input MUST return 400 validation_error. Past-end cursor
-            (lastSequence >= run's current event count) MUST yield 200 +
-            empty events + `isComplete: true`, never 4xx.
-            """
-            if not self._check_auth():
-                return
-            run = state.runs.get(run_id)
-            if run is None:
-                self._send_error_envelope(404, "run_not_found", f"Unknown runId: {run_id}")
-                return
-            params = parse_qs(query)
-            cursor_param: str | None = params.get("lastSequence", [None])[0]
-            if cursor_param is None:
-                cursor_param = params.get("since", [None])[0]
-            if cursor_param is None:
-                cursor = -1
+        try:
+            reply = fn()
+        except HostError as e:
+            if cacheable(e.status):
+                s.complete_idem(tenant, endpoint, key, e.status, e.headers, e.body())
             else:
-                try:
-                    cursor = int(cursor_param)
-                except ValueError:
-                    self._send_error_envelope(
-                        400,
-                        "validation_error",
-                        "lastSequence MUST be an integer (or -1 for stream start)",
-                    )
-                    return
-                if cursor < -1:
-                    self._send_error_envelope(
-                        400,
-                        "validation_error",
-                        "lastSequence MUST be >= -1",
-                    )
-                    return
-            events = [e.to_dict() for e in iter_events_since(run, cursor)]
-            last_seq = events[-1]["sequence"] if events else cursor
-            self._send_json(
-                200,
-                {
-                    "runId": run_id,
-                    "events": events,
-                    "lastEventSeq": last_seq,
-                    "runStatus": run.status,
-                    "isTerminal": run.is_terminal(),
-                    # isComplete: stream has no more events. True iff run is
-                    # terminal AND cursor caught up (no events past it).
-                    "isComplete": run.is_terminal() and not events,
-                },
+                s.release_idem(tenant, endpoint, key)
+            raise
+        except BaseException:
+            s.release_idem(tenant, endpoint, key)
+            raise
+        if cacheable(reply.status):
+            s.complete_idem(tenant, endpoint, key, reply.status, reply.headers, reply.body)
+        else:
+            s.release_idem(tenant, endpoint, key)
+        return reply
+
+    # ─── Routes ───────────────────────────────────────────────────────────
+    def route(self, method: str, path: str, auth: bool) -> Callable[[Callable[[Ctx], Any]], Callable[[Ctx], Any]]:
+        pattern = re.escape(path)
+        pattern = re.sub(
+            r"\\\{(\w+)\\\}",
+            lambda m: f"(?P<{m.group(1)}>[^/:]+)" if m.group(1) == "runId" else f"(?P<{m.group(1)}>[^/]+)",
+            pattern,
+        )
+        compiled = re.compile(f"^{pattern}$")
+
+        def deco(fn: Callable[[Ctx], Any]) -> Callable[[Ctx], Any]:
+            self.routes.append((method, compiled, auth, fn))
+            return fn
+
+        return deco
+
+    def _register_routes(self) -> None:  # noqa: C901 — one place lists every operation
+        route = self.route
+        ex = self.executor
+        store = self.store
+
+        @route("GET", "/.well-known/openwop", False)
+        def discovery(ctx: Ctx) -> Reply:
+            text = _dumps(self.discovery_document())
+            etag = '"' + hashlib.sha256(text).hexdigest()[:32] + '"'
+            headers = {"ETag": etag, "Cache-Control": "public, max-age=60"}
+            if if_none_match(ctx, etag):
+                return Reply(304, None, headers)
+            return Reply(200, json.loads(text), headers)
+
+        # replay.md §The effect-seam manifest — this host's node runtime reaches no outbound effect path.
+        @route("GET", "/host/effect-seams", True)
+        def effect_seams(ctx: Ctx) -> Reply:
+            return Reply(
+                200, {"manifestVersion": "1", "host": {"name": HOST_NAME, "build": self.host_build}, "seams": []}
             )
 
-        def _handle_events_sse(self, run_id: str, query: str = "") -> None:
-            if not self._check_auth():
-                return
-            run = state.runs.get(run_id)
-            if run is None:
-                self._send_error_envelope(404, "run_not_found", f"Unknown runId: {run_id}")
-                return
+        # ─── Runs ─────────────────────────────────────────────────────────
+        @route("POST", "/runs", True)
+        def create_run(ctx: Ctx) -> Reply:
+            return self.with_idempotency(ctx, "createRun", lambda: self.create_run(ctx))
 
-            # Content negotiation: clients that don't ask for SSE get a
-            # JSON snapshot of the event log (the same shape served from
-            # /v1/runs/{runId}/events/poll). Defensive — SSE clients
-            # always send `Accept: text/event-stream`; non-streaming
-            # consumers (test drivers, debug fetches) expect JSON and
-            # would otherwise hang on the open stream.
-            accept = self.headers.get("Accept", "").lower()
-            if "text/event-stream" not in accept and query == "":
-                self._handle_events_poll(run_id, query)
-                return
+        @route("GET", "/runs", True)
+        def list_runs(ctx: Ctx) -> Reply:
+            return self.list_runs(ctx)
 
-            # stream-modes.md §"Mode selection" — validate ?streamMode= and
-            # ?bufferMs= before promoting the response to SSE. Reject
-            # malformed combinations with a structured 400 envelope per
-            # stream-modes.test.ts + stream-modes-buffer.test.ts +
-            # stream-modes-mixed.test.ts.
-            params = parse_qs(query)
-            stream_mode_raw = params.get("streamMode", [None])[0]
-            if stream_mode_raw is not None:
-                modes = [m for m in stream_mode_raw.split(",") if m]
-                if not modes:
-                    self._send_error_envelope(
-                        400,
-                        "unsupported_stream_mode",
-                        "streamMode MUST be one or more known modes.",
-                        {"details": {"supported": sorted(SUPPORTED_STREAM_MODES)}},
-                    )
-                    return
-                unknown = [m for m in modes if m not in SUPPORTED_STREAM_MODES]
-                if unknown:
-                    self._send_error_envelope(
-                        400,
-                        "unsupported_stream_mode",
-                        f"Unknown streamMode value(s): {','.join(unknown)}.",
-                        {"details": {"supported": sorted(SUPPORTED_STREAM_MODES),
-                                     "unknown": unknown}},
-                    )
-                    return
-                # `values` mode is exclusive — cannot combine with other
-                # modes per stream-modes-mixed.test.ts §"rejects
-                # streamMode=values,updates".
-                if "values" in modes and len(modes) > 1:
-                    self._send_error_envelope(
-                        400,
-                        "unsupported_stream_mode",
-                        "streamMode=values cannot be combined with other modes.",
-                        {"details": {"supported": sorted(SUPPORTED_STREAM_MODES),
-                                     "exclusive": "values"}},
-                    )
-                    return
-            buffer_ms_raw = params.get("bufferMs", [None])[0]
-            if buffer_ms_raw is not None:
-                try:
-                    buffer_ms = int(buffer_ms_raw)
-                except ValueError:
-                    self._send_error_envelope(
-                        400,
-                        "validation_error",
-                        f"bufferMs MUST be an integer (got '{buffer_ms_raw}').",
-                    )
-                    return
-                # stream-modes.md §"Aggregation hint" — valid range is
-                # 0..5000 (5 seconds upper bound; larger values are out-of-
-                # range, NOT clamped). stream-modes-buffer.test.ts rejects
-                # bufferMs=99999 with 400.
-                if buffer_ms < 0 or buffer_ms > 5000:
-                    self._send_error_envelope(
-                        400,
-                        "validation_error",
-                        f"bufferMs MUST be in [0, 5000] (got {buffer_ms}).",
-                        {"details": {"minBufferMs": 0, "maxBufferMs": 5000}},
-                    )
-                    return
+        @route("GET", "/runs/{runId}", True)
+        def get_run(ctx: Ctx) -> Reply:
+            run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+            etag = f'"seq-{store.last_sequence(run["run_id"])}-{run["status"]}"'
+            if if_none_match(ctx, etag):
+                return Reply(304, None, {"ETag": etag})
+            return Reply(200, self.snapshot(run), {"ETag": etag})
 
-            # Resolve effective modes + buffer setting per stream-modes.md.
-            # Default mode (no streamMode param) is "updates" per
-            # stream-modes.md §"Mode selection" + stream-modes.test.ts
-            # "updates (default) closes on terminal event".
-            effective_modes: set[str] = (
-                set(modes) if stream_mode_raw is not None else {"updates"}
+        @route("GET", "/runs/{runId}/events/poll", True)
+        def poll(ctx: Ctx) -> Reply:
+            return self.poll(ctx)
+
+        @route("GET", "/runs/{runId}/events", True)
+        def stream(ctx: Ctx) -> object:
+            return self.stream(ctx)
+
+        @route("POST", "/runs/{runId}/cancel", True)
+        def cancel(ctx: Ctx) -> Reply:
+            def go() -> Reply:
+                run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+                body = ctx.body()
+                reason = body["reason"] if isinstance(body.get("reason"), str) else "caller-requested"
+                return Reply(200, {"runId": run["run_id"], "status": ex.request_cancel(run, reason)})
+
+            return self.with_idempotency(ctx, "cancelRun", go)
+
+        @route("POST", "/runs:bulk-cancel", True)
+        def bulk_cancel(ctx: Ctx) -> Reply:
+            return self.with_idempotency(ctx, "bulkCancelRuns", lambda: self.bulk_cancel(ctx))
+
+        @route("POST", "/runs/{runId}:pause", True)
+        def pause(ctx: Ctx) -> Reply:
+            return self.with_idempotency(ctx, "pauseRun", lambda: self.pause(ctx))
+
+        @route("POST", "/runs/{runId}:resume", True)
+        def resume(ctx: Ctx) -> Reply:
+            def go() -> Reply:
+                run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+                body = ctx.body()
+                if run["status"] in TERMINAL:
+                    raise err("run_terminal", f"a {run['status']} run cannot be resumed", {"runStatus": run["status"]})
+                if run["status"] != "paused":
+                    raise err(
+                        "run_state_conflict",
+                        f"a run in status {run['status']} is not paused",
+                        {"runStatus": run["status"]},
+                    )
+                store.append_event(
+                    run["run_id"],
+                    "run.resumed",
+                    {"reason": body["reason"]} if isinstance(body.get("reason"), str) else {},
+                )
+                store.update_run(run["run_id"], status="running")
+                ex.schedule_run(run["run_id"])
+                return Reply(202, {"runId": run["run_id"], "status": "running", "resumedAt": now_iso()})
+
+            return self.with_idempotency(ctx, "resumeRun", go)
+
+        # idempotency.md §Witness — no node here performs an external effect, so the ledger is empty.
+        @route("GET", "/runs/{runId}/effects", True)
+        def effects(ctx: Ctx) -> Reply:
+            run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+            return Reply(200, {"runId": run["run_id"], "effects": []})
+
+        @route("POST", "/runs/{runId}:fork", True)
+        def fork(ctx: Ctx) -> Reply:
+            return self.with_idempotency(ctx, "forkRun", lambda: self.fork(ctx))
+
+        # ─── Interrupts ───────────────────────────────────────────────────
+        @route("POST", "/runs/{runId}/interrupts/{nodeId}", True)
+        def resolve_by_run(ctx: Ctx) -> Reply:
+            def go() -> Reply:
+                run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+                node_id = ctx.params["nodeId"]
+                if not NODE_ID.match(node_id):
+                    raise err("not_found", "no such node")
+                body = resume_body(ctx)
+                row = store.open_interrupt(run["run_id"], node_id)
+                if row is None:
+                    if run["status"] in TERMINAL or store.any_interrupt(run["run_id"], node_id):
+                        raise err("interrupt_already_resolved", "the interrupt is already resolved, or its run ended")
+                    raise err("not_found", f"node {node_id} holds no interrupt")
+                return Reply(200, ex.resolve(run, row, body["resumeValue"], ctx.subject))
+
+            return self.with_idempotency(ctx, "resolveInterruptByRun", go)
+
+        @route("GET", "/interrupts/{token}", False)
+        def inspect_token(ctx: Ctx) -> Reply:
+            row = ex.verify_token(ctx.params["token"])
+            return Reply(200, json.loads(row["payload_json"]))
+
+        @route("POST", "/interrupts/{token}", False)
+        def resolve_by_token(ctx: Ctx) -> Reply:
+            row = ex.verify_token(ctx.params["token"])
+            run = store.get_run(row["run_id"])
+            assert run is not None
+            body = resume_body(ctx)
+            return Reply(200, ex.resolve(run, row, body["resumeValue"], None))
+
+    # ─── Run operations ───────────────────────────────────────────────────
+    CREATE_KEYS = frozenset(
+        {
+            "workflowId",
+            "inputs",
+            "residency",
+            "tenantId",
+            "scopeId",
+            "callbackUrl",
+            "mode",
+            "evalSuiteRef",
+            "agentId",
+            "runSecrets",
+            "configurable",
+            "tags",
+            "metadata",
+        }
+    )
+    CONFIGURABLE_SECTIONS = {
+        "run": frozenset({"recursionLimit", "runTimeoutMs", "maxLoopIterations", "escalationThreshold"}),
+        "ai": frozenset(
+            {
+                "provider",
+                "model",
+                "temperature",
+                "maxTokens",
+                "credentialRef",
+                "promptOverrides",
+                "mockProvider",
+                "reasoningVerbosity",
+                "maxRefusals",
+            }
+        ),
+        "distillation": frozenset({"tokenBudget"}),
+    }
+
+    def validate_configurable(self, c: Any) -> None:
+        """runs.md §Run options — `configurable` is closed, nested and versioned."""
+        if not isinstance(c, dict):
+            raise err("validation_error", "configurable MUST be an object", {"path": "configurable"})
+        if c.get("version") != 1 or isinstance(c.get("version"), bool):
+            raise err(
+                "validation_error", "configurable.version is REQUIRED and MUST be 1", {"path": "configurable.version"}
             )
-            effective_buffer_ms: int = (
-                buffer_ms if buffer_ms_raw is not None else 0
+        for k, v in c.items():
+            if k == "version":
+                continue
+            if k == "budget":
+                raise err(
+                    "capability_not_provided", "this host does not advertise budget", {"path": "configurable.budget"}
+                )
+            if k == "extensions":
+                if not isinstance(v, dict):
+                    raise err("validation_error", "configurable.extensions MUST be an object")
+                continue
+            section = self.CONFIGURABLE_SECTIONS.get(k)
+            if section is None:
+                raise err("validation_error", f"unknown configurable key {k}", {"path": f"configurable.{k}"})
+            if not isinstance(v, dict):
+                raise err("validation_error", f"configurable.{k} MUST be an object", {"path": f"configurable.{k}"})
+            for inner in v:
+                if inner not in section:
+                    raise err(
+                        "validation_error",
+                        f"unknown key {inner} in configurable.{k}",
+                        {"path": f"configurable.{k}.{inner}"},
+                    )
+            if k == "ai" and "provider" in v:
+                raise err(
+                    "validation_error",
+                    "ai.provider MUST be in aiProviders.providers; this host advertises none",
+                    {"path": "configurable.ai.provider"},
+                )
+            if k == "ai" and "temperature" in v:
+                t = v["temperature"]
+                if not isinstance(t, (int, float)) or isinstance(t, bool) or t < 0 or t > 2:
+                    raise err("validation_error", "ai.temperature is 0..2", {"path": "configurable.ai.temperature"})
+            if k == "run":
+                for name, cap in (
+                    ("recursionLimit", MAX_NODE_EXECUTIONS),
+                    ("runTimeoutMs", self.opts.max_run_duration_ms),
+                ):
+                    x = v.get(name)
+                    if x is not None and (not _is_int(x) or x < 1 or x > cap):
+                        raise err(
+                            "validation_error",
+                            f"run.{name} is out of range (1..{cap})",
+                            {"path": f"configurable.run.{name}"},
+                        )
+
+    def validate_options(self, body: dict[str, Any]) -> dict[str, Any]:
+        if "configurable" in body:
+            self.validate_configurable(body["configurable"])
+        tags = body.get("tags")
+        if "tags" in body and (
+            not isinstance(tags, list) or len(tags) > 100 or not all(isinstance(t, str) and len(t) <= 256 for t in tags)
+        ):
+            raise err("validation_error", "tags: at most 100 strings of at most 256 characters", {"field": "tags"})
+        if "metadata" in body and not isinstance(body["metadata"], dict):
+            raise err("validation_error", "metadata MUST be an object", {"field": "metadata"})
+        return {k: body[k] for k in ("configurable", "tags", "metadata") if k in body}
+
+    def create_run(self, ctx: Ctx) -> Reply:
+        body = ctx.body()
+        subject = ctx.subject
+        assert subject is not None
+        for k in body:
+            if k not in self.CREATE_KEYS:
+                raise err("validation_error", f"unknown key {k}; the createRun body is closed", {"field": k})
+        if body.get("mode") == "eval":
+            raise err(
+                "capability_not_provided",
+                "mode: eval needs agents.evalSuite, which this host does not advertise",
+                {"capability": "agents.evalSuite"},
             )
+        if "mode" in body:
+            raise err("validation_error", "mode MUST be eval when present", {"field": "mode"})
+        workflow_id = body.get("workflowId")
+        if not isinstance(workflow_id, str) or not WORKFLOW_ID.match(workflow_id):
+            raise err("validation_error", "workflowId is REQUIRED", {"field": "workflowId"})
+        if "tenantId" in body and body["tenantId"] != subject["tenant"]:
+            raise err("forbidden", "tenantId MUST be the credential's tenant")
+        if "callbackUrl" in body:
+            raise err(
+                "validation_error",
+                "callbackUrl is refused: this host does not advertise interrupt.callbackDelivery",
+                {"field": "callbackUrl"},
+            )
+        if "runSecrets" in body:
+            raise err(
+                "validation_error",
+                "runSecrets is refused: this host does not advertise secrets.runSecrets",
+                {"field": "runSecrets"},
+            )
+        if "inputs" in body and not isinstance(body["inputs"], dict):
+            raise err("validation_error", "inputs MUST be an object", {"field": "inputs"})
+        options = self.validate_options(body)
+        definition = self.workflows.get(workflow_id)
+        if definition is None:
+            raise err(
+                "not_found", f"workflow {workflow_id} is not registered on this host", {"workflowId": workflow_id}
+            )
+        scope_id = body["scopeId"] if isinstance(body.get("scopeId"), str) else None
+        if (
+            ctx.header("openwop-dedup") == "enforce"
+            and scope_id is not None
+            and self.store.active_for_scope(subject["tenant"], scope_id)
+        ):
+            raise err(
+                "run_already_active",
+                f"a run for scopeId {scope_id} is active",
+                {"scopeId": scope_id},
+                {"Retry-After": "5"},
+            )
+        variables = definition.get("variables") or []
+        inputs = {v["name"]: v["defaultValue"] for v in variables if "defaultValue" in v}
+        inputs.update(body.get("inputs") or {})
+        for v in variables:
+            if v.get("required") is True and inputs.get(v["name"]) is None:
+                raise err(
+                    "validation_error",
+                    f"input {v['name']} is required by the workflow",
+                    {"field": f"inputs.{v['name']}"},
+                )
+        run = self.store.insert_run(
+            run_id=tenant_bound(subject["tenant"]),
+            tenant=subject["tenant"],
+            workflow_id=workflow_id,
+            inputs=inputs,
+            options=options,
+            owner={"tenant": subject["tenant"], "subject": dict(subject)},
+            scope_id=scope_id,
+        )
+        self.executor.schedule_run(run["run_id"])
+        return Reply(201, {"runId": run["run_id"], "status": "pending", **self.links(ctx, run["run_id"])})
 
-            def event_matches_modes(event_type: str) -> bool:
-                """stream-modes.md mode → event-type filter.
-
-                `debug` is the superset (returns True for every event).
-                `updates` is everything except message-flavor events
-                (`agent.*` / `message.*`) — strictly a subset of `debug`
-                per stream-modes.test.ts §"debug ⊇ updates".
-                `values` is state-changing terminal/interrupt events.
-                `messages` is the `agent.*` / `message.*` family (host
-                doesn't emit these today; the filter is correct in
-                principle for forward-compat).
-                The function returns True iff the event matches ANY of the
-                requested modes (union semantics for comma-separated subsets).
-                """
-                for m in effective_modes:
-                    if m == "debug":
-                        return True
-                    if m == "updates":
-                        if not (
-                            event_type.startswith("agent.")
-                            or event_type.startswith("message.")
-                        ):
-                            return True
-                    elif m == "values":
-                        if event_type in {
-                            "run.completed",
-                            "run.failed",
-                            "run.cancelled",
-                            "interrupt.requested",
-                            "interrupt.resolved",
-                        }:
-                            return True
-                    elif m == "messages":
-                        if event_type.startswith("agent.") or event_type.startswith(
-                            "message."
-                        ):
-                            return True
-                return False
-
-            last_event_id_header = self.headers.get("Last-Event-ID", "")
-            resume_after = -1
+    def list_runs(self, ctx: Ctx) -> Reply:
+        """RFC 0182 listRuns — newest first; the cursor is MAC'd so a cursor this host did not mint is refused."""
+        tenant = ctx.subject["tenant"]  # type: ignore[index]
+        q = ctx.query
+        limit_raw = q.get("limit")
+        if limit_raw is not None and not POSITIVE_INT.match(limit_raw):
+            raise err("validation_error", "limit MUST be an integer >= 1", {"field": "limit"})
+        limit = min(RUN_LIST_MAX_PAGE if limit_raw is None else int(limit_raw), RUN_LIST_MAX_PAGE)
+        workflow_id = q.get("workflowId")
+        if workflow_id is not None and not WORKFLOW_ID.match(workflow_id):
+            raise err("validation_error", "workflowId does not match its grammar", {"field": "workflowId"})
+        status = q.get("status")
+        if status is not None and status not in RUN_STATUSES:
+            raise err("validation_error", "status is not a run status", {"field": "status"})
+        after = None
+        cursor = q.get("cursor")
+        if cursor is not None:
             try:
-                resume_after = int(last_event_id_header) if last_event_id_header else -1
+                created_at, run_id, mac = b64url_decode(cursor).decode("utf-8").split("|")
             except ValueError:
-                resume_after = -1
+                raise err("validation_error", "the cursor is not one this host minted", {"field": "cursor"}) from None
+            expect = self.cursor_mac(f"{created_at}|{run_id}")
+            if not hmac.compare_digest(mac, expect):
+                raise err("validation_error", "the cursor is not one this host minted", {"field": "cursor"})
+            after = (created_at, run_id)
+        rows = self.store.list_runs(tenant, limit=limit + 1, workflow_id=workflow_id, status=status, after=after)
+        page = rows[:limit]
+        body: dict[str, Any] = {"runs": [self.snapshot(r) for r in page]}
+        if len(rows) > limit and page:
+            last = page[-1]
+            payload = f"{last['created_at']}|{last['run_id']}"
+            body["nextCursor"] = b64url(f"{payload}|{self.cursor_mac(payload)}".encode())
+        return Reply(200, body)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            # stream-modes.md §"Server-closed stream": the host closes
-            # the socket after emitting the terminal run.* event so SSE
-            # clients see EOF and can finalize. Connection: close pins
-            # this — without it BaseHTTPRequestHandler keeps the socket
-            # open via HTTP/1.1 keep-alive and clients hang until
-            # their timeout fires. close_connection=True instructs the
-            # server-side handle_one_request loop to close after this
-            # response (the Connection header alone is just a hint).
-            self.send_header("Connection", "close")
-            self.close_connection = True
-            self.end_headers()
+    def cursor_mac(self, payload: str) -> str:
+        return b64url(hmac.new(self.cursor_secret.encode(), payload.encode(), hashlib.sha256).digest())
 
-            # Per-event emit (bufferMs == 0 or absent) — unchanged path.
-            def write_event_single(event: Any) -> bool:
-                """Return False on broken pipe (client disconnected)."""
-                try:
-                    payload = (
-                        f"id: {event.seq}\n"
-                        f"event: {event.type}\n"
-                        f"data: {json.dumps(event.to_dict())}\n\n"
-                    ).encode("utf-8")
-                    self.wfile.write(payload)
-                    self.wfile.flush()
-                    return True
-                except (BrokenPipeError, ConnectionResetError):
-                    return False
+    def poll(self, ctx: Ctx) -> Reply:
+        """events.md §Poll — `afterSequence` is an exclusive cursor; long-polls up to `timeout` seconds."""
+        run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+        raw_after = ctx.query.get("afterSequence")
+        if raw_after is not None and not NON_NEGATIVE_INT.match(raw_after):
+            raise err("validation_error", "afterSequence MUST be an integer >= 0", {"field": "afterSequence"})
+        raw_timeout = ctx.query.get("timeout")
+        timeout = 30 if raw_timeout is None else (int(raw_timeout) if POSITIVE_INT.match(raw_timeout) else -1)
+        if timeout < 1 or timeout > 60:
+            raise err("validation_error", "timeout is 1..60 seconds", {"field": "timeout"})
+        after = -1 if raw_after is None else int(raw_after)
+        until = now_ms() + timeout * 1000
+        events = self.read_events(run["run_id"], after)
+        fresh = self.store.get_run(run["run_id"]) or run
+        while not events and fresh["status"] not in TERMINAL and now_ms() < until and not self.closing.is_set():
+            self.store.wait_for_change(min(0.25, max(0.01, (until - now_ms()) / 1000)))
+            events = self.read_events(run["run_id"], after)
+            fresh = self.store.get_run(run["run_id"]) or run
+        return Reply(
+            200,
+            {
+                "runId": run["run_id"],
+                "events": events,
+                "lastSequence": self.store.last_sequence(run["run_id"]),
+                "status": fresh["status"],
+                "isTerminal": fresh["status"] in TERMINAL,
+            },
+        )
 
-            # Batch emit (bufferMs > 0) — stream-modes.md §"Aggregation
-            # hint". Events accumulate in `pending_batch`; flushed when
-            # bufferMs elapses OR a terminal event arrives. Terminal-flush
-            # is force-emit BEFORE the timer fires per stream-modes-
-            # buffer.test.ts §"forces flush on terminal".
-            pending_batch: list[dict[str, Any]] = []
-            last_flush_monotonic = time.monotonic()
+    def stream(self, ctx: Ctx) -> object:
+        """events.md §SSE frames — `id:` is the sequence, `event:` the type (single mode)
+        or the admitting mode (mixed), `data:` the RunEvent. Honours `streamMode`,
+        `Last-Event-ID` (an exclusive cursor) and `bufferMs`; closes on the terminal."""
+        run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+        run_id = run["run_id"]
+        modes = parse_stream_modes(ctx.query.get("streamMode"))
+        last_raw = ctx.header("last-event-id")
+        if last_raw is not None and not NON_NEGATIVE_INT.match(last_raw.strip()):
+            raise err("validation_error", "Last-Event-ID MUST be a non-negative integer", {"header": "Last-Event-ID"})
+        buffer_raw = ctx.query.get("bufferMs")
+        buffer_ms = 0 if buffer_raw is None else (int(buffer_raw) if NON_NEGATIVE_INT.match(buffer_raw) else -1)
+        if buffer_ms < 0 or buffer_ms > 5000:
+            raise err("validation_error", "bufferMs is 0..5000", {"field": "bufferMs"})
+        delivered = -1 if last_raw is None else int(last_raw.strip())
+        values = "values" in modes
+        out = ctx.handler.start_stream()
+        batch: list[dict[str, Any]] = []
 
-            def flush_batch() -> bool:
-                """Emit accumulated events as a single `event: batch` frame."""
-                nonlocal last_flush_monotonic
-                if not pending_batch:
-                    last_flush_monotonic = time.monotonic()
-                    return True
-                try:
-                    payload = (
-                        f"event: batch\n"
-                        f"data: {json.dumps(list(pending_batch))}\n\n"
-                    ).encode("utf-8")
-                    self.wfile.write(payload)
-                    self.wfile.flush()
-                    pending_batch.clear()
-                    last_flush_monotonic = time.monotonic()
-                    return True
-                except (BrokenPipeError, ConnectionResetError):
-                    return False
+        def frame(id_: int, event: str, data: Any) -> None:
+            out.write(f"id: {id_}\nevent: {event}\ndata: ".encode() + _dumps(data) + b"\n\n")
 
-            def write_event_batched(event: Any) -> bool:
-                """Append to pending batch + flush if bufferMs elapsed or
-                event is terminal (force-flush)."""
-                pending_batch.append(event.to_dict())
-                is_terminal = event.type in {
-                    "run.completed",
-                    "run.failed",
-                    "run.cancelled",
-                }
-                age_ms = (time.monotonic() - last_flush_monotonic) * 1000.0
-                if is_terminal or age_ms >= effective_buffer_ms:
-                    return flush_batch()
-                return True
+        def flush() -> None:
+            nonlocal batch
+            if batch:
+                frame(batch[-1]["sequence"], "batch", batch)
+                batch = []
 
-            def write_event(event: Any) -> bool:
-                """Mode-filter + dispatch to per-event or batch emit."""
-                if not event_matches_modes(event.type):
-                    return True
-                if effective_buffer_ms > 0:
-                    return write_event_batched(event)
-                return write_event_single(event)
+        def emit(doc: dict[str, Any]) -> bool:
+            """Deliver one event; True when the stream is finished."""
+            nonlocal delivered
+            delivered = doc["sequence"]
+            mode = admitted_by(modes, doc["type"])
+            if mode is not None:
+                if buffer_ms > 0:
+                    batch.append(doc)
+                    if doc["type"] == "node.suspended" or doc["type"] in TERMINAL_EVENTS:
+                        flush()
+                else:
+                    frame(doc["sequence"], doc["type"] if len(modes) == 1 else mode, doc)
+                if values and mode == "values":
+                    frame(doc["sequence"], "state.snapshot", self.snapshot(self.store.get_run(run_id) or run))
+            return doc["type"] in TERMINAL_EVENTS
 
-            # Drain backlog past the resume point.
-            highest_emitted = resume_after
-            for event in list(iter_events_since(run, resume_after)):
-                if not write_event(event):
-                    return
-                highest_emitted = event.seq
+        try:
+            if values and last_raw is not None:
+                frame(delivered, "state.snapshot", self.snapshot(run))
+            last_write = now_ms()
+            tail = buffer_ms / 1000 if buffer_ms > 0 else 0.25
+            while not self.closing.is_set():
+                done = False
+                for doc in self.read_events(run_id, delivered):
+                    if emit(doc):
+                        done = True
+                        break
+                if buffer_ms > 0:
+                    flush()
+                fresh = self.store.get_run(run_id)
+                if (
+                    done
+                    or fresh is None
+                    or fresh["status"] in TERMINAL
+                    and not self.store.events_after(run_id, delivered)
+                ):
+                    flush()
+                    break
+                if now_ms() - last_write > KEEP_ALIVE_SECONDS * 1000:
+                    out.write(b": keep-alive\n\n")
+                    last_write = now_ms()
+                self.store.wait_for_change(tail)
+            out.close()
+        except (BrokenPipeError, ConnectionResetError, socket.timeout, OSError):
+            ctx.handler.close_connection = True
+        return STREAMED
 
-            if run.is_terminal():
-                # Force-flush any pending buffered events before closing.
-                if effective_buffer_ms > 0:
-                    flush_batch()
-                return
-
-            # Live tail.
+    def bulk_cancel(self, ctx: Ctx) -> Reply:
+        body = ctx.body()
+        for k in body:
+            if k not in ("runIds", "reason"):
+                raise err("validation_error", f"unknown key {k}", {"field": k})
+        ids = body.get("runIds")
+        if not isinstance(ids, list) or not ids:
+            raise err("validation_error", "runIds MUST be a non-empty array", {"field": "runIds", "maxRunIds": 100})
+        if len(ids) > 100:
+            raise err("validation_error", "runIds exceeds the host cap", {"maxRunIds": 100})
+        reason = body["reason"] if isinstance(body.get("reason"), str) else "caller-requested"
+        results = []
+        for id_ in ids:
             try:
-                while True:
-                    wait_for_next_event_or_terminal(run, highest_emitted, timeout_s=25.0)
-                    pending = list(iter_events_since(run, highest_emitted))
-                    for event in pending:
-                        if not write_event(event):
-                            return
-                        highest_emitted = event.seq
-                        if event.type in {"run.completed", "run.failed", "run.cancelled"}:
-                            return
-                    if run.is_terminal() and not pending:
-                        return
-            finally:
-                # Always flush any buffered events on exit (terminal, broken
-                # pipe, exception). Catches the case where the loop exited
-                # before write_event_batched got to force-flush.
-                if effective_buffer_ms > 0 and pending_batch:
-                    flush_batch()
+                if not isinstance(id_, str):
+                    raise err("validation_error", "a runId MUST be a string")
+                run = self.run_for(ctx.subject, unproject_bound_id(id_))  # type: ignore[arg-type]
+                results.append({"runId": id_, "ok": True, "status": self.executor.request_cancel(run, reason)})
+            except HostError as e:
+                results.append({"runId": id_ if isinstance(id_, str) and id_ else "?", "ok": False, "error": e.body()})
+        return Reply(200, {"results": results})
 
-        def _handle_debug_bundle(self, run_id: str) -> None:
-            """GET /v1/runs/{runId}/debug-bundle — portable diagnostic export.
+    def pause(self, ctx: Ctx) -> Reply:
+        run = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+        run_id = run["run_id"]
+        body = ctx.body()
+        drain = body.get("drainPolicy", "drain-current-node")
+        if drain not in ("immediate", "drain-current-node"):
+            raise err("validation_error", "drainPolicy is immediate | drain-current-node", {"field": "drainPolicy"})
+        if run["status"] in TERMINAL:
+            raise err("run_terminal", f"a {run['status']} run cannot be paused", {"runStatus": run["status"]})
+        if run["status"] not in ("running", "pending") or run["pause_requested"] is not None:
+            pending = " (a pause is already pending)" if run["pause_requested"] is not None else ""
+            raise err(
+                "run_state_conflict",
+                f"a run in status {run['status']} cannot be paused{pending}",
+                {"runStatus": run["status"]},
+            )
+        reason = body["reason"] if isinstance(body.get("reason"), str) else "operator"
+        executing = self.executor.is_active(run_id)
+        if executing and drain == "drain-current-node":
+            # The run's thread pauses it when the current node reaches its terminal.
+            self.store.update_run(run_id, pause_requested=drain)
+            return Reply(202, {"runId": run_id, "status": "paused"})
+        # Nothing executing, or `immediate`: record the pause now. An executing
+        # attempt is cut between events; the run's thread sees `paused` and stops.
+        payload: dict[str, Any] = {"reason": reason, "drainPolicy": drain}
+        if executing:
+            open_: tuple[str, int] | None = None
+            for e in self.read_events(run_id):
+                n = e.get("nodeId")
+                if e["type"] == "node.started" and n is not None:
+                    open_ = (n, int(e["payload"].get("attempt", 0)) + 1)
+                if (
+                    e["type"] in ("node.completed", "node.failed", "node.suspended", "node.cancelled")
+                    and open_
+                    and n == open_[0]
+                ):
+                    open_ = None
+            if open_ is not None:
+                payload["interruptedNodeId"], payload["interruptedAttempt"] = open_
+        self.store.append_event(run_id, "run.paused", payload)
+        self.store.update_run(run_id, status="paused", pause_requested=None)
+        return Reply(202, {"runId": run_id, "status": "paused", "pausedAt": now_iso()})
 
-            Per spec/v1/debug-bundle.md + schemas/debug-bundle.schema.json:
-              - bundleVersion MUST match `^[0-9]+\\.[0-9]+$` ("1.0" for v1.x).
-              - metrics.eventCount MUST equal events.length (the count of
-                events actually included in this response). When the event
-                log is truncated, the original count is preserved separately
-                in `truncatedOriginalCount` so callers can decide whether
-                to re-request a paged view.
-              - redactionApplied / redactionMode describe the masking policy
-                in effect (this host uses `omit` — user-supplied inputs and
-                event `data` payloads are dropped). Production hosts MAY use
-                `mask` or `hash` per capabilities.compliance.defaultMode.
+    def fork(self, ctx: Ctx) -> Reply:
+        """replay.md — events `< fromSeq` are copied as fixed history; the child then
+        re-executes. A replay keys its interrupts on its source and takes the
+        source's recorded resolution; a branch is an independent run."""
+        source = self.run_for(ctx.subject, ctx.params["runId"])  # type: ignore[arg-type]
+        body = ctx.body()
+        for k in body:
+            if k not in ("mode", "fromSeq", "runOptionsOverlay"):
+                raise err("validation_error", f"unknown key {k}", {"field": k})
+        mode = body.get("mode")
+        if mode not in ("replay", "branch"):
+            raise err("validation_error", "mode is replay | branch", {"field": "mode"})
+        if "fromSeq" not in body and mode == "branch":
+            raise err("validation_error", "fromSeq is REQUIRED for branch", {"field": "fromSeq"})
+        from_seq = body.get("fromSeq", 0)
+        if not _is_int(from_seq) or from_seq < 0:
+            raise err("validation_error", "fromSeq MUST be an integer >= 0", {"field": "fromSeq"})
+        overlay = body.get("runOptionsOverlay")
+        if "runOptionsOverlay" in body and not isinstance(overlay, dict):
+            raise err("validation_error", "runOptionsOverlay MUST be an object", {"field": "runOptionsOverlay"})
+        if mode == "replay" and overlay:
+            raise err("validation_error", "runOptionsOverlay is branch-only", {"field": "runOptionsOverlay"})
+        events = self.store.events_after(source["run_id"], -1)
+        if from_seq > 0 and not any(e["seq"] == from_seq for e in events):
+            raise err("fork_point_invalid", f"fromSeq {from_seq} is not in the source log", {"fromSeq": from_seq})
+        terminal = next((e for e in events if e["type"] in TERMINAL_EVENTS), None)
+        if terminal is not None and from_seq > terminal["seq"]:
+            raise err(
+                "fork_point_invalid", f"fromSeq {from_seq} is past the source's terminal event", {"fromSeq": from_seq}
+            )
+        options = {**options_of(source), **(self.validate_options(overlay) if overlay is not None else {})}
+        child = self.store.insert_run(
+            run_id=tenant_bound(source["tenant"]),
+            tenant=source["tenant"],
+            workflow_id=source["workflow_id"],
+            inputs=json.loads(source["inputs_json"]),
+            options=options,
+            owner=json.loads(source["owner_json"]),
+            parent_run_id=source["run_id"],
+            fork_mode=mode,
+            from_seq=from_seq,
+        )
+        self.store.copy_prefix(source["run_id"], child["run_id"], from_seq)
+        self.executor.schedule_run(child["run_id"])
+        return Reply(
+            201,
+            {
+                "runId": child["run_id"],
+                "sourceRunId": source["run_id"],
+                "fromSeq": from_seq,
+                "mode": mode,
+                "status": "pending",
+                "eventsUrl": self.links(ctx, child["run_id"])["eventsUrl"],
+            },
+        )
 
-            Truncation policy: cap at MAX_EVENTS_PER_BUNDLE events. When
-            exceeded, the first half + last half are kept (causally most-
-            interesting envelopes; head-and-tail style) and `truncated: true`
-            + `truncatedReason` is set.
-            """
-            if not self._check_auth():
+    def close(self) -> None:
+        self.closing.set()
+        self.store.notify()
+        self.executor.close()
+        self.store.close()
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def if_none_match(ctx: Ctx, etag: str) -> bool:
+    """RFC 9110 §13.1.2 — `*` or any listed tag, under weak comparison."""
+    h = ctx.header("if-none-match")
+    if h is None:
+        return False
+
+    def strip(t: str) -> str:
+        t = t.strip()
+        return t[2:] if t.startswith("W/") else t
+
+    return any(t.strip() == "*" or strip(t) == strip(etag) for t in h.split(","))
+
+
+def resume_body(ctx: Ctx) -> dict[str, Any]:
+    body = ctx.body()
+    for k in body:
+        if k != "resumeValue":
+            raise err("validation_error", f"unknown key {k}; the body is {{ resumeValue }}", {"field": k})
+    if "resumeValue" not in body:
+        raise err("validation_error", "resumeValue is REQUIRED", {"field": "resumeValue"})
+    return body
+
+
+STREAM_MODE = re.compile(r"^(values|(updates|messages|debug)(,(updates|messages|debug))*)$")
+DEBUG_ONLY = frozenset(
+    {
+        "log.appended",
+        "variable.changed",
+        "version.pinned",
+        "lease.acquired",
+        "lease.renewed",
+        "lease.lost",
+        "lease.handed-off",
+        "node.retried",
+    }
+)
+
+
+def parse_stream_modes(raw: str | None) -> list[str]:
+    """events.md §Stream modes — the one grammar; this host serves all four modes."""
+    value = "updates" if not raw else raw
+    if not STREAM_MODE.match(value):
+        raise err(
+            "unsupported_stream_mode",
+            f"streamMode {value} is outside the grammar",
+            {"supported": ["updates", "values", "messages", "debug"]},
+        )
+    return value.split(",")
+
+
+def admitted_by(modes: list[str], type_: str) -> str | None:
+    """events.md §Stream modes — which mode admits an event, or None."""
+    for mode in modes:
+        if mode == "debug":
+            return "debug"
+        if mode in ("updates", "values") and type_ not in DEBUG_ONLY:
+            return mode
+        if mode == "messages" and type_ == "output.chunk":
+            return "messages"
+    return None
+
+
+class ChunkedWriter:
+    """HTTP/1.1 chunked transfer encoding, so a stream can end without closing the connection."""
+
+    def __init__(self, wfile: Any) -> None:
+        self.wfile = wfile
+
+    def write(self, data: bytes) -> None:
+        self.wfile.write(f"{len(data):X}\r\n".encode() + data + b"\r\n")
+        self.wfile.flush()
+
+    def close(self) -> None:
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
+
+# ─── The front door ──────────────────────────────────────────────────────────
+#
+# versioning.md §1.3: one major is served, 2. No header, `2` or `2.<n>` is
+# served under it; any other major is 406; a malformed header is 400. Every
+# protocol response carries `OpenWOP-Version: 2.0` (§1.4), refusals included.
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = HOST_NAME
+    app: App  # set on the subclass `serve` builds
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 — stdlib signature
+        pass
+
+    def do_GET(self) -> None:
+        self.dispatch()
+
+    do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_GET
+
+    def read_body(self) -> bytes:
+        if self._body is not None:
+            return self._body
+        if (self.headers.get("transfer-encoding") or "").lower() == "chunked":
+            chunks = bytearray()
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if size == 0:
+                    while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+                        pass
+                    break
+                chunks += self.rfile.read(size)
+                self.rfile.readline()
+                if len(chunks) > MAX_REQUEST_BODY_BYTES:
+                    self.close_connection = True
+                    raise err(
+                        "validation_error",
+                        "the request body exceeds limits.maxRequestBodyBytes",
+                        {"maxRequestBodyBytes": MAX_REQUEST_BODY_BYTES},
+                    )
+            self._body = bytes(chunks)
+            return self._body
+        length = int(self.headers.get("content-length") or 0)
+        if length > MAX_REQUEST_BODY_BYTES:
+            self.close_connection = True
+            raise err(
+                "validation_error",
+                "the request body exceeds limits.maxRequestBodyBytes",
+                {"maxRequestBodyBytes": MAX_REQUEST_BODY_BYTES},
+            )
+        self._body = self.rfile.read(length) if length > 0 else b""
+        return self._body
+
+    def start_stream(self) -> ChunkedWriter:
+        self._streaming = True
+        self.send_response(200)
+        self.send_header("OpenWOP-Version", PROTOCOL_VERSION)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        self.wfile.flush()
+        return ChunkedWriter(self.wfile)
+
+    def send(self, reply: Reply) -> None:
+        payload = b"" if reply.body is None else _dumps(reply.body)
+        self.send_response(reply.status)
+        self.send_header("OpenWOP-Version", PROTOCOL_VERSION)
+        for k, v in reply.headers.items():
+            self.send_header(k, v)
+        if reply.body is not None:
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(payload)
+
+    def dispatch(self) -> None:
+        self._body: bytes | None = None
+        self._streaming = False
+        app = self.app
+        split = urlsplit(self.path)
+        path = split.path
+        try:
+            version = (self.headers.get("openwop-version") or "").strip()
+            if version:
+                m = VERSION_HEADER.match(version)
+                if not m:
+                    raise err(
+                        "validation_error",
+                        "OpenWOP-Version MUST be <major> or <major>.<minor>",
+                        {"header": "OpenWOP-Version"},
+                    )
+                if m.group(1) != "2":
+                    raise err(
+                        "protocol_version_unsupported",
+                        f"major {m.group(1)} is not served by this host",
+                        {"protocolVersions": [PROTOCOL_VERSION]},
+                    )
+            method = self.command.upper()
+            matched = None
+            path_seen = False
+            for r_method, pattern, auth, fn in app.routes:
+                m = pattern.match(path)
+                if not m:
+                    continue
+                path_seen = True
+                if r_method != method:
+                    continue
+                matched = (auth, fn, m.groupdict())
+                break
+            if matched is None:
+                raise err("not_found", f"{method} is not served at {path}" if path_seen else f"no operation at {path}")
+            auth, fn, groups = matched
+            params = {}
+            for k, v in groups.items():
+                decoded = unquote(v)
+                params[k] = unproject_bound_id(decoded) if k == "runId" else decoded
+            subject = app.authenticate(self.headers.get("authorization")) if auth else None
+            query: dict[str, str] = {}
+            for k, v in parse_qsl(split.query, keep_blank_values=True):
+                query.setdefault(k, v)
+            reply = fn(Ctx(self, path, query, params, subject))
+            if reply is not STREAMED:
+                self._drain()
+                self.send(reply)
+        except HostError as e:
+            if self._streaming:
+                self.close_connection = True
                 return
-            run = state.runs.get(run_id)
-            if run is None:
-                self._send_error_envelope(404, "run_not_found", f"Unknown runId: {run_id}")
+            self._drain()
+            self.send(Reply(e.status, e.body(), e.headers))
+        except Exception as e:  # noqa: BLE001
+            if self._streaming:
+                self.close_connection = True
                 return
+            print(f"[{HOST_NAME}] unhandled error: {e!r}", flush=True)
+            self.close_connection = True
+            self.send(Reply(500, {"error": "internal_error", "message": "the host failed to serve the request"}))
 
-            MAX_EVENTS_PER_BUNDLE = 1000
-            original_event_count = len(run.events)
-            truncated = original_event_count > MAX_EVENTS_PER_BUNDLE
-            if truncated:
-                # Head + tail (preserves run.started + recent activity).
-                half = MAX_EVENTS_PER_BUNDLE // 2
-                kept = list(run.events[:half]) + list(run.events[-half:])
-            else:
-                kept = list(run.events)
-
-            node_ids = {e.node_id for e in kept if e.node_id is not None}
-
-            # Redaction: omit event `data` payloads (may carry interrupt
-            # configs, approval tokens, BYOK credentialRefs, LLM messages).
-            # Receivers wanting the full payload MUST use authenticated
-            # GET /v1/runs/{id} or specialized inspection endpoints.
-            rendered_events = [
-                {
-                    "sequence": e.seq,
-                    "type": e.type,
-                    "timestamp": e.timestamp,
-                    "nodeId": e.node_id,
-                    # `data` intentionally omitted per redaction policy.
-                }
-                for e in kept
-            ]
-
-            bundle: dict[str, Any] = {
-                "bundleVersion": "1.0",
-                "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "host": {
-                    "name": "openwop-host-in-memory-python",
-                    "version": "1.0.0",
-                    "vendor": "openwop-spec (reference example)",
-                },
-                "run": {
-                    "runId": run.run_id,
-                    "workflowId": run.workflow_id,
-                    "status": run.status,
-                    "inputs": {},  # redaction: omit user-supplied inputs
-                    "startedAt": run.started_at,
-                    "endedAt": run.ended_at,
-                    "variables": {},
-                    **({"error": run.error} if run.error else {}),
-                },
-                "events": rendered_events,
-                "spans": [],
-                "metrics": {
-                    "nodeCount": len(node_ids),
-                    "eventCount": len(rendered_events),
-                },
-                "redactionApplied": True,
-                "redactionMode": "omit",
-            }
-            if truncated:
-                bundle["truncated"] = True
-                bundle["truncatedReason"] = "events_truncated_to_size_cap"
-                bundle["truncatedOriginalCount"] = original_event_count
-            self._send_json(200, bundle, {"Cache-Control": "no-store"})
-
-    return Handler
+    def _drain(self) -> None:
+        """Read an unread body, so the next request on a kept-alive connection starts clean."""
+        if self._body is None and not self.close_connection:
+            try:
+                self.read_body()
+            except HostError:
+                self.close_connection = True
 
 
-def serve(host: str, port: int) -> tuple[ThreadingHTTPServer, _State, threading.Thread]:
-    """Build + start the server. Returns (server, state, thread)."""
-    state = _State()
-    handler_cls = make_handler(state)
-    server = ThreadingHTTPServer((host, port), handler_cls)
-    thread = threading.Thread(target=server.serve_forever, daemon=True, name="openwop-host-http")
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def serve(opts: HostOptions) -> tuple[Server, App, threading.Thread, int]:
+    app = App(opts)
+    handler = type("BoundHandler", (Handler,), {"app": app})
+    server = Server((opts.host, opts.port), handler)
+    thread = threading.Thread(target=server.serve_forever, name="http", daemon=True)
     thread.start()
-    return server, state, thread
+    resumed = app.executor.resume_unfinished()
+    return server, app, thread, resumed

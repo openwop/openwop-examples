@@ -1,0 +1,66 @@
+[
+  {
+    "workflow": "conformance-noop",
+    "core": true,
+    "terminal": "completed / completed",
+    "counts": "4 / 4",
+    "sequence": "run.started → node.started → node.completed → run.completed",
+    "outputs": "equal",
+    "schema": "0 / 0 invalid",
+    "same": true
+  },
+  {
+    "workflow": "conformance-delay",
+    "core": true,
+    "terminal": "completed / completed",
+    "counts": "4 / 4",
+    "sequence": "run.started → node.started → node.completed → run.completed",
+    "outputs": "equal",
+    "schema": "0 / 0 invalid",
+    "same": true
+  },
+  {
+    "workflow": "conformance-multi-node",
+    "core": true,
+    "terminal": "completed / completed",
+    "counts": "8 / 8",
+    "sequence": "run.started → node.started → node.completed → node.started → node.completed → node.started → node.completed → run.completed",
+    "outputs": "equal",
+    "schema": "0 / 0 invalid",
+    "same": true
+  },
+  {
+    "workflow": "conformance-failure",
+    "core": false,
+    "terminal": "failed / failed",
+    "counts": "4 / 4",
+    "sequence": "run.started → node.started → node.failed → run.failed",
+    "outputs": "equal",
+    "schema": "0 / 0 invalid",
+    "same": true
+  },
+  {
+    "workflow": "conformance-approval",
+    "core": false,
+    "terminal": "completed / completed",
+    "counts": "8 / 8",
+    "sequence": "run.started → node.started → interrupt.requested → node.suspended → interrupt.resolved → node.resumed → node.completed → run.completed",
+    "outputs": "equal",
+    "schema": "0 / 0 invalid",
+    "same": true,
+    "replay": {
+      "terminal": "completed / completed",
+      "sequence": "run.started → node.started → interrupt.resolved → node.resumed → node.completed → run.completed",
+      "pinned": true,
+      "schema": "0 / 0 invalid",
+      "same": true
+    }
+  },
+  {
+    "workflow": "conformance-identity",
+    "core": false,
+    "terminal": "refused 404 not_found / refused 404 not_found",
+    "same": true,
+    "sequence": "n/a (both refused at creation)"
+  }
+]

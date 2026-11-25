@@ -48,14 +48,13 @@ OPENWOP_API_KEY=$YOUR_KEY \
   npm start --prefix examples/approval-workflow
 ```
 
-The v1 hosts (`hosts/in-memory`, `hosts/sqlite`, `hosts/postgres`, `hosts/python`) are frozen: v1 reached end of support on 2026-10-04 (RFC 0234). `sqlite` and `postgres` are being ported to v2; `in-memory` and `python` (v1) will be removed. No sample targets them.
+`hosts/sqlite` and `hosts/python` are v2 hosts too, and the samples above that need only core runs, `idempotency`, `interrupt` or `replay` (`tiny-workflow`, `streaming-client`, `idempotent-runs`, `approval-workflow`, `branch-fork`) run against either: `OPENWOP_BASE_URL=http://127.0.0.1:3839 OPENWOP_API_KEY=openwop-sqlite-dev-key` for SQLite, `OPENWOP_BASE_URL=http://127.0.0.1:3840 OPENWOP_API_KEY=openwop-python-dev-key` for Python (stdlib only: `PYTHONPATH=src python3 -m openwop_host`). `hosts/postgres` is the one remaining v1 host: frozen (v1 reached end of support on 2026-10-04, RFC 0234) and being ported to v2; no sample targets it. The v1-only `in-memory` host was removed, and the v1 Python host was replaced by the v2 one.
 
 ## CI behavior
 
 `.github/workflows/examples.yml` runs every sample end-to-end. Each declares its `host:` target in the matrix:
 
 - `host: v2-reference` — CI starts the v2 reference host on port 3838, then runs the sample.
-- `host: in-memory` — CI starts the in-memory v1 host (no sample uses it today).
 - `host: external` — runs only when the external-host secrets are set (no sample uses it today).
 - `host: dry-run` — the sample needs no host.
 
@@ -97,6 +96,7 @@ See [`docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/P
 ## See also
 
 - [`hosts/v2-reference/`](./hosts/v2-reference/) — the v2 reference host every sample defaults to.
-- [`hosts/in-memory/`](./hosts/in-memory/), [`hosts/sqlite/`](./hosts/sqlite/) — frozen v1 hosts (v1 ended 2026-10-04); for "build your own host", start from `hosts/v2-reference/`.
+- [`hosts/sqlite/`](./hosts/sqlite/) — a durable single-file v2 host and a walkthrough of porting a v1 host to v2.
+- [`hosts/postgres/`](./hosts/postgres/) — frozen v1 host being ported to v2 (v1 ended 2026-10-04).
 - [`spec/v2/core/`](https://github.com/openwop/openwop/tree/main/spec/v2/core) — the v2 prose the samples are written against.
 - [`docs/PACK-CATALOG.md`](https://github.com/openwop/openwop/blob/main/docs/PACK-CATALOG.md) — the published packs grouped by domain.

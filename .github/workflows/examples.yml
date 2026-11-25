@@ -5,7 +5,6 @@ name: Examples CI
 # with package.json having `npm test` defined, then add a row below.
 #
 # Host targets:
-#   - in-memory  — CI starts the in-memory reference host first.
 #   - v2-reference — CI starts the v2 reference host first (port 3838).
 #   - external   — CI runs only when OPENWOP_EXTERNAL_BASE_URL and
 #                  OPENWOP_EXTERNAL_API_KEY secrets are set.
@@ -131,27 +130,6 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # In-memory host setup — only when host == in-memory
-      - name: Install in-memory host
-        if: matrix.example.host == 'in-memory'
-        working-directory: examples/hosts/in-memory
-        run: npm install
-
-      - name: Start in-memory host
-        if: matrix.example.host == 'in-memory'
-        working-directory: examples/hosts/in-memory
-        run: |
-          npm start > /tmp/openwop-host.log 2>&1 &
-          for i in {1..30}; do
-            if curl -sf http://127.0.0.1:3737/.well-known/openwop > /dev/null; then
-              echo "host ready"; exit 0
-            fi
-            sleep 1
-          done
-          echo "host failed to start" >&2
-          cat /tmp/openwop-host.log >&2
-          exit 1
-
       # v2 reference host setup — only when host == v2-reference
       - name: Install v2 reference host
         if: matrix.example.host == 'v2-reference'
@@ -186,21 +164,77 @@ jobs:
         working-directory: examples/${{ matrix.example.name }}
         env:
           # Three host modes:
-          #   - in-memory: target the local reference host started above (localhost:3737)
+          #   - v2-reference: target the local v2 reference host started above (localhost:3838)
           #   - external:  use the operator-provided secrets; when secrets are unset,
           #                leave empty so the example's `if (!BASE_URL) skip()` branch fires
           #   - dry-run:   no env vars needed (the example ignores them)
           # The previous expression collapsed `external + missing secrets` to localhost,
           # which defeated each example's skip-equivalent contract; now external-with-
           # empty-secret falls through to '' and the example exits 0 cleanly.
-          OPENWOP_BASE_URL: ${{ matrix.example.host == 'in-memory' && 'http://127.0.0.1:3737' || matrix.example.host == 'v2-reference' && 'http://127.0.0.1:3838' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_BASE_URL) || '' }}
-          OPENWOP_API_KEY: ${{ matrix.example.host == 'in-memory' && 'openwop-inmem-dev-key' || matrix.example.host == 'v2-reference' && 'openwop-v2-dev-key' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_API_KEY) || '' }}
+          OPENWOP_BASE_URL: ${{ matrix.example.host == 'v2-reference' && 'http://127.0.0.1:3838' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_BASE_URL) || '' }}
+          OPENWOP_API_KEY: ${{ matrix.example.host == 'v2-reference' && 'openwop-v2-dev-key' || (matrix.example.host == 'external' && secrets.OPENWOP_EXTERNAL_API_KEY) || '' }}
         run: npm test
         timeout-minutes: 2
 
       - name: Show host log on failure
-        if: failure() && (matrix.example.host == 'in-memory' || matrix.example.host == 'v2-reference')
+        if: failure() && matrix.example.host == 'v2-reference'
         run: cat /tmp/openwop-host.log
+
+  # The SQLite v2 host's own checks: typecheck (which also checks the
+  # v2-reference contract modules it imports) and the durability test, which
+  # SIGKILLs a host process mid-run and resumes the run from the file.
+  host-sqlite:
+    name: host (sqlite)
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Install
+        working-directory: examples/hosts/sqlite
+        run: npm install --legacy-peer-deps
+      - name: Typecheck
+        working-directory: examples/hosts/sqlite
+        run: npm run typecheck
+      - name: Test
+        working-directory: examples/hosts/sqlite
+        run: npm test
+        timeout-minutes: 3
+
+  # The Python v2 host's own checks: stdlib only, so no install step. The
+  # contract test compares its copied error rows and event types with the
+  # corpus, so fetch @openwop/spec-artifacts first; the durability test
+  # SIGKILLs a host process mid-run and resumes the run from the file.
+  host-python:
+    name: host (python)
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Fetch the v2 corpus (spec-artifacts)
+        run: |
+          mkdir -p /tmp/spec-artifacts && cd /tmp/spec-artifacts
+          npm pack --silent @openwop/spec-artifacts@2.49.14
+          tar -xzf openwop-spec-artifacts-2.49.14.tgz
+      - name: Compile
+        working-directory: examples/hosts/python
+        run: python -m compileall -q src tests
+      - name: Test
+        working-directory: examples/hosts/python
+        env:
+          OPENWOP_SPEC_ARTIFACTS_DIR: /tmp/spec-artifacts/package
+        run: python -m unittest discover -s tests -v
+        timeout-minutes: 3
 
   # Single, always-run required check. Aggregates the (possibly-skipped) real
   # jobs so branch protection has one stable context to require with
@@ -210,7 +244,7 @@ jobs:
   # examples are added or removed.
   gate:
     name: Examples gate
-    needs: [changes, validate-workflow-defs, examples]
+    needs: [changes, validate-workflow-defs, examples, host-sqlite, host-python]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -218,10 +252,12 @@ jobs:
         env:
           VALIDATE_RESULT: ${{ needs.validate-workflow-defs.result }}
           EXAMPLES_RESULT: ${{ needs.examples.result }}
+          HOST_SQLITE_RESULT: ${{ needs.host-sqlite.result }}
+          HOST_PYTHON_RESULT: ${{ needs.host-python.result }}
         run: |
-          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT"
+          echo "validate-workflow-defs=$VALIDATE_RESULT  examples=$EXAMPLES_RESULT  host-sqlite=$HOST_SQLITE_RESULT  host-python=$HOST_PYTHON_RESULT"
           # 'success' and 'skipped' are OK; 'failure'/'cancelled' fail the gate.
-          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT"; do
+          for r in "$VALIDATE_RESULT" "$EXAMPLES_RESULT" "$HOST_SQLITE_RESULT" "$HOST_PYTHON_RESULT"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required examples job did not succeed ($r)."
               exit 1

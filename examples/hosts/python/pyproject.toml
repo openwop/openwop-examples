@@ -3,23 +3,25 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openwop-host-in-memory-python"
-version = "1.0.0"
-description = "Python 3.11 stdlib-only reference host for the openwop v1 wire contract. Mirrors examples/hosts/in-memory/ in shape; drives the @openwop/openwop-conformance suite end-to-end."
+name = "openwop-host-python"
+version = "2.0.0"
+description = "OpenWOP v2 host in Python: stdlib only (http.server, sqlite3, hmac), one SQLite file. Serves the core run floor."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-authors = [
-    { name = "openwop project" },
-]
+authors = [{ name = "openwop project" }]
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/openwop/openwop"
-Repository = "https://github.com/openwop/openwop"
+Homepage = "https://github.com/openwop/openwop-examples"
+Repository = "https://github.com/openwop/openwop-examples"
 
 [project.scripts]
-openwop-host = "openwop_host.__main__:main"
+openwop-host-python = "openwop_host.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

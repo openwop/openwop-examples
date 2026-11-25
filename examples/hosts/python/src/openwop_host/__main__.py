@@ -1,4 +1,4 @@
-"""CLI entry point: `python -m openwop_host`."""
+"""CLI entry point: `python -m openwop_host` (with `src` on PYTHONPATH)."""
 
 from __future__ import annotations
 
@@ -6,38 +6,54 @@ import os
 import signal
 import sys
 import threading
+from pathlib import Path
 
 from . import __version__
-from .server import serve
+from .contract import PROTOCOL_VERSION
+from .fixtures import fixtures_dir_from_env
+from .server import HOST_NAME, HostOptions, serve
+
+PKG_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _env_int(name: str, fallback: int) -> int:
+    try:
+        n = int(os.environ.get(name, ""))
+    except ValueError:
+        return fallback
+    return n if n > 0 else fallback
+
+
+def options_from_env() -> HostOptions:
+    return HostOptions(
+        host=os.environ.get("OPENWOP_HOST", "127.0.0.1"),
+        port=_env_int("OPENWOP_PORT", 3840),
+        db_path=os.environ.get("OPENWOP_SQLITE_PATH", str(PKG_ROOT / "data" / "openwop-host-python.sqlite")),
+        api_key=os.environ.get("OPENWOP_API_KEY", "openwop-python-dev-key"),
+        tenant_b_key=os.environ.get("OPENWOP_TENANT2_API_KEY") or None,
+        max_run_duration_ms=_env_int("OPENWOP_MAX_RUN_DURATION_MS", 600_000),
+        fixtures_dir=fixtures_dir_from_env(),
+        log_resume_tokens=os.environ.get("OPENWOP_LOG_RESUME_TOKENS") == "true",
+    )
 
 
 def main() -> int:
-    host = os.environ.get("OPENWOP_HOST", "127.0.0.1")
-    port = int(os.environ.get("OPENWOP_PORT", "3737"))
-
-    server, state, thread = serve(host, port)
-    # Name where the key came from, never the key itself.
-    key_source = (
-        "from OPENWOP_API_KEY" if "OPENWOP_API_KEY" in os.environ else "built-in dev default"
-    )
-    fixture_count = len(state.workflows)
+    opts = options_from_env()
+    server, app, thread, resumed = serve(opts)
+    port = server.server_address[1]
+    note = f"; resumed {resumed} unfinished run(s)" if resumed else ""
     print(
-        f"[openwop-host-in-memory-python {__version__}] listening on "
-        f"http://{host}:{port} (api key: {key_source}, {fixture_count} fixtures loaded)",
+        f"[{HOST_NAME} {__version__}] listening on http://{opts.host}:{port} "
+        f"(OpenWOP {PROTOCOL_VERSION}; db {opts.db_path}; {len(app.workflows)} fixtures{note})",
         flush=True,
     )
 
-    shutdown_event = threading.Event()
-
-    def _on_signal(signum: int, _frame: object) -> None:  # noqa: ARG001
-        print(f"[openwop-host] received signal {signum}; shutting down", flush=True)
-        shutdown_event.set()
-
-    signal.signal(signal.SIGINT, _on_signal)
-    signal.signal(signal.SIGTERM, _on_signal)
-
-    shutdown_event.wait()
+    stop = threading.Event()
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    stop.wait()
     server.shutdown()
+    app.close()
     server.server_close()
     thread.join(timeout=5)
     return 0

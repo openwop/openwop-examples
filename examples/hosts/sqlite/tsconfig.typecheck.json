@@ -1,0 +1,11 @@
+{
+  "//": "Typecheck only. The reused v2-reference modules import better-sqlite3 types from their own directory; this maps them to this package's copy so the check does not depend on v2-reference being installed. Not read by tsx (a runtime `paths` entry would redirect the real import).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "better-sqlite3": [
+        "./node_modules/@types/better-sqlite3/index.d.ts"
+      ]
+    }
+  }
+}

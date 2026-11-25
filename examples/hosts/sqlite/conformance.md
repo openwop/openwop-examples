@@ -1,175 +1,35 @@
-# Conformance Result: openwop SQLite Reference Host
+# Conformance: SQLite host (v2)
 
-> **Suite-version note (drift #8, 2026-08-25).** Every bundle row below was measured against `@openwop/openwop-conformance@1.130.0`. The suite is now **1.139.0**, and three of the changes between them alter what a run *reports* rather than what a host *does*, so the counts below are **not comparable** to a 1.139.0 run: a run-end disposition summary now surfaces `blocked` / `skipped` / `inapplicable` rows that previously printed as passes; `forkDeclined` treats a `404` on the fork route as `blocked` where it used to hard-fail; and `a2a-task-roundtrip`'s push-egress leg became two-sided. **No re-measurement has been done** — this is a marker, not a new claim, and the honest reading of the rows below is "what 1.130.0 saw on this host on the date given".
-
-
-> **Delivery-header correction — 2026-08-25.** This host emitted `X-openwop-Subscription-Id`, `X-openwop-Signature-Timestamp`, a **bare-hex** `X-openwop-Signature`, no `X-openwop-Event-Type`, and a runtime-default `User-Agent`. `webhooks.md` §"Delivery headers" specifies `X-openwop-Webhook-Id`, `X-openwop-Timestamp`, `X-openwop-Signature: sha256={hex}`, `X-openwop-Event-Type`, and `openwop-webhook-dispatcher/{version}`. The signed **bytes** were always correct (`{timestamp}.{rawBody}`); only the envelope was wrong. All three reference hosts had the same defect — the Python host is a port of the SQLite one, and the suite had asserted the same invented names until it was corrected against the spec in [#914](https://github.com/openwop/openwop/pull/914) (2026-08-09) after a tier-2 host emitted what the spec shows and failed.
->
-> **Why the measurements below never caught it — four different mechanisms, one green.** (1) Runs on suites older than 2026-08-09 asserted the same invented names this host emitted: suite and host were mirrors of each other, and the spec was the oracle neither was checked against. (2) `--certify` runs on a **default-env boot** record `webhook-signed-delivery` as `blocked` — the SSRF guard refuses the loopback receiver — so the assertions were never reached. (3) The one run anywhere in the reference set that *did* execute these assertions with the opt-in on was on the **postgres** sibling (2026-08-16, suite 1.116.0); it went `executed-fail` and was recorded as **"not diagnosed here"**. This host never had a post-2026-08-09 run with the opt-in on, so mechanisms (1) and (2) are the ones that applied here. A defect can survive being measured. (4) The corpus's own `postgres-host-conformance` job **runs this scenario with the opt-in on, on every push to `main`, and it has failed at `webhook-signed-delivery.test.ts:194` every time since 2026-08-09** — absorbed by an **85% pass-rate floor** the run clears with room to spare — the 2026-08-20 `main` run measured `passed=2907 total=3031 pass-rate=95%` and exited 0 with that assertion red. **A pass-rate floor converts a specific, named, reproducible assertion failure into an anonymous fraction**, and a ten-point cushion is wide enough that no single scenario can move the verdict. This is the mechanism with a human-facing green checkmark on it. *(Corrected 2026-08-25: this sentence first cited `588/682 = 86%`, numbers that are a **comment** in `postgres-host-conformance.yml:166` echoed by Actions, not output from any run. The failure was real; the arithmetic was read out of prose that looked like a measurement. **A log is not a measurement — it is a transcript containing measurements, comments, and echoed source, typographically identical.**)* **Confirmed after the fix:** the 2026-08-25 `main` run shows this scenario green at 772 ms.
->
-> Re-measured 2026-08-25 after the fix: `webhook-signed-delivery` **executed-pass** (real witness, ~0.5 s — not the sub-50 ms shape a soft-skip produces), alongside `webhook-negative` and `webhook-tenant-isolation`. Red-before-green confirmed by sabotage: reverting `X-openwop-Webhook-Id` to `X-openwop-Subscription-Id` reddens the assertion. A full `--certify` re-run has **not** been done, so every bundle row below still describes the pre-fix host.
-
-
-> **Latest measurement — bundle v2 (RFC 0148 §C), 2026-08-16, `@openwop/openwop-conformance@1.130.0` (`--certify --bundle-version 2`, requirement ledger on):** `openwop-host-sqlite@1.1.7` — executed-pass 214 / executed-fail 0 / skipped 0 / inapplicable 144 / blocked 108 (**0** zero-assertion passes). Per-profile: certifiable: `openwop-discovery-core` (+ alias `openwop-core`), `openwop-stream-sse`, `openwop-stream-poll`, `openwop-secrets`, `openwop-fixtures`; `openwop-node-packs` **not held** (runtime-derived, floor rows not witnessed passes). Exit 0 — every claimed profile certifiable; the 108 `blocked` rows are seams/capabilities this host does not expose, each with its reason. The bundle is committed as [`certification-bundle-v2.json`](./certification-bundle-v2.json); verify with `verifyBundleV2` from the suite. Local boot, default env, single run.
->
-> **Prior measurement (superseded 2026-08-16 by the 1.130.0 run) — bundle v2 (RFC 0148 §C), 2026-08-16, `@openwop/openwop-conformance@1.116.0` (`--certify --bundle-version 2`, requirement ledger on):** `openwop-host-sqlite@1.1.7` — executed-pass 340 / executed-fail 0 / skipped 0 / inapplicable 78 / blocked 43 (128 of the passes carry `assertionCount: 0`). Per-profile: certifiable: `openwop-discovery-core` (+ alias `openwop-core`), `openwop-stream-sse`, `openwop-stream-poll`, `openwop-fixtures`; **not** certifiable: `openwop-secrets` (no floor defined — unprovable, RFC 0148 §C G6), `openwop-node-packs` (REJECTED — `openwop.floor.pack-registry` and `openwop.floor.pack-registry-publish` executed-pass with zero assertions). Zero assertion failures. The bundle is committed as [`certification-bundle-v2.json`](./certification-bundle-v2.json); it validates against `certification-bundle-v2.schema.json` and the consumer verifier `verifyBundleV2` agrees with the emitter row-for-row. Under RFC 0148 §A a bundle with `blocked > 0` does not certify the claims it blocks; the per-profile verdicts above are the state of the evidence. The pre-ledger measurements below counted an early-returning test as a pass and could not tell `skipped` from `inapplicable` from `blocked`; they are kept as the dated record and superseded by this line.
-
-> **Latest measurement:** **2026-06-11 (post-fix re-run) against `@openwop/openwop-conformance@1.22.0` — 1826 passed / 0 failed / 137 skipped / 0 todo of 1963 tests (93.0%) — 0 deterministic failures** (strict mode + the soak gate's honest profile/fixture opt-outs, which now include `openwop-grpc-transport`/`openwop-i18n`; full 82-fixture catalog resolved via the new `OPENWOP_FIXTURES_DIR` override — no symlinks). The 2 real RFC 0093 §A3 `webhook-tenant-isolation` failures from the same-day measurement below are **closed**: the host now enforces the registration-time tenant-membership gate (403 `tenant_membership_required` on a foreign `tenantId`, tenant-scoped `DELETE` with no existence leak, tenant-filtered delivery fan-out) — `webhook-tenant-isolation.test.ts` passes 4/4 non-vacuously.
->
-> **Prior measurement (superseded same-day by the webhook-tenant-gate fix):** **2026-06-11 against `@openwop/openwop-conformance@1.22.0` — 1820 passed / 6 failed / 137 skipped / 0 todo of 1963 tests (92.7%)** (strict mode + honest profile/fixture opt-outs; cross-host re-measurement in `INTEROP-MATRIX.md`). The 6 failures decompose honestly: 4 are strict-mode `behaviorGate` failures for the new 1.22.0 profiles this host does not claim (`openwop-grpc-transport`, `openwop-i18n` — the soak gate's opt-out list gains them in the spec repo), and **2 are real**: the new RFC 0093 §A3 `webhook-tenant-isolation.test.ts` — this host advertises `webhooks.supported: true` but lacks a registration-time tenant-membership gate (genuine gap on an advertised surface; fix tracked). **Measurement-basis note:** this run loads the full 82-fixture catalog (prior readings ran with degraded fixture loading — the host's upward fixture probe only finds the catalog when nested inside the spec repo), so passed/skipped deltas vs 1.21.0 reflect broader coverage.
->
-> **Prior measurement (superseded 2026-06-11):** **2026-06-09 against `@openwop/openwop-conformance@1.21.0` — 1742 passed / 0 failed / 212 skipped / 0 todo of 1954 tests (89.1%) — 0 deterministic failures** (strict mode + honest profile/fixture opt-outs; cross-host re-measurement in `INTEROP-MATRIX.md`). Holds the 0-failure posture against 1.21.0; the 3 new RFC 0090/0091/0092 always-on probes (`verifier-gating`/`callai-multimodal`/`agent-capability-degraded`) are opted out as unclaimed profiles per the soak gate.
->
-> **Prior measurement (superseded 2026-06-09):** **2026-06-01 against `@openwop/openwop-conformance@1.18.1` — 2056 passed / 0 failed / 105 skipped / 0 todo of 2161 tests (95.1%) — 0 deterministic failures** (the cross-host re-measurement in `INTEROP-MATRIX.md`; **+18 passed** vs the same-day 1.15.0 reading as the 1.16–1.18.1 capability-gated scenarios landed, failures/skips unchanged). The current published suite is `1.19.0`; its sole addition (the RFC 0082 §B `agent-channel-dispatch` scenario) is capability-gated on `agents.deployment` and **soft-skips** here. Holds the 0-failure posture; total rose 2086 → 2161 as the v1.11–v1.18.1 scenarios (RFCs 0078–0083 + memory-degraded-projection + OTel collector-canary-inspection + budget + agent-platform aggregate-evidence + SAML) landed. The TypeScript SDK `dist/` was built first so the server-free corpus-validity scenarios pass. See `INTEROP-MATRIX.md` §"External conformance suite — pass rates".
->
-> **Prior measurement (superseded 2026-06-01):** **2026-05-30 against `@openwop/openwop-conformance@1.10.0` — 1982 passed / 0 failed / 104 skipped / 0 todo of 2086 tests (95.0%) — 0 deterministic failures**, re-measured after the root-`limits` fix (#376). The prior `aiEnvelope.capBreached` (×3) + `discovery` (×1) failures are closed; the total rose 2074 → 2086 as the merged root limits re-activated capability-gated sub-tests. See `docs/CONFORMANCE-RUNS-2026-05-30.md` + `INTEROP-MATRIX.md`.
->
-> **Prior measurement (superseded by the #376 fix):** **2026-05-30 against `@openwop/openwop-conformance@1.10.0` — 1966 passed / 4 failed / 104 skipped / 0 todo of 2074 tests (94.8%)**. The 4 failures were `aiEnvelope.capBreached` (×3) + `discovery` (×1) — both closed by #376.
->
-> **Prior measurement (superseded 2026-05-30):** **2026-05-26 against the then-current in-repo `conformance/` suite — 1716 passed / 0 failed / 104 skipped of 1820 tests** (post RFC 0057 memory-write-attribution + RFC 0056 feedback enforcement; prior 2026-05-25 snapshot was 1641/0/104 of 1745 — the +75 delta is the `memory-attribution-*` + `feedback-*` scenarios flipping from soft-skip to pass). The previously-recorded 7 failures are all closed: RFC 0022 dispatch input/output mapping (× 4) is now implemented in the executor (`mockDispatchPlan` supervisor-mock + sequential multi-worker dispatch with all four mapping fields + `core.subWorkflow` `inputMapping`), RFC 0026 cost-attribution (× 2) landed earlier, and the RFC 0031 `model.capability.insufficient` refusal (× 1) is now wired end-to-end. SQLite is the first reference host to demonstrate the RFC 0031 refusal. See the 2026-05-25 update in `docs/CONFORMANCE-RUNS-2026-05-23.md`.
->
-> **Prior measurements:** 2026-05-22 against suite v1.5.0 — 1486/1564 (95.0%, 7 failures, since superseded); 2026-05-22 against suite v1.4.0 — 1480/1558 (95.0%); 2026-05-19 against suite v1.2.0 — 669/731 (retained below for historical context).
->
-> **Run date (prior):** 2026-05-19 (snapshot refreshed after soak-gate close-out via `OPENWOP_OPTED_OUT_FIXTURES` + `OPENWOP_OPTED_OUT_SCENARIOS` + the SQLite artifact-route auth stub — see CHANGELOG `[1.1.2 — unreleased]`. Previous snapshots: 2026-05-12 Phase A/D close-out; 2026-05-11 audit-log + four interrupt profiles)
-> **Host version:** `openwop-host-sqlite@1.0.0`
-> **Conformance suite:** Latest run (2026-05-26) against the current in-repo `conformance/` suite (= `@openwop/openwop-conformance@1.6.1` — the prior published-suite citation `@openwop/openwop-conformance@1.5.0` is retained in §"Prior measurements" above)
-> **Profile claim:** `openwop-core` · `openwop-stream-poll` · `openwop-stream-sse` · `openwop-audit-log-integrity` · `openwop-interrupt-quorum` · `openwop-interrupt-auth-required` · `openwop-interrupt-external-event` · `openwop-interrupt-cascade-cancel` · `openwop-auth-api-key-rotation` · `openwop-discovery-auth-scoped`. Debug-bundle advertised.
-> **Profiles explicitly NOT claimed (per honesty principle):** `openwop-production` (Postgres host is the canonical claimant — see `INTEROP-MATRIX.md`), `openwop-auth-oauth2-client-credentials`, `openwop-auth-oidc-user-bearer`, `openwop-auth-mtls`. The reference HTTP listener does not enforce backpressure/retention, parse JWTs, or terminate TLS, so advertising those profiles would be over-claiming.
-> **Scale claim:** `minimal` (single-process; SQLite single-writer)
-
-## Summary
-
-Against the live SQLite host (`npm start` from `examples/hosts/sqlite/`):
-
-- **Test files:** 140 total (post-soak-gate close-out — suite grew with RFC 0013 workflow-chain-packs, RFC 0022 dispatch mapping, audit-tamper scenarios, etc.).
-- **Tests (strict-mode, `OPENWOP_REQUIRE_BEHAVIOR=true` + opt-out envs):** **1216 passing / 0 failing / 55 skipped / 7 todo** (2026-05-19, against suite `@openwop/openwop-conformance@1.2.0`). Required envs for a green run: `OPENWOP_OPTED_OUT_PROFILES=openwop-production,openwop-auth-oauth2-client-credentials,openwop-auth-oidc-user-bearer,openwop-auth-mtls,openwop-replay-fork,workflowChainPacks` + `OPENWOP_OPTED_OUT_FIXTURES=conformance-dispatch-input-mapping*,conformance-dispatch-output-mapping*,conformance-dispatch-cross-worker-handoff*,conformance-subworkflow-input-mapping*` + `OPENWOP_OPTED_OUT_SCENARIOS=otel-trace-propagation-subworkflow`. The 55 skips break down as: profile-opt-outs (this host doesn't claim production, OAuth2-CC, OIDC, mTLS, replay-fork, workflow-chain-packs), fixture-opt-outs (RFC 0022 §A/§B variable projection not implemented in the reference executor), and one scenario-opt-out (traceparent doesn't thread the `core.subWorkflow` dispatch boundary). **(Superseded 2026-05-25: RFC 0022 §A/§B variable projection is now implemented, so the `OPENWOP_OPTED_OUT_FIXTURES=conformance-dispatch-*` / `conformance-subworkflow-input-mapping*` opt-outs are no longer required — those fixtures now pass.)**
-- **Test command (mirrors `.github/workflows/conformance-soak.yml`):**
-  ```
-  OPENWOP_BASE_URL=http://127.0.0.1:3838 OPENWOP_API_KEY=openwop-sqlite-dev-key \
-    OPENWOP_REQUIRE_BEHAVIOR=true \
-    OPENWOP_OPTED_OUT_PROFILES='...' \
-    OPENWOP_OPTED_OUT_FIXTURES='...' \
-    OPENWOP_OPTED_OUT_SCENARIOS='otel-trace-propagation-subworkflow' \
-    npx vitest run --no-file-parallelism
-  ```
-- **RFC 0011 auth-scoped discovery (verified end-to-end 2026-05-12):** With `OPENWOP_TENANT2_API_KEY` configured, the host returns three views — unauthenticated + primary (6 capability keys: `auth`, `discovery`, `dispatch`, `orchestrator`, `secrets`, `webhooks`) vs tenant2 (4 keys: `auth`, `discovery`, `secrets`, `webhooks`). Tenant2's keyset is a strict subset of primary's, satisfying the no-authorization-oracle invariant from `capabilities-change-detection.md` §"Scoped capability views" line 69. All 3 RFC 0011 subtests in `discovery.test.ts` pass under `OPENWOP_REQUIRE_BEHAVIOR=true` + `OPENWOP_TEST_UNAUTHORIZED_API_KEY=<tenant2-key>`.
-- **RFC 0010 auth-profile rotation (verified end-to-end 2026-05-12):** Two-key overlap via `OPENWOP_SECONDARY_API_KEY`; constant-time dual-candidate `checkAuth`; canary-redaction confirmed. `auth-api-key-rotation.test.ts` passes 3/3 under behavior mode.
-
-Net result vs the in-memory host (which claims only `openwop-core` + stream profiles): SQLite adds the durability surface plus 7 optional profile claims, each verified end-to-end through the conformance suite or host-internal tests.
-
-## What this host adds over in-memory
-
-| Property | In-memory | SQLite |
-|---|---|---|
-| Run state survives process restart | ❌ | ✅ |
-| Events survive process restart | ❌ | ✅ |
-| Claim acquisition for cross-process safety | N/A | ✅ |
-| Idempotency cache survives restart | ❌ | ✅ |
-| Total LOC | ~570 | ~700 |
-| External dependencies | 0 | 1 (`better-sqlite3`) |
-
-The SQLite host is the cheapest possible proof of "I can replace the storage layer without changing the wire contract." It is also a durable OpenWOP host with a different storage backend from the in-memory example, addressing the interoperability ask for a non-trivial backend.
-
-## Per-file result (mirrors in-memory shape)
-
-| Scenario file | Status | Tests | Notes |
-|---|---|---|---|
-| `discovery.test.ts` | ✅ PASS | 4/4 | |
-| `runs-lifecycle.test.ts` | ✅ PASS | 3/3 | |
-| `idempotency.test.ts` | ✅ PASS | 2/2 | |
-| `idempotencyRetry.test.ts` | ✅ PASS | 3/3 | RFC 0002 contract checks |
-| `cancellation.test.ts` | ✅ PASS | 2/2 | |
-| `auth.test.ts` | ✅ PASS | 2/2 | |
-| `errors.test.ts` | ✅ PASS | 2/2 | |
-| `failure-path.test.ts` | ✅ PASS | 1/1 | |
-| `multi-node-ordering.test.ts` | ✅ PASS | 1/1 | |
-| `eventOrdering.test.ts` | ✅ PASS | 4/4 | repeated-poll stability proved against persistence |
-| `policies.test.ts` | ✅ PASS | 5/5 | shape contract; host doesn't advertise policies |
-| `providerPolicyEnforcement.test.ts` | ✅ PASS | 5/5 | mode-set contract; skip-equivalent on enforcement |
-| `redaction.test.ts` | ✅ PASS | 6/6 | |
-| `redactionAdversarial.test.ts` | ✅ PASS | 4/4 | |
-| `approval-payload.test.ts` | ✅ PASS | 4/4 | shape only |
-| `pack-registry-publish.test.ts` | ✅ PASS | with skips | host doesn't claim `openwop-node-packs` — absent-fallback path |
-| `maliciousManifest.test.ts` | ✅ PASS | 4/4 | skip-equivalent on absent registry |
-| `cost-attribution.test.ts` | ✅ PASS | 1/1 + 5 todo | |
-| `fixtures-valid.test.ts` | ✅ PASS | 22/22 | server-free |
-| `spec-corpus-validity.test.ts` | ✅ PASS | 42/42 | server-free |
-| `profileDerivation.test.ts` | ✅ PASS | 25/25 | server-free |
-| `highConcurrency.test.ts` | ✅ PASS | 4/4 | |
-| `debugBundle.test.ts` | ✅ PASS | 6/6 | host advertises `debugBundle.supported: true` |
-| `audit-log-integrity.test.ts` | ✅ PASS | 2/2 | passes in strict mode (`OPENWOP_REQUIRE_BEHAVIOR=true`); host emits Ed25519-signed checkpoints over a hash-chained audit log. Internal tamper test at `test/audit-tamper.test.ts` proves chainValid: false on in-place mutation. |
-| `interrupt-approval.test.ts` | ✅ PASS | 3/3 | baseline `core.approvalGate` end-to-end (suspend → resolve → terminal). |
-| `interrupt-clarification.test.ts` | ✅ PASS | 1/1 | `core.clarificationGate` with question-set resume validation. |
-| `interrupt-quorum-resolution.test.ts` | ✅ PASS | 2/2 | three-accepts-resume + majority-reject paths against `core.approvalGate` config `requiredApprovals: 3, rejectionPolicy: majority`. |
-| `interrupt-auth-required-resume.test.ts` | ✅ PASS | 2/2 | bearer-token resolve succeeds; signed-token resolve REJECTED with 403 when the interrupt config carries `profile: openwop-interrupt-auth-required`. Insufficient-scope subtest auto-skips without `OPENWOP_TEST_LOW_SCOPE_KEY`. |
-| `interrupt-external-event-correlation.test.ts` | ✅ PASS | 2/2 | `core.interrupt kind=external-event` with signed callback token at `/v1/interrupts/{token}`; matching correlation resumes, mismatched returns 422 `correlation_mismatch`. |
-| `interrupt-parent-child-cascade.test.ts` | ✅ PASS | 2/2 | `core.subWorkflow` dispatch + parent/child linkage in snapshot (`childRuns[]`); parent cancel cascades to child (both reach terminal `cancelled`); late resolve on cascaded child returns 404. |
-| `runtime-capabilities.test.ts` | ❌ 1/2 | | host advertises empty `runtimeCapabilities`; out-of-profile |
-| `version-negotiation.test.ts` | ❌ 1/4 | | event-shape `seq` vs spec's `eventId+sequence` (same gap as in-memory) |
-| `cap-breach.test.ts` | ❌ 0/2 | | host doesn't enforce `recursionLimit` — out-of-profile |
-| `channel-ttl.test.ts` | ❌ 0/1 | | channels not implemented — out-of-profile |
-| `subworkflow.test.ts` | ❌ 0/2 | | sub-workflows not implemented — out-of-profile |
-| `replay-fork.test.ts` | ❌ 1/6 | | `POST /v1/runs:fork` not implemented — out-of-profile |
-~~| `interrupt-approval.test.ts` | ❌ 0/3 | | host doesn't claim `openwop-interrupts` |~~ — closed 2026-05-11 (T1.2 commit A).
-~~| `interrupt-clarification.test.ts` | ❌ 0/1 | | same |~~ — closed 2026-05-11 (T1.2 commit A).
-| `pack-registry.test.ts` | ❌ 5/8 | | host doesn't claim `openwop-node-packs` |
-| `stream-modes.test.ts` | ❌ 3/4 | | mixed-mode SSE buffering scenario fails (advanced) |
-| `stream-modes-buffer.test.ts` | ❌ 1/4 | | `bufferMs` query forwarding not implemented |
-| `stream-modes-mixed.test.ts` | ❌ 2/4 | | array-form `streamMode` parameter handling partial |
-| `identity-passthrough.test.ts` | ❌ 0/1 | | host doesn't echo nested input objects through to `variables` |
-
-## Failure classification
-
-| Category | Files | Reason |
-|---|---|---|
-| **Out-of-profile (expected)** | `cap-breach`, `channel-ttl`, `subworkflow`, `replay-fork`, `interrupt-*`, `pack-registry`, `runtime-capabilities`, `identity-passthrough` | Host doesn't claim the gating profile. Adding the corresponding feature would lift the host's profile claim. |
-| **Within-profile gaps** | `version-negotiation`, `stream-modes-buffer`, `stream-modes-mixed`, partial `stream-modes` | Same gaps as in-memory host: event-shape `seq` vs `eventId+sequence`; SSE buffering / array `streamMode` parameter handling. |
-
-## Reproducing this result
+Measured 2026-11-25 with `@openwop/openwop-conformance@2.49.14` (peer `@openwop/spec-artifacts@2.49.14`) at `--target-major 2`, against a local host on a fresh database, with a second-tenant key set (`OPENWOP_TENANT2_API_KEY` on the host, `OPENWOP_TEST_TENANT_B_API_KEY` for the suite).
 
 ```bash
-# Terminal 1
-cd examples/hosts/sqlite
-npm install
-npm start
-
-# Terminal 2 (from repo root)
-cd conformance
-OPENWOP_BASE_URL=http://127.0.0.1:3838 OPENWOP_API_KEY=openwop-sqlite-dev-key npx vitest run
+OPENWOP_TENANT2_API_KEY=openwop-sqlite-tenant-b-key npm start
+OPENWOP_TEST_TENANT_B_API_KEY=openwop-sqlite-tenant-b-key \
+  npx openwop-conformance --base-url http://127.0.0.1:3839 --api-key openwop-sqlite-dev-key --target-major 2 --max-workers 2
 ```
 
-## Comparison with in-memory host
+## Result
 
-The in-memory host (`examples/hosts/in-memory/`) and SQLite host run nearly the same code path at the wire level. The differences:
+| | v1 host (before the port) | v2 host |
+|---|---:|---:|
+| Scenario files failed / passed | 27 / 207 | 2 / 232 |
+| Tests failed / passed (of 945) | 39 / 906 | 2 / 943 |
+| Requirements executed-pass | 324 | 458 |
+| Requirements executed-fail | 69 | 4 |
+| Requirements blocked | 103 | 0 |
+| Requirements inapplicable | 748 | 774 |
 
-- **SQLite passes `eventOrdering` repeated-poll stability** with stronger evidence — events come from the durable log every read, not from process-local state.
-- **SQLite advertises `debugBundle.supported: true`** like the in-memory host; their bundle responses share the same shape contract.
-- **SQLite's idempotency cache survives restart**; the in-memory cache doesn't. The `staleClaim` scenario exercises the stop-restart-resume path for claim recovery.
+"Passed" in vitest includes soft skips; the RFC 0148 dispositions are the honest count. Most of the v2 host's inapplicable rows are families it does not advertise (A2A, MCP, agents, prompts, budget, webhooks and so on).
 
-The within-profile gaps are identical because both hosts share the same `seq` field naming choice. Closing them in one host should close them in both.
+Of the two failures in the full run:
 
-## Stale-claim recovery (live)
+- **`v2-run-pause-resume`: fixed.** An `immediate` pause on an executing run was recorded by the executor on its next poll, so a second pause sent at once still saw `running` and got `202`. The pause is now recorded by the request itself; a filtered rerun of the scenario passes.
+- **`v2-effect-seam-manifest`: known.** A host advertising `replay` must list at least one outbound effect seam in `GET /host/effect-seams`. This host's node runtime reaches none yet (it has no HTTP node and no webhook fan-out), so it publishes an empty list. The first seam arrives with webhooks; until then the scenario fails rather than the host advertising a seam it does not have.
 
-`staleClaim.test.ts` passes against this host. The scenario spawns process A pointing at a temp DB, starts a long-running run, SIGKILLs A, waits for the claim to expire, then spawns process B pointing at the same DB. B's resume-on-startup re-acquires the claim and finishes the run. The event log shows `run.started` (from A) followed by `run.resumed` (from B) followed by the rest of the run's lifecycle.
+## Before the port
 
-Run it manually:
+The v1 host answered the v2 suite mostly with 404s on unversioned paths and a v1 discovery document. Its failing scenario families: webhooks (5 files), version negotiation and the discovery root (`preferred-version-default`, `version-header-honored`, `header-scheme`, `discovery-etag`, `capabilities-root-closed`, `capability-record-shape`, `profiles-derived-only`, `advertised-fixtures-exist`, `no-transport-advertisement`, `envelope-surfaces-absent`), sub-workflows and dispatch (4), run options and limits (2), model capabilities (2), and one each for the malformed-body envelope, the era key, bound-id kinds and eval mode.
 
-```bash
-OPENWOP_RUN_STALE_CLAIM=1 \
-  OPENWOP_BASE_URL=http://127.0.0.1:9999 OPENWOP_API_KEY=irrelevant \
-  npx vitest run src/scenarios/staleClaim.test.ts
-```
+## Not claimed
 
-(The `OPENWOP_BASE_URL` + `OPENWOP_API_KEY` env vars are required by the conformance suite's standard driver but are not used by this scenario — it spawns its own host processes.)
-
-Typical wall-clock: ~5–8 seconds. The dominant cost is the 5-second `core.delay` re-execution on host B; the spec says nothing about Layer-2 idempotency, so the reference example re-runs the delay from scratch. Production hosts with Layer-2 dedup would skip the already-completed sub-steps.
-
-## Known v1.x Expansion Candidates
-
-1. ~~**Resume-on-startup.**~~ ✅ Live as of 2026-05-01.
-2. ~~**Heartbeat renewal.**~~ ✅ Live as of 2026-05-01.
-3. ~~**Audit-log integrity profile.**~~ ✅ Live as of 2026-05-11. Hash-chained `audit_log` table + Ed25519-signed `audit_checkpoints`; `GET /v1/audit/verify` reports `chainValid` + anomalies. Wiring under `src/audit.ts`.
-4. ~~**HITL interrupts + four optional profiles.**~~ ✅ Live as of 2026-05-11 (T1.2 commits A–D). `core.approvalGate` / `core.clarificationGate` / `core.interrupt` / `core.subWorkflow` node types; `POST /v1/runs/{runId}/interrupts/{nodeId}` + `POST /v1/interrupts/{token}` resolve routes; `interrupts` table with hash-chain'd vote ledger; parent/child cascade via `parent_run_id` linkage. Wiring under `src/interrupts.ts`.
-5. **Postgres adapter.** Same schema, swap the DB driver, gain horizontal scale-out. Filed as a future row in `INTEROP-MATRIX.md`.
-4. **Multi-tenancy.** Add `tenant_id` to every table + composite primary keys. Currently single hardcoded tenant.
-5. **Layer-2 idempotency** for non-pure nodes. The reference example only ships pure nodes (`core.noop`, `core.delay`); a fork that adds `core.ai.callPrompt` MUST persist invocation results to dedupe on resume.
+`openwop-core-standard` requires the `webhooks` family, which this host does not serve yet, so of the derived profiles it meets `openwop-discovery-core` only; what it serves beyond that is the families its discovery document lists. No certification bundle is published for it; the v1 bundle that used to sit here was v1 evidence and substantiates nothing at major 2 (`persistence.md` §Everything else a v1 host persisted).
