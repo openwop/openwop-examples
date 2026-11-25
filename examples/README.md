@@ -48,7 +48,7 @@ OPENWOP_API_KEY=$YOUR_KEY \
   npm start --prefix examples/approval-workflow
 ```
 
-`hosts/sqlite` is a v2 host too, and the samples above that need only core runs, `idempotency`, `interrupt` or `replay` (`tiny-workflow`, `streaming-client`, `idempotent-runs`, `approval-workflow`, `branch-fork`) run against it with `OPENWOP_BASE_URL=http://127.0.0.1:3839 OPENWOP_API_KEY=openwop-sqlite-dev-key`. `hosts/postgres` is the one remaining v1 host: frozen (v1 reached end of support on 2026-10-04, RFC 0234) and being ported to v2; no sample targets it. The v1-only `in-memory` and `python` hosts were removed.
+`hosts/sqlite` and `hosts/python` are v2 hosts too, and the samples above that need only core runs, `idempotency`, `interrupt` or `replay` (`tiny-workflow`, `streaming-client`, `idempotent-runs`, `approval-workflow`, `branch-fork`) run against either: `OPENWOP_BASE_URL=http://127.0.0.1:3839 OPENWOP_API_KEY=openwop-sqlite-dev-key` for SQLite, `OPENWOP_BASE_URL=http://127.0.0.1:3840 OPENWOP_API_KEY=openwop-python-dev-key` for Python (stdlib only: `PYTHONPATH=src python3 -m openwop_host`). `hosts/postgres` is the one remaining v1 host: frozen (v1 reached end of support on 2026-10-04, RFC 0234) and being ported to v2; no sample targets it. The v1-only `in-memory` host was removed, and the v1 Python host was replaced by the v2 one.
 
 ## CI behavior
 

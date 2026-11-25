@@ -13,6 +13,9 @@ protocol repo stays a lean spec + conformance contract.
     `conformance.md`). Start here for a new integration — v2 is the current protocol major.
   - `sqlite/` — durable single-file **v2** host (`better-sqlite3`): claim-based dispatch, crash
     resume, and a walkthrough of porting a v1 host; serves the core run floor
+  - `python/` — **v2** host in Python 3.11, **stdlib only** (`http.server`, `sqlite3`): the same core
+    floor, sharing no code with the TypeScript hosts, so cross-language portability can be measured
+    at v2 ([`docs/portability-v2.md`](docs/portability-v2.md))
   - `postgres/` — production-profile v1 host (`pg`; pglite for in-process tests)
   - `wasm-sandbox/` — RFC 0035 sandboxed-execution reference
 - `examples/` (top level) — runnable workflow samples (`tiny-workflow`, `approval-workflow`,
@@ -21,7 +24,7 @@ protocol repo stays a lean spec + conformance contract.
 
 > **v2 only.** v1 reached end of support on 2026-10-04 (RFC 0234). `postgres` is the one remaining
 > v1 host under `hosts/`: frozen history being ported to v2, not a reference implementation.
-> `sqlite` has been ported; the v1-only `in-memory` and `python` hosts were removed. Build new hosts
+> `sqlite` has been ported and `python` rewritten for v2; the v1-only `in-memory` host was removed. Build new hosts
 > against `hosts/v2-reference/` and measure them with `@openwop/openwop-conformance` at
 > `--target-major 2`.
 
@@ -48,8 +51,14 @@ bundle and is a row in the corpus [`INTEROP-MATRIX.md`](https://github.com/openw
 v2 table. The host-conformance regression gates (SQLite soak + Postgres) live in the
 [`openwop/openwop`](https://github.com/openwop/openwop) repo (co-located with the suite),
 which checks this repo out to obtain the host source. `examples.yml` here runs the samples
-against the v2 reference host, typechecks and tests the SQLite host, and validates that workflow-definition pack references resolve
+against the v2 reference host, typechecks and tests the SQLite host, tests the Python host, and validates that workflow-definition pack references resolve
 against the live registry at [`packs.openwop.dev`](https://packs.openwop.dev).
+
+## Portability
+
+[`docs/portability-v2.md`](docs/portability-v2.md) runs the same workflows against the TypeScript v2
+reference host and the Python host and compares terminal state and the `RunEvent` type sequence
+(`scripts/portability-v2.mjs` re-runs it).
 
 ## License
 
