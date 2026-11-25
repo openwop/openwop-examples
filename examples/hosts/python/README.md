@@ -4,7 +4,7 @@ An OpenWOP **v2** host in Python 3.11, **standard library only**: `http.server` 
 
 It exists for two reasons:
 
-1. **Cross-language portability.** Every other v2 host in this repo is TypeScript. This one shares no code with them; it is written from the v2 spec and checked against the same conformance suite, so "the same workflow behaves the same on two independent implementations" can be measured at v2. The measurement is in [`docs/portability-v2.md`](../../../docs/portability-v2.md).
+1. **Cross-language portability.** Every other v2 host in this repo is TypeScript. This one shares no code with them; it is written from the v2 spec and checked against the same conformance suite, so "the same workflow behaves the same in two languages" can be measured at v2. Both hosts are steward-authored, and this one was written from the sqlite host's behaviour plus the spec, so it does not establish independent implementation. The measurement is in [`docs/portability-v2.md`](../../../docs/portability-v2.md).
 2. **A template for a non-Node host.** About 2,300 lines across six modules, small enough to read in one sitting.
 
 > **Not for production.** One process per database file, one API-key lane, no rate limiting, no webhooks (see [What is left](#what-is-left)).
